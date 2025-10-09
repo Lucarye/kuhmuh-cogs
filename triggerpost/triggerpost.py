@@ -1,7 +1,7 @@
 import time
 import discord
 from typing import Optional
-from discord import ui, AllowedMentions, app_commands
+from discord import ui, AllowedMentions
 from redbot.core import commands, Config
 from redbot.core.bot import Red
 
@@ -29,7 +29,7 @@ DEFAULT_GUILD = {
 
 
 class TriggerPost(commands.Cog):
-    """Muhhelfer-System mit Triggern, Embed, Buttons und Pings."""
+    """Muhhelfer-System mit Triggern, Embed, Buttons und Pings (nur Präfix-Befehle)."""
 
     _ping_cd_until: dict[int, float] = {}
 
@@ -38,16 +38,9 @@ class TriggerPost(commands.Cog):
         self.config = Config.get_conf(self, identifier=81521025, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
         self._cooldown_until = {}
-
-    async def cog_load(self) -> None:
-        # Buttons nach Neustarts funktionsfähig halten
+        # Buttons persistent halten
         try:
             self.bot.add_view(self._PingView(self))
-        except Exception:
-            pass
-        # Slash-Commands synchronisieren (best effort)
-        try:
-            await self.bot.tree.sync()
         except Exception:
             pass
 
@@ -216,21 +209,20 @@ class TriggerPost(commands.Cog):
 
         return sent_message
 
-    # ========= Commands =========
+    # ========= Commands (nur Präfix) =========
     @commands.guild_only()
     @commands.group(name="muhhelfer", aliases=["triggerpost"])
     async def muhhelfer(self, ctx: commands.Context):
-        """Muhhelfer-Tools und Konfiguration."""
+        """Muhhelfer-Tools und Konfiguration (Präfix-Befehle)."""
         pass
 
-    # --- HYBRID: Post (Slash + Präfix), optional: Minuten-Override ---
-    @muhhelfer.hybrid_command(name="post", with_app_command=True, description="Muhhelfer posten (optional mit Auto-Delete-Minuten)")
-    @app_commands.describe(minutes="Auto-Delete-Minuten (nur außerhalb des Zielchannels wirksam; 0=aus)")
+    @muhhelfer.command(name="post")
     async def manual_post(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Postet die Muhhelfer-Nachricht.
-        - Admins/Offiziere dürfen überall posten
-        - Normale Mitglieder nur im Zielchannel (mit Cooldown)
-        - Optional: Minuten für Auto-Delete angeben (nur außerhalb Zielchannel wirksam)
+        """Postet die Muhhelfer-Übersicht.
+        - Offiziere/Admins: überall nutzbar
+        - Normale Mitglieder: nur im Zielchannel (mit Cooldown)
+        - Optional: Auto-Delete-Minuten für Nicht-Zielchannel
+          z. B. °muhhelfer post 20
         """
         guild = ctx.guild
         author = ctx.author
@@ -269,30 +261,25 @@ class TriggerPost(commands.Cog):
         autodelete_conf = int(data.get("autodelete_minutes") or 0)
         autodelete_used = None if is_target else (minutes_override if minutes_override is not None else autodelete_conf)
 
-        # Footer-Hinweis bauen (klein/grau), nur wenn Auto-Delete aktiv und nicht im Zielchannel
+        # Footer-Hinweis (nur außerhalb Zielchannel, wenn aktiv)
         footer_note = None
         if not is_target and autodelete_used and autodelete_used > 0:
             footer_note = f"Auto-Delete in {autodelete_used} Min"
 
-        # Embed bauen & posten
         manual_info = None
         if (is_admin or is_offizier) and not is_target:
             manual_info = f"manuell ausgelöst von {author.display_name}"
 
         embed = await self._build_embed(guild, author, manual_info=manual_info, footer_note=footer_note)
         await self._post_or_edit(
-            ctx.channel,
-            embed,
-            data["message_id"],
-            target_id=target_id,
-            autodelete_after_min=autodelete_used,
+            ctx.channel, embed, data["message_id"], target_id=target_id, autodelete_after_min=autodelete_used
         )
         await ctx.send("✅ Muhhelfer-Nachricht gepostet.", delete_after=5)
 
-    # --- Admin/Offizier: Trigger & Übersicht ---
+    # --- Trigger-Verwaltung ---
     @muhhelfer.command(name="addtrigger")
     async def add_trigger(self, ctx: commands.Context, *, phrase: str):
-        """Fügt einen Trigger hinzu. '+' verbindet Wörter (z. B. 'loml+hard')."""
+        """Fügt einen Trigger hinzu. '+' = UND (z. B. 'loml+hard')."""
         author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
         is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
@@ -326,7 +313,7 @@ class TriggerPost(commands.Cog):
 
     @muhhelfer.command(name="list")
     async def list_triggers(self, ctx: commands.Context):
-        """Zeigt Einstellungen + kompakte Command-Übersicht (Admins/Offiziere)."""
+        """Zeigt Einstellungen + kompakte Command-Übersicht (nur Präfix)."""
         author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
         is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
@@ -338,9 +325,8 @@ class TriggerPost(commands.Cog):
         ch = ctx.guild.get_channel(data["target_channel_id"]) if data["target_channel_id"] else None
 
         commands_block = (
-            "**📜 Commands:**\n"
-            "• `°muhhelfer help` / `/muhhelfer help` – hübsches Hilfe-Embed.\n"
-            "• `°muhhelfer post [min]` / `/muhhelfer post [min]` – Embed posten (Offis/Admins überall; User nur im Zielchannel). Optional Auto-Delete-Minuten.\n"
+            "**📜 Commands (Präfix `°`):**\n"
+            "• `°muhhelfer post [min]` – Embed posten (Offis/Admins überall; User nur im Zielchannel). Optional Auto-Delete-Minuten.\n"
             "• `°muhhelfer addtrigger <text>` – Trigger hinzufügen (mit `+` für UND, z. B. `loml+hard`).\n"
             "• `°muhhelfer removetrigger <text>` – Trigger entfernen.\n"
             "• `°muhhelfer list` – Diese Übersicht anzeigen.\n"
@@ -365,7 +351,7 @@ class TriggerPost(commands.Cog):
 
     @muhhelfer.command(name="refresh")
     async def refresh_list(self, ctx: commands.Context):
-        """Baut das Muhhelfer-Embed neu und aktualisiert die gespeicherte Nachricht (Admins/Offiziere)."""
+        """Baut das Muhhelfer-Embed neu und aktualisiert die gespeicherte Nachricht (Offiziere/Admins)."""
         author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
         is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
@@ -424,55 +410,6 @@ class TriggerPost(commands.Cog):
             return await ctx.send("⚠️ Bitte 0–1440 Minuten.")
         await self.config.guild(ctx.guild).autodelete_minutes.set(minutes)
         await ctx.send(f"🗑️ Auto-Delete (außerhalb Zielchannel): **{minutes} min**")
-
-    # --- Hübsches Hilfe-Embed (HYBRID: Slash + Präfix) ---
-    @muhhelfer.hybrid_command(name="help", with_app_command=True, description="Zeigt ein Hilfe-Embed für Muhhelfer")
-    async def show_help(self, ctx: commands.Context):
-        """Zeigt ein hübsches Hilfe-Embed mit allen Befehlen."""
-        e = discord.Embed(
-            title=f"{EMOJI_TITLE} Muhhelfer – Hilfe",
-            description="Kurzübersicht aller wichtigen Befehle und Funktionen.",
-            color=discord.Color.blue(),
-        )
-        e.set_thumbnail(url=MUHKU_THUMBNAIL)
-
-        e.add_field(
-            name="🔔 Posten",
-            value=(
-                "`°muhhelfer post [min]` / `/muhhelfer post [min]`\n"
-                "Postet die Muhhelfer-Übersicht.\n"
-                "• Offiziere/Admins: überall nutzbar\n"
-                "• Normale Mitglieder: nur im Zielchannel\n"
-                "• Optional: Auto-Delete-Minuten angeben (nur außerhalb Zielchannel)\n"
-                "  z. B. `°muhhelfer post 20`"
-            ),
-            inline=False,
-        )
-        e.add_field(
-            name="🧩 Trigger-Verwaltung (Offizier/Admin)",
-            value=(
-                "`°muhhelfer addtrigger <text>` – Trigger hinzufügen (UND mit `+`, z. B. `loml+hard`)\n"
-                "`°muhhelfer removetrigger <text>` – Trigger entfernen\n"
-                "`°muhhelfer list` – Einstellungen + Kommandos anzeigen\n"
-                "`°muhhelfer refresh` – Embed im Zielchannel neu aufbauen"
-            ),
-            inline=False,
-        )
-        e.add_field(
-            name="⚙️ Setup (Admin)",
-            value=(
-                "`°muhhelfer setchannel #channel` – Zielchannel setzen\n"
-                "`°muhhelfer setmessage <id>` – bestehende Nachricht verwenden\n"
-                "`°muhhelfer cooldown <sek>` – Trigger/Post-Cooldown\n"
-                "`°muhhelfer intro <text|clear>` – Intro-Text\n"
-                "`°muhhelfer autodelete <min>` – Auto-Delete außerhalb Zielchannel (0=aus)"
-            ),
-            inline=False,
-        )
-
-        e.set_footer(text=f"Aufgerufen von: {ctx.author.display_name}")
-        e.timestamp = discord.utils.utcnow()
-        await ctx.send(embed=e)
 
     # --- Listener für Trigger ---
     @commands.Cog.listener()
