@@ -14,6 +14,9 @@ EMOJI_TITLE = "<:muhkuh:1207038544510586890>"
 EMOJI_NORMAL = discord.PartialEmoji(name="muh_normal", id=1424467460228124803)
 EMOJI_SCHWER = discord.PartialEmoji(name="muh_schwer", id=1424467458118647849)
 
+# Muhkuh-Bild (Thumbnail oben rechts)
+MUHKU_THUMBNAIL = "https://cdn.discordapp.com/attachments/1404063753946796122/1404063845491671160/muhku.png?ex=68e8451b&is=68e6f39b&hm=92c4de08b4562cdb9779ffaf1177dfa141515658028cd9335a29f2670618c9c0&"
+
 DEFAULT_GUILD = {
     "triggers": ["hilfe"],
     "target_channel_id": None,
@@ -126,10 +129,8 @@ class TriggerPost(commands.Cog):
             color=discord.Color.blue(),
         )
 
-        # 🖼️ Muhkuh-Banner unten
-        embed.set_image(
-            url="https://cdn.discordapp.com/attachments/1404063753946796122/1404063845491671160/muhku.png?ex=68e8451b&is=68e6f39b&hm=92c4de08b4562cdb9779ffaf1177dfa141515658028cd9335a29f2670618c9c0&"
-        )
+        # 🖼️ Muhkuh als Thumbnail oben rechts
+        embed.set_thumbnail(url=MUHKU_THUMBNAIL)
 
         embed.set_footer(text=f"Angefragt von: {author.display_name}")
         embed.timestamp = discord.utils.utcnow()
@@ -182,7 +183,7 @@ class TriggerPost(commands.Cog):
                 target = guild.get_channel(target_id)
                 return await ctx.send(f"⚠️ Bitte nutze den Befehl im {target.mention}.", delete_after=5)
 
-        # Cooldown für Nicht-Bypass (wie beim Trigger)
+        # Cooldown für Nicht-Bypass
         now = time.time()
         until = self._cooldown_until.get(ctx.channel.id, 0)
         if not (is_admin or is_offizier):
@@ -191,12 +192,10 @@ class TriggerPost(commands.Cog):
                 return
             self._cooldown_until[ctx.channel.id] = now + cd
 
-        # Embed bauen & posten
         manual_info = None
         if (is_admin or is_offizier) and ctx.channel.id != target_id:
             manual_info = f"manuell ausgelöst von {author.display_name}"
 
         embed = await self._build_embed(guild, author, manual_info)
-        channel = ctx.channel
-        await self._post_or_edit(channel, embed, data["message_id"])
+        await self._post_or_edit(ctx.channel, embed, data["message_id"])
         await ctx.send("✅ Muhhelfer-Nachricht gepostet.", delete_after=5)
