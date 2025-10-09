@@ -20,7 +20,7 @@ class TriggerPost(commands.Cog):
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=0xA1B5F00D, force_registration=True)
+        self.config = Config.get_conf(self, identifier=81521025, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
         self._cooldown_until = {}  # channel_id -> timestamp
 
@@ -197,4 +197,5 @@ class TriggerPost(commands.Cog):
         # Embed bauen & posten/aktualisieren
         embed = await self._build_embed(guild, message.author)
         await self._post_or_edit(message.channel, embed, data["message_id"])
+
 
