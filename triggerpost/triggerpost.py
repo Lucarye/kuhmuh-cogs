@@ -1,6 +1,7 @@
 # triggerpost/triggerpost.py
 import time
 import discord
+from discord import ui, AllowedMentions
 from redbot.core import commands, Config
 from redbot.core.bot import Red
 
@@ -9,22 +10,96 @@ ROLE_NORMAL = 1424769286790054050            # Muhhelfer – Normal
 ROLE_SCHWER = 1424768638157852682            # Muhhelfer – Schwer
 ROLE_OFFIZIERE_BYPASS = 1198652039312453723  # Offiziere: Cooldown-Bypass
 
+# Custom Emojis
+EMOJI_TITLE = "<:muhkuh:1207038544510586890>"
+EMOJI_NORMAL = discord.PartialEmoji(name="muh_normal", id=1424467460228124803)
+EMOJI_SCHWER = discord.PartialEmoji(name="muh_schwer", id=1424467458118647849)
+
 DEFAULT_GUILD = {
     "triggers": ["hilfe"],       # weitere Trigger per Command hinzufügen
     "target_channel_id": None,   # MUSS gesetzt werden (Channel, in dem getriggert wird)
     "message_id": None,          # optional: bestehende Nachricht zum Editieren
-    "cooldown_seconds": 30,      # Standard-Cooldown
+    "cooldown_seconds": 30,      # Standard-Cooldown (Text-Trigger)
 }
 
 class TriggerPost(commands.Cog):
-    """Postet/aktualisiert eine Muhhelfer-Übersicht bei Triggerwörtern (nur online Mitglieder)."""
+    """Postet/aktualisiert eine Muhhelfer-Übersicht bei Triggerwörtern (nur online Mitglieder) + Ping-Buttons."""
+
+    # separater Ping-Cooldown (für Button-Pings)
+    _ping_cd_until: dict[int, float] = {}
 
     def __init__(self, bot: Red):
         self.bot = bot
-        # Achtung: identifier muss eine gültige Ganzzahl/Hex sein.
         self.config = Config.get_conf(self, identifier=81521025, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
         self._cooldown_until = {}  # channel_id -> timestamp
+
+    # ========= Buttons / View =========
+    class _PingView(ui.View):
+        def __init__(self, parent: "TriggerPost"):
+            super().__init__(timeout=None)
+            self.parent = parent
+
+        @ui.button(
+            label="Muhhelfer – normal ping",
+            style=discord.ButtonStyle.primary,
+            emoji=EMOJI_NORMAL,
+            custom_id="muh_ping_normal",
+        )
+        async def ping_normal(self, interaction: discord.Interaction, button: ui.Button):
+            await self.parent._handle_ping(interaction, ROLE_NORMAL, "Muhhelfer – normal")
+
+        @ui.button(
+            label="Muhhelfer – schwer ping",
+            style=discord.ButtonStyle.danger,
+            emoji=EMOJI_SCHWER,
+            custom_id="muh_ping_schwer",
+        )
+        async def ping_schwer(self, interaction: discord.Interaction, button: ui.Button):
+            await self.parent._handle_ping(interaction, ROLE_SCHWER, "Muhhelfer – schwer")
+
+    async def _handle_ping(self, interaction: discord.Interaction, role_id: int, label: str):
+        """Pingt eine Rolle mit Cooldown & Bypass."""
+        channel = interaction.channel
+        guild = interaction.guild
+        user = interaction.user
+
+        if not channel or not guild:
+            return await interaction.response.send_message("⚠️ Nur in Server-Channels nutzbar.", ephemeral=True)
+
+        # Bypass prüfen
+        is_admin = user.guild_permissions.administrator or user.guild_permissions.manage_guild
+        has_bypass_role = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(user, "roles", []))
+
+        # Cooldown (pro Channel) – nur für Nicht-Bypass
+        now = time.time()
+        until = self._ping_cd_until.get(channel.id, 0)
+        PING_CD = 60
+        if not (is_admin or has_bypass_role):
+            if now < until:
+                remaining = int(until - now)
+                try:
+                    return await interaction.response.send_message(
+                        f"⏱️ Bitte warte **{remaining}s**, bevor erneut gepingt wird.",
+                        ephemeral=True,
+                    )
+                except Exception:
+                    return
+            self._ping_cd_until[channel.id] = now + PING_CD
+
+        # Ping senden (Rolle muss mentionable sein ODER AllowedMentions.roles=True)
+        role_mention = f"<@&{role_id}>"
+        content = f"🔔 {role_mention} – angefragt von {user.mention}"
+        try:
+            await interaction.response.send_message(
+                content,
+                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
+            )
+        except discord.InteractionResponded:
+            await channel.send(
+                content,
+                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
+            )
 
     # ========= Helpers =========
     async def _build_embed(self, guild: discord.Guild, author: discord.Member) -> discord.Embed:
@@ -63,7 +138,7 @@ class TriggerPost(commands.Cog):
         )
 
         embed = discord.Embed(
-            title="🐮 Muhhelfer – Übersicht",
+            title=f"{EMOJI_TITLE} Muhhelfer – Übersicht",
             description=desc,
             color=discord.Color.blue(),
         )
@@ -72,15 +147,16 @@ class TriggerPost(commands.Cog):
         return embed
 
     async def _post_or_edit(self, channel: discord.TextChannel, embed: discord.Embed, msg_id: int | None):
-        """Postet ein neues Embed oder editiert eine bestehende Nachricht-ID."""
+        """Postet ein neues Embed oder editiert eine bestehende Nachricht-ID – mit Buttons."""
+        view = self._PingView(self)
         try:
             if msg_id:
                 old = await channel.fetch_message(int(msg_id))
-                await old.edit(content="🔔 Muhhelfer – Übersicht (aktualisiert):", embed=embed)
+                await old.edit(content=f"🔔 Muhhelfer – Übersicht (aktualisiert):", embed=embed, view=view)
             else:
-                await channel.send(content="🔔 Muhhelfer – Übersicht:", embed=embed)
+                await channel.send(content=f"🔔 Muhhelfer – Übersicht:", embed=embed, view=view)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            await channel.send(content="🔔 Muhhelfer – Übersicht:", embed=embed)
+            await channel.send(content=f"🔔 Muhhelfer – Übersicht:", embed=embed, view=view)
 
     # ========= Commands =========
     @commands.guild_only()
@@ -167,6 +243,17 @@ class TriggerPost(commands.Cog):
         await self._post_or_edit(channel, embed, data["message_id"])
         await ctx.send("✅ Muhhelfer-Liste aktualisiert.", delete_after=5)
 
+    @triggerpost.command(name="buttons")
+    async def post_buttons(self, ctx: commands.Context):
+        """Postet die Muhhelfer-Ping-Buttons in den Ziel-Channel."""
+        data = await self.config.guild(ctx.guild).all()
+        target_id = data["target_channel_id"]
+        if not target_id:
+            return await ctx.send("⚠️ Kein Ziel-Channel gesetzt. `°triggerpost setchannel #bot-test`")
+        channel = ctx.guild.get_channel(target_id) or ctx.channel
+        await channel.send("🔘 **Muhhelfer-Buttons:**", view=self._PingView(self))
+        await ctx.send("✅ Buttons gepostet.", delete_after=5)
+
     # ========= Listener =========
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -201,6 +288,6 @@ class TriggerPost(commands.Cog):
                 return  # still: keine Nachricht
             self._cooldown_until[message.channel.id] = now + cd
 
-        # Embed bauen & posten/aktualisieren
+        # Embed bauen & posten/aktualisieren (mit Buttons)
         embed = await self._build_embed(guild, message.author)
         await self._post_or_edit(message.channel, embed, data["message_id"])
