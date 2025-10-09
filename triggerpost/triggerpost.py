@@ -295,6 +295,22 @@ class TriggerPost(commands.Cog):
             t.append(phrase)
         await ctx.send(f"✅ Trigger hinzugefügt: `{phrase}`")
 
+    @muhhelfer.command(name="removetrigger")
+    async def remove_trigger(self, ctx: commands.Context, *, phrase: str):
+        """Entfernt einen Trigger."""
+        author = ctx.author
+        is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
+        if not (is_admin or is_offizier):
+            return await ctx.send("🚫 Du darfst diesen Befehl nicht verwenden.")
+
+        phrase = (phrase or "").strip().casefold()
+        async with self.config.guild(ctx.guild).triggers() as t:
+            if phrase not in t:
+                return await ctx.send("⚠️ Trigger nicht gefunden.")
+            t.remove(phrase)
+        await ctx.send(f"🗑️ Trigger entfernt: `{phrase}`")
+
     @muhhelfer.command(name="list")
     async def list_triggers(self, ctx: commands.Context):
         """Zeigt Einstellungen + kompakte Command-Übersicht (Admins/Offiziere)."""
@@ -310,6 +326,7 @@ class TriggerPost(commands.Cog):
 
         commands_block = (
             "**📜 Commands:**\n"
+            "• `°muhhelfer help` – hübsches Hilfe-Embed mit allen Befehlen.\n"
             "• `°muhhelfer post [min]` – Embed posten (Offis/Admins überall; User nur im Zielchannel). Optional Auto-Delete-Minuten.\n"
             "• `°muhhelfer addtrigger <text>` – Trigger hinzufügen (mit `+` für UND, z. B. `loml+hard`).\n"
             "• `°muhhelfer removetrigger <text>` – Trigger entfernen.\n"
@@ -394,6 +411,55 @@ class TriggerPost(commands.Cog):
             return await ctx.send("⚠️ Bitte 0–1440 Minuten.")
         await self.config.guild(ctx.guild).autodelete_minutes.set(minutes)
         await ctx.send(f"🗑️ Auto-Delete (außerhalb Zielchannel): **{minutes} min**")
+
+    # --- Hübsches Hilfe-Embed (für alle sichtbar) ---
+    @muhhelfer.command(name="help")
+    async def show_help(self, ctx: commands.Context):
+        """Zeigt ein hübsches Hilfe-Embed mit allen Befehlen."""
+        e = discord.Embed(
+            title=f"{EMOJI_TITLE} Muhhelfer – Hilfe",
+            description="Kurzübersicht aller wichtigen Befehle und Funktionen.",
+            color=discord.Color.blue(),
+        )
+        e.set_thumbnail(url=MUHKU_THUMBNAIL)
+
+        e.add_field(
+            name="🔔 Posten",
+            value=(
+                "`°muhhelfer post [min]`\n"
+                "Postet die Muhhelfer-Übersicht.\n"
+                "• Offiziere/Admins: überall nutzbar\n"
+                "• Normale Mitglieder: nur im Zielchannel\n"
+                "• Optional: Auto-Delete-Minuten angeben (nur außerhalb Zielchannel)\n"
+                "  z. B. `°muhhelfer post 20`"
+            ),
+            inline=False,
+        )
+        e.add_field(
+            name="🧩 Trigger-Verwaltung (Offizier/Admin)",
+            value=(
+                "`°muhhelfer addtrigger <text>` – Trigger hinzufügen (UND mit `+`, z. B. `loml+hard`)\n"
+                "`°muhhelfer removetrigger <text>` – Trigger entfernen\n"
+                "`°muhhelfer list` – Einstellungen + Kommandos anzeigen\n"
+                "`°muhhelfer refresh` – Embed im Zielchannel neu aufbauen"
+            ),
+            inline=False,
+        )
+        e.add_field(
+            name="⚙️ Setup (Admin)",
+            value=(
+                "`°muhhelfer setchannel #channel` – Zielchannel setzen\n"
+                "`°muhhelfer setmessage <id>` – bestehende Nachricht verwenden\n"
+                "`°muhhelfer cooldown <sek>` – Trigger/Post-Cooldown\n"
+                "`°muhhelfer intro <text|clear>` – Intro-Text\n"
+                "`°muhhelfer autodelete <min>` – Auto-Delete außerhalb Zielchannel (0=aus)"
+            ),
+            inline=False,
+        )
+
+        e.set_footer(text=f"Aufgerufen von: {ctx.author.display_name}")
+        e.timestamp = discord.utils.utcnow()
+        await ctx.send(embed=e)
 
     # --- Listener für Trigger ---
     @commands.Cog.listener()
