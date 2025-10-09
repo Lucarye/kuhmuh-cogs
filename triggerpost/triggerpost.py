@@ -8,23 +8,24 @@ from redbot.core.bot import Red
 # ====== Server-spezifische IDs ======
 ROLE_NORMAL = 1424768638157852682            # Muhhelfer – Normal
 ROLE_SCHWER = 1424769286790054050            # Muhhelfer – Schwer
-ROLE_OFFIZIERE_BYPASS = 1198652039312453723  # Offiziere: Cooldown-Bypass
+ROLE_OFFIZIERE_BYPASS = 1198652039312453723  # Offiziere: Bypass + erweiterte Rechte
 
-# Custom Emojis (nur dein :muhkuh:)
+# Custom Emojis
 EMOJI_TITLE = "<:muhkuh:1207038544510586890>"
 EMOJI_NORMAL = discord.PartialEmoji(name="muh_normal", id=1424467460228124803)
 EMOJI_SCHWER = discord.PartialEmoji(name="muh_schwer", id=1424467458118647849)
 
 DEFAULT_GUILD = {
-    "triggers": ["hilfe"],                  # weitere Trigger per Command hinzufügen (+ für UND)
-    "target_channel_id": None,              # MUSS gesetzt werden
-    "message_id": None,                     # optional: bestehende Nachricht zum Editieren
-    "cooldown_seconds": 30,                 # Text-Trigger-/Post-Cooldown
+    "triggers": ["hilfe"],
+    "target_channel_id": None,
+    "message_id": None,
+    "cooldown_seconds": 30,
     "intro_text": "Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? :muhkuh:",
 }
 
+
 class TriggerPost(commands.Cog):
-    """Muhhelfer-Übersicht bei Triggern (nur online Mitglieder) + Ping-Buttons & Intro."""
+    """Muhhelfer-System mit Triggern, Embed, Buttons und Pings."""
 
     _ping_cd_until: dict[int, float] = {}
 
@@ -32,9 +33,9 @@ class TriggerPost(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=81521025, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
-        self._cooldown_until = {}  # channel_id -> timestamp (für Auto-Trigger & manuellen Post)
+        self._cooldown_until = {}
 
-    # ========= Buttons / View =========
+    # ========= Buttons =========
     class _PingView(ui.View):
         def __init__(self, parent: "TriggerPost"):
             super().__init__(timeout=None)
@@ -59,52 +60,35 @@ class TriggerPost(commands.Cog):
             await self.parent._handle_ping(interaction, ROLE_SCHWER, "Muhhelfer – schwer")
 
     async def _handle_ping(self, interaction: discord.Interaction, role_id: int, label: str):
-        """Pingt eine Rolle mit Cooldown & Bypass."""
         channel = interaction.channel
         guild = interaction.guild
         user = interaction.user
-
         if not channel or not guild:
             return await interaction.response.send_message("⚠️ Nur in Server-Channels nutzbar.", ephemeral=True)
 
-        # Bypass prüfen
         is_admin = user.guild_permissions.administrator or user.guild_permissions.manage_guild
-        has_bypass_role = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(user, "roles", []))
+        has_bypass = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(user, "roles", []))
 
-        # Ping-Cooldown (pro Channel) – nur für Nicht-Bypass
         now = time.time()
         until = self._ping_cd_until.get(channel.id, 0)
         PING_CD = 60
-        if not (is_admin or has_bypass_role):
+        if not (is_admin or has_bypass):
             if now < until:
                 remaining = int(until - now)
-                try:
-                    return await interaction.response.send_message(
-                        f"⏱️ Bitte warte **{remaining}s**, bevor erneut gepingt wird.",
-                        ephemeral=True,
-                    )
-                except Exception:
-                    return
+                return await interaction.response.send_message(
+                    f"⏱️ Bitte warte **{remaining}s**, bevor erneut gepingt wird.",
+                    ephemeral=True,
+                )
             self._ping_cd_until[channel.id] = now + PING_CD
 
-        # Ping senden
         role_mention = f"<@&{role_id}>"
         content = f"🔔 {role_mention} – angefragt von {user.mention}"
-        try:
-            await interaction.response.send_message(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
-            )
-        except discord.InteractionResponded:
-            await channel.send(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
-            )
+        await interaction.response.send_message(
+            content, allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False)
+        )
 
-    # ========= Helpers =========
+    # ========= Embed Builder =========
     async def _build_embed(self, guild: discord.Guild, author: discord.Member) -> discord.Embed:
-        """Baut das Embed (nur online/idle/dnd) und formatiert die Abschnitte."""
-        # Presence/Member-Intents im Dev-Portal aktivieren!
         try:
             await guild.chunk()
         except Exception:
@@ -123,20 +107,15 @@ class TriggerPost(commands.Cog):
             members.sort(key=lambda x: x.display_name.lower())
             return members
 
-        normal_list = online_members(ROLE_NORMAL)
-        schwer_list = online_members(ROLE_SCHWER)
+        normal = online_members(ROLE_NORMAL)
+        schwer = online_members(ROLE_SCHWER)
 
-        def section(name_lower: str, members):
+        def section(name, members):
             if not members:
-                return f"{name_lower}:\n– aktuell niemand –"
-            lines = "\n".join(m.mention for m in members)
-            return f"{name_lower}:\n{lines}"
+                return f"{name}:\n– aktuell niemand –"
+            return f"{name}:\n" + "\n".join(m.mention for m in members)
 
-        desc = (
-            f"{section('Muhhelfer – normal', normal_list)}\n\n"
-            f"{section('Muhhelfer – schwer', schwer_list)}"
-        )
-
+        desc = f"{section('Muhhelfer – normal', normal)}\n\n{section('Muhhelfer – schwer', schwer)}"
         embed = discord.Embed(
             title=f"{EMOJI_TITLE} Muhhelfer – Übersicht",
             description=desc,
@@ -146,37 +125,36 @@ class TriggerPost(commands.Cog):
         embed.timestamp = discord.utils.utcnow()
         return embed
 
-    async def _post_or_edit(self, channel: discord.TextChannel, embed: discord.Embed, msg_id: int | None):
-        """Postet ein neues Embed oder editiert eine bestehende Nachricht-ID – mit Buttons und optionalem Intro-Text."""
+    async def _post_or_edit(self, channel, embed, msg_id):
         view = self._PingView(self)
         data = await self.config.guild(channel.guild).all()
-        intro_text = data.get("intro_text") or ""
-        if intro_text:
-            intro = f"{intro_text}\n\n🔔 Muhhelfer – Übersicht:"
-        else:
-            intro = "🔔 Muhhelfer – Übersicht:"
-
+        intro = f"{data.get('intro_text')}\n\n🔔 Muhhelfer – Übersicht:" if data.get("intro_text") else "🔔 Muhhelfer – Übersicht:"
         try:
             if msg_id:
-                old = await channel.fetch_message(int(msg_id))
-                await old.edit(content=intro, embed=embed, view=view)
+                msg = await channel.fetch_message(int(msg_id))
+                await msg.edit(content=intro, embed=embed, view=view)
             else:
                 await channel.send(content=intro, embed=embed, view=view)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        except (discord.NotFound, discord.Forbidden):
             await channel.send(content=intro, embed=embed, view=view)
 
     # ========= Commands =========
     @commands.guild_only()
     @commands.group(name="muhhelfer", aliases=["triggerpost"])
-    async def muhhelfer(self, ctx: commands.Context):
-        """Konfiguration & Tools für den Muhhelfer-Post."""
+    async def muhhelfer(self, ctx):
+        """Muhhelfer-Tools und Konfiguration."""
         pass
 
-    # ----- Admin/Config-Commands -----
+    # --- Admin/Offizier ---
     @muhhelfer.command(name="addtrigger")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def add_trigger(self, ctx: commands.Context, *, phrase: str):
-        """Fügt einen Trigger hinzu. '+' verbindet UND-Kombinationen (z. B. 'loml+hard')."""
+    async def add_trigger(self, ctx, *, phrase: str):
+        """Fügt einen Trigger hinzu. '+' verbindet Wörter (z. B. 'loml+hard')."""
+        author = ctx.author
+        is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
+        if not (is_admin or is_offizier):
+            return await ctx.send("🚫 Du darfst diesen Befehl nicht verwenden.")
+
         phrase = (phrase or "").strip().casefold()
         if not phrase:
             return await ctx.send("⚠️ Leerer Trigger ist nicht erlaubt.")
@@ -186,19 +164,15 @@ class TriggerPost(commands.Cog):
             t.append(phrase)
         await ctx.send(f"✅ Trigger hinzugefügt: `{phrase}`")
 
-    @muhhelfer.command(name="removetrigger")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def remove_trigger(self, ctx: commands.Context, *, phrase: str):
-        phrase = (phrase or "").strip().casefold()
-        async with self.config.guild(ctx.guild).triggers() as t:
-            if phrase not in t:
-                return await ctx.send("⚠️ Trigger nicht gefunden.")
-            t.remove(phrase)
-        await ctx.send(f"🗑️ Trigger entfernt: `{phrase}`")
-
     @muhhelfer.command(name="list")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def list_triggers(self, ctx: commands.Context):
+    async def list_triggers(self, ctx):
+        """Zeigt aktuelle Trigger, Channel, Cooldown und Introtext."""
+        author = ctx.author
+        is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
+        if not (is_admin or is_offizier):
+            return await ctx.send("🚫 Du darfst diesen Befehl nicht verwenden.")
+
         data = await self.config.guild(ctx.guild).all()
         triggers = ", ".join(f"`{x}`" for x in data["triggers"]) or "—"
         ch = ctx.guild.get_channel(data["target_channel_id"]) if data["target_channel_id"] else None
@@ -211,127 +185,93 @@ class TriggerPost(commands.Cog):
             f"**Intro:** {data['intro_text'] or '— kein Text —'}"
         )
 
-    @muhhelfer.command(name="setchannel")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_channel(self, ctx: commands.Context, channel: discord.TextChannel = None):
-        if channel is None:
-            return await ctx.send("⚠️ Bitte gib einen Channel an, z. B. `°muhhelfer setchannel #bot-test`.")
-        await self.config.guild(ctx.guild).target_channel_id.set(channel.id)
-        await ctx.send(f"📍 Ziel-Channel gesetzt: {channel.mention}")
-
-    @muhhelfer.command(name="setmessage")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_message(self, ctx: commands.Context, message_id: int = None):
-        await self.config.guild(ctx.guild).message_id.set(message_id)
-        await ctx.send(f"🧷 Message-ID gesetzt: `{message_id}`")
-
-    @muhhelfer.command(name="cooldown")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_cooldown(self, ctx: commands.Context, seconds: int):
-        if seconds < 0 or seconds > 3600:
-            return await ctx.send("⚠️ Bitte 0–3600 Sekunden.")
-        await self.config.guild(ctx.guild).cooldown_seconds.set(seconds)
-        await ctx.send(f"⏱️ Cooldown gesetzt: **{seconds}s**")
-
-    @muhhelfer.command(name="intro")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_intro(self, ctx: commands.Context, *, text: str = None):
-        """Setzt oder löscht den Intro-Text (vor dem Embed)."""
-        if not text:
-            data = await self.config.guild(ctx.guild).intro_text()
-            if not data:
-                return await ctx.send("ℹ️ Kein Intro-Text gesetzt.")
-            return await ctx.send(f"📜 Aktueller Intro-Text:\n> {data}")
-
-        if text.lower() in ("clear", "none", "off"):
-            await self.config.guild(ctx.guild).intro_text.set(None)
-            return await ctx.send("🧹 Intro-Text gelöscht.")
-
-        await self.config.guild(ctx.guild).intro_text.set(text)
-        await ctx.send(f"✅ Intro-Text gesetzt auf:\n> {text}")
-
     @muhhelfer.command(name="refresh")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def refresh_list(self, ctx: commands.Context):
-        """Baut Embed neu und editiert die gespeicherte Nachricht (falls gesetzt)."""
-        author: discord.Member = ctx.author
-        guild: discord.Guild = ctx.guild
+    async def refresh_list(self, ctx):
+        """Baut das Muhhelfer-Embed neu und aktualisiert die gespeicherte Nachricht."""
+        author = ctx.author
+        is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
+        if not (is_admin or is_offizier):
+            return await ctx.send("🚫 Du darfst diesen Befehl nicht verwenden.")
 
-        data = await self.config.guild(guild).all()
-        target_id = data["target_channel_id"]
-        if not target_id:
-            return await ctx.send("⚠️ Kein Ziel-Channel gesetzt. `°muhhelfer setchannel #bot-test`")
-        channel = guild.get_channel(target_id)
-        if not channel:
-            return await ctx.send("⚠️ Ziel-Channel nicht gefunden oder keine Rechte.")
-
-        embed = await self._build_embed(guild, author)
-        await self._post_or_edit(channel, embed, data["message_id"])
-        await ctx.send("✅ Muhhelfer-Liste aktualisiert.", delete_after=5)
-
-    @muhhelfer.command(name="buttons")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def post_buttons(self, ctx: commands.Context):
-        """Postet nur die Ping-Buttons im Ziel-Channel."""
         data = await self.config.guild(ctx.guild).all()
         target_id = data["target_channel_id"]
         if not target_id:
-            return await ctx.send("⚠️ Kein Ziel-Channel gesetzt. `°muhhelfer setchannel #bot-test`")
-        channel = ctx.guild.get_channel(target_id) or ctx.channel
-        await channel.send("🔘 **Muhhelfer-Buttons:**", view=self._PingView(self))
-        await ctx.send("✅ Buttons gepostet.", delete_after=5)
+            return await ctx.send("⚠️ Kein Ziel-Channel gesetzt.")
+        channel = ctx.guild.get_channel(target_id)
+        embed = await self._build_embed(ctx.guild, ctx.author)
+        await self._post_or_edit(channel, embed, data["message_id"])
+        await ctx.send("✅ Muhhelfer-Liste aktualisiert.", delete_after=5)
 
-    # ----- Öffentlicher Post-Command -----
+    # --- Admin-only ---
+    @muhhelfer.command(name="setchannel")
+    @commands.admin_or_permissions(manage_guild=True)
+    async def set_channel(self, ctx, channel: discord.TextChannel = None):
+        if not channel:
+            return await ctx.send("⚠️ Bitte gib einen Channel an.")
+        await self.config.guild(ctx.guild).target_channel_id.set(channel.id)
+        await ctx.send(f"📍 Ziel-Channel gesetzt: {channel.mention}")
+
+    @muhhelfer.command(name="intro")
+    @commands.admin_or_permissions(manage_guild=True)
+    async def set_intro(self, ctx, *, text: str = None):
+        if not text:
+            intro = await self.config.guild(ctx.guild).intro_text()
+            return await ctx.send(f"📜 Aktuell: {intro or '— kein Text —'}")
+        if text.lower() in ("clear", "none", "off"):
+            await self.config.guild(ctx.guild).intro_text.set(None)
+            return await ctx.send("🧹 Intro gelöscht.")
+        await self.config.guild(ctx.guild).intro_text.set(text)
+        await ctx.send(f"✅ Intro gesetzt auf:\n> {text}")
+
+    @muhhelfer.command(name="cooldown")
+    @commands.admin_or_permissions(manage_guild=True)
+    async def set_cooldown(self, ctx, seconds: int):
+        if seconds < 0 or seconds > 3600:
+            return await ctx.send("⚠️ Bitte 0–3600 Sekunden.")
+        await self.config.guild(ctx.guild).cooldown_seconds.set(seconds)
+        await ctx.send(f"⏱️ Cooldown gesetzt: {seconds}s")
+
+    # --- Öffentlicher Post ---
     @muhhelfer.command(name="post")
-    async def manual_post(self, ctx: commands.Context):
-        """Postet die Muhhelfer-Nachricht im Ziel-Channel. Für alle nutzbar – nur im Ziel-Channel und mit Cooldown."""
-        author: discord.Member = ctx.author
-        guild: discord.Guild = ctx.guild
-
+    async def manual_post(self, ctx):
+        """Postet die Muhhelfer-Nachricht (für alle, im Ziel-Channel, mit Cooldown)."""
+        guild = ctx.guild
         data = await self.config.guild(guild).all()
         target_id = data["target_channel_id"]
         if not target_id:
-            return await ctx.send("⚠️ Kein Ziel-Channel gesetzt. `°muhhelfer setchannel #bot-test`")
-
-        # Nur im Ziel-Channel erlauben
+            return await ctx.send("⚠️ Kein Ziel-Channel gesetzt.")
         if ctx.channel.id != target_id:
             target = guild.get_channel(target_id)
             return await ctx.send(f"⚠️ Bitte nutze den Befehl im {target.mention}.", delete_after=5)
 
-        # Cooldown wie beim Auto-Trigger (still), Admin/Offiziere bypass
         now = time.time()
         until = self._cooldown_until.get(ctx.channel.id, 0)
+        author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
-        has_bypass_role = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
-        if not (is_admin or has_bypass_role):
+        has_bypass = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
+        if not (is_admin or has_bypass):
             cd = (await self.config.guild(guild).cooldown_seconds())
             if now < until:
-                return  # still: keine Nachricht
+                return
             self._cooldown_until[ctx.channel.id] = now + cd
 
-        channel = guild.get_channel(target_id)
         embed = await self._build_embed(guild, author)
-        await self._post_or_edit(channel, embed, data["message_id"])
+        await self._post_or_edit(ctx.channel, embed, data["message_id"])
         await ctx.send("✅ Muhhelfer-Nachricht gepostet.", delete_after=5)
 
-    # ========= Listener (Auto-Trigger) =========
+    # --- Listener für Trigger ---
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Bots/DMs ignorieren
         if message.author.bot or not message.guild:
             return
-
         guild = message.guild
         data = await self.config.guild(guild).all()
-
-        # Nur im gesetzten Channel reagieren
         target_id = data["target_channel_id"]
         if not target_id or message.channel.id != target_id:
             return
 
-        # Trigger prüfen – unterstützt UND-Kombinationen via "+"
         content = message.content.casefold()
-
         matched = False
         for trigger in data["triggers"]:
             if "+" in trigger:
@@ -342,24 +282,19 @@ class TriggerPost(commands.Cog):
             elif trigger in content:
                 matched = True
                 break
-
         if not matched:
             return
 
-        # Cooldown (still); Admin/Manage_Guild/Offiziere bypass
         now = time.time()
         until = self._cooldown_until.get(message.channel.id, 0)
-        is_admin = (
-            message.author.guild_permissions.administrator
-            or message.author.guild_permissions.manage_guild
-        )
-        has_bypass_role = any(r.id == ROLE_OFFIZIERE_BYPASS for r in message.author.roles)
-        if not (is_admin or has_bypass_role):
+        author = message.author
+        is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
+        has_bypass = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
+        if not (is_admin or has_bypass):
             cd = data.get("cooldown_seconds", 30)
             if now < until:
-                return  # still: keine Nachricht
+                return
             self._cooldown_until[message.channel.id] = now + cd
 
-        # Embed bauen & posten/aktualisieren (mit Buttons)
-        embed = await self._build_embed(guild, message.author)
+        embed = await self._build_embed(guild, author)
         await self._post_or_edit(message.channel, embed, data["message_id"])
