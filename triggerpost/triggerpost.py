@@ -6,8 +6,8 @@ from redbot.core import commands, Config
 from redbot.core.bot import Red
 
 # ====== Server-spezifische IDs ======
-ROLE_NORMAL = 1424769286790054050            # Muhhelfer – Normal
-ROLE_SCHWER = 1424768638157852682            # Muhhelfer – Schwer
+ROLE_NORMAL = 1424768638157852682     # Muhhelfer – Normal
+ROLE_SCHWER = 1424769286790054050     # Muhhelfer – Schwer
 ROLE_OFFIZIERE_BYPASS = 1198652039312453723  # Offiziere: Cooldown-Bypass
 
 # Custom Emojis
@@ -291,3 +291,4 @@ class TriggerPost(commands.Cog):
         # Embed bauen & posten/aktualisieren (mit Buttons)
         embed = await self._build_embed(guild, message.author)
         await self._post_or_edit(message.channel, embed, data["message_id"])
+
