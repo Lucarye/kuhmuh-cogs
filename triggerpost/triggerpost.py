@@ -146,17 +146,20 @@ class TriggerPost(commands.Cog):
         embed.timestamp = discord.utils.utcnow()
         return embed
 
-    async def _post_or_edit(self, channel: discord.TextChannel, embed: discord.Embed, msg_id: int | None):
-        """Postet ein neues Embed oder editiert eine bestehende Nachricht-ID – mit Buttons."""
-        view = self._PingView(self)
-        try:
-            if msg_id:
-                old = await channel.fetch_message(int(msg_id))
-                await old.edit(content=f"🔔 Muhhelfer – Übersicht (aktualisiert):", embed=embed, view=view)
-            else:
-                await channel.send(content=f"🔔 Muhhelfer – Übersicht:", embed=embed, view=view)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            await channel.send(content=f"🔔 Muhhelfer – Übersicht:", embed=embed, view=view)
+async def _post_or_edit(self, channel: discord.TextChannel, embed: discord.Embed, msg_id: int | None):
+    """Postet ein neues Embed oder editiert eine bestehende Nachricht-ID – mit Buttons und Intro-Text."""
+    view = self._PingView(self)
+    intro = f"Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? {EMOJI_TITLE}\n\n🔔 Muhhelfer – Übersicht:"
+
+    try:
+        if msg_id:
+            old = await channel.fetch_message(int(msg_id))
+            await old.edit(content=intro, embed=embed, view=view)
+        else:
+            await channel.send(content=intro, embed=embed, view=view)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        await channel.send(content=intro, embed=embed, view=view)
+
 
     # ========= Commands =========
     @commands.guild_only()
@@ -291,4 +294,5 @@ class TriggerPost(commands.Cog):
         # Embed bauen & posten/aktualisieren (mit Buttons)
         embed = await self._build_embed(guild, message.author)
         await self._post_or_edit(message.channel, embed, data["message_id"])
+
 
