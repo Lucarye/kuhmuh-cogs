@@ -54,10 +54,10 @@ class TriggerPost(commands.Cog):
             lines = "\n".join(m.mention for m in members)
             return f"{name_lower}:\n{lines}"
 
-        desc = f"{section_plain('normal', normal_list)}\n\n{section_plain('schwer', schwer_list)}"
+        desc = f"{section('Muhhelfer – normal', normal_list)}\n\n{section('Muhhelfer – schwer', schwer_list)}"
 
         embed = discord.Embed(
-            title="Aushilfe – Übersicht",
+            title="🐮 Muhhelfer – Übersicht",
             description=desc,
             color=discord.Color.blue(),
         )
@@ -197,5 +197,6 @@ class TriggerPost(commands.Cog):
         # Embed bauen & posten/aktualisieren
         embed = await self._build_embed(guild, message.author)
         await self._post_or_edit(message.channel, embed, data["message_id"])
+
 
 
