@@ -297,7 +297,7 @@ class TriggerPost(commands.Cog):
 
     @muhhelfer.command(name="list")
     async def list_triggers(self, ctx: commands.Context):
-        """Zeigt aktuelle Trigger, Channel, Cooldown, Introtext und Auto-Delete-Minuten."""
+        """Zeigt Einstellungen + kompakte Command-Übersicht (Admins/Offiziere)."""
         author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
         is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
@@ -307,6 +307,21 @@ class TriggerPost(commands.Cog):
         data = await self.config.guild(ctx.guild).all()
         triggers = ", ".join(f"`{x}`" for x in data["triggers"]) or "—"
         ch = ctx.guild.get_channel(data["target_channel_id"]) if data["target_channel_id"] else None
+
+        commands_block = (
+            "**📜 Commands:**\n"
+            "• `°muhhelfer post [min]` – Embed posten (Offis/Admins überall; User nur im Zielchannel). Optional Auto-Delete-Minuten.\n"
+            "• `°muhhelfer addtrigger <text>` – Trigger hinzufügen (mit `+` für UND, z. B. `loml+hard`).\n"
+            "• `°muhhelfer removetrigger <text>` – Trigger entfernen.\n"
+            "• `°muhhelfer list` – Diese Übersicht anzeigen.\n"
+            "• `°muhhelfer refresh` – Embed im Zielchannel neu aufbauen (Offis/Admins).\n"
+            "• `°muhhelfer setchannel #channel` – Zielchannel festlegen (Admin).\n"
+            "• `°muhhelfer setmessage <id>` – Bestehende Nachricht-ID setzen (Admin).\n"
+            "• `°muhhelfer cooldown <sek>` – Trigger/Post-Cooldown setzen (Admin).\n"
+            "• `°muhhelfer intro <text|clear>` – Intro-Text setzen/löschen (Admin).\n"
+            "• `°muhhelfer autodelete <min>` – Auto-Delete außerhalb Zielchannel (Admin, 0=aus).\n"
+        )
+
         await ctx.send(
             f"**Trigger:** {triggers}\n"
             f"**Ziel-Channel:** {ch.mention if ch else '— nicht gesetzt —'}\n"
@@ -314,7 +329,8 @@ class TriggerPost(commands.Cog):
             f"**Cooldown:** {data['cooldown_seconds']}s\n"
             f"**Auto-Delete (andere Channels):** {data.get('autodelete_minutes', 0)} min\n"
             f"**Bypass-Rolle:** <@&{ROLE_OFFIZIERE_BYPASS}>\n"
-            f"**Intro:** {data['intro_text'] or '— kein Text —'}"
+            f"**Intro:** {data['intro_text'] or '— kein Text —'}\n\n"
+            f"{commands_block}"
         )
 
     @muhhelfer.command(name="refresh")
