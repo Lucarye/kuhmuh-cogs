@@ -19,7 +19,7 @@ DEFAULT_GUILD = {
     "target_channel_id": None,
     "message_id": None,
     "cooldown_seconds": 30,
-    "intro_text": "Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? :muhkuh:",
+    "intro_text": "Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? <:muhkuh:1207038544510586890>:",
 }
 
 
@@ -125,6 +125,12 @@ class TriggerPost(commands.Cog):
             description=desc,
             color=discord.Color.blue(),
         )
+
+        # 🖼️ Muhkuh-Banner unten
+        embed.set_image(
+            url="https://cdn.discordapp.com/attachments/1404063753946796122/1404063845491671160/muhku.png?ex=68e8451b&is=68e6f39b&hm=92c4de08b4562cdb9779ffaf1177dfa141515658028cd9335a29f2670618c9c0&"
+        )
+
         embed.set_footer(text=f"Angefragt von: {author.display_name}")
         embed.timestamp = discord.utils.utcnow()
         return embed
@@ -132,7 +138,11 @@ class TriggerPost(commands.Cog):
     async def _post_or_edit(self, channel, embed, msg_id):
         view = self._PingView(self)
         data = await self.config.guild(channel.guild).all()
-        intro = f"{data.get('intro_text')}\n\n🔔 Muhhelfer – Übersicht:" if data.get("intro_text") else "🔔 Muhhelfer – Übersicht:"
+        intro = (
+            f"{data.get('intro_text')}\n\n{EMOJI_TITLE} Muhhelfer – Übersicht:"
+            if data.get("intro_text")
+            else f"{EMOJI_TITLE} Muhhelfer – Übersicht:"
+        )
         try:
             if msg_id:
                 msg = await channel.fetch_message(int(msg_id))
