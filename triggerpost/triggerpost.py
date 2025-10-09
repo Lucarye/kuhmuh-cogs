@@ -1,32 +1,35 @@
+# triggerpost/triggerpost.py
 import time
 import discord
 from redbot.core import commands, Config
 from redbot.core.bot import Red
 
-# ====== IDs aus deinem Server ======
-ROLE_NORMAL = 1424769286790054050       # Muhhelper – Normal
-ROLE_SCHWER = 1424768638157852682       # Muhhelper – Schwer
+# ====== Server-spezifische IDs ======
+ROLE_NORMAL = 1424769286790054050            # Muhhelfer – Normal
+ROLE_SCHWER = 1424768638157852682            # Muhhelfer – Schwer
 ROLE_OFFIZIERE_BYPASS = 1198652039312453723  # Offiziere: Cooldown-Bypass
 
 DEFAULT_GUILD = {
-    "triggers": ["aushilfe?"],   # weitere Trigger per Command hinzufügen
-    "target_channel_id": None,   # muss gesetzt werden (s.u.)
+    "triggers": ["hilfe"],       # weitere Trigger per Command hinzufügen
+    "target_channel_id": None,   # MUSS gesetzt werden (Channel, in dem getriggert wird)
     "message_id": None,          # optional: bestehende Nachricht zum Editieren
-    "cooldown_seconds": 30,      # Standard: 30s
+    "cooldown_seconds": 30,      # Standard-Cooldown
 }
 
 class TriggerPost(commands.Cog):
-    """Postet/aktualisiert eine Aushilfe-Übersicht bei Triggerwörtern (nur online Mitglieder)."""
+    """Postet/aktualisiert eine Muhhelfer-Übersicht bei Triggerwörtern (nur online Mitglieder)."""
 
     def __init__(self, bot: Red):
         self.bot = bot
+        # Achtung: identifier muss eine gültige Ganzzahl/Hex sein.
         self.config = Config.get_conf(self, identifier=81521025, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
         self._cooldown_until = {}  # channel_id -> timestamp
 
     # ========= Helpers =========
     async def _build_embed(self, guild: discord.Guild, author: discord.Member) -> discord.Embed:
-        # Präsenzdaten sicherstellen (Presence/Member-Intents müssen im Dev-Portal aktiv sein)
+        """Baut das Embed (nur online/idle/dnd) und formatiert die Abschnitte."""
+        # Präsenzdaten sicherstellen (Presence/Member-Intents im Dev-Portal aktivieren!)
         try:
             await guild.chunk()
         except Exception:
@@ -48,32 +51,36 @@ class TriggerPost(commands.Cog):
         normal_list = online_members(ROLE_NORMAL)
         schwer_list = online_members(ROLE_SCHWER)
 
-        def section_plain(name_lower: str, members):
+        def section(name_lower: str, members):
             if not members:
                 return f"{name_lower}:\n– aktuell niemand –"
             lines = "\n".join(m.mention for m in members)
             return f"{name_lower}:\n{lines}"
 
-        desc = f"{section('Muhhelfer – normal', normal_list)}\n\n{section('Muhhelfer – schwer', schwer_list)}"
+        desc = (
+            f"{section('Muhhelfer – normal', normal_list)}\n\n"
+            f"{section('Muhhelfer – schwer', schwer_list)}"
+        )
 
         embed = discord.Embed(
             title="🐮 Muhhelfer – Übersicht",
             description=desc,
             color=discord.Color.blue(),
         )
-        embed.set_footer(text=f"Auslöser: {author.display_name}")
+        embed.set_footer(text=f"Angefragt von: {author.display_name}")
         embed.timestamp = discord.utils.utcnow()
         return embed
 
     async def _post_or_edit(self, channel: discord.TextChannel, embed: discord.Embed, msg_id: int | None):
+        """Postet ein neues Embed oder editiert eine bestehende Nachricht-ID."""
         try:
             if msg_id:
                 old = await channel.fetch_message(int(msg_id))
-                await old.edit(content="🔔 Aushilfe – Übersicht (aktualisiert):", embed=embed)
+                await old.edit(content="🔔 Muhhelfer – Übersicht (aktualisiert):", embed=embed)
             else:
-                await channel.send(content="🔔 Aushilfe – Übersicht:", embed=embed)
+                await channel.send(content="🔔 Muhhelfer – Übersicht:", embed=embed)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            await channel.send(content="🔔 Aushilfe – Übersicht:", embed=embed)
+            await channel.send(content="🔔 Muhhelfer – Übersicht:", embed=embed)
 
     # ========= Commands =========
     @commands.guild_only()
@@ -118,13 +125,13 @@ class TriggerPost(commands.Cog):
     async def set_channel(self, ctx: commands.Context, channel: discord.TextChannel = None):
         """Setzt den Ziel-Channel (nur dort triggert der Bot)."""
         if channel is None:
-            return await ctx.send("⚠️ Bitte gib einen Channel an, z. B. `°triggerpost setchannel #hilfe`.")
+            return await ctx.send("⚠️ Bitte gib einen Channel an, z. B. `°triggerpost setchannel #bot-test`.")
         await self.config.guild(ctx.guild).target_channel_id.set(channel.id)
         await ctx.send(f"📍 Ziel-Channel gesetzt: {channel.mention}")
 
     @triggerpost.command(name="setmessage")
     async def set_message(self, ctx: commands.Context, message_id: int = None):
-        """Optional: bestehende Nachricht-ID, die künftig editiert wird."""
+        """Optional: bestehende Nachricht-ID, die künftig editiert wird (0/leer = deaktivieren)."""
         await self.config.guild(ctx.guild).message_id.set(message_id)
         await ctx.send(f"🧷 Message-ID gesetzt: `{message_id}`")
 
@@ -138,7 +145,7 @@ class TriggerPost(commands.Cog):
 
     @triggerpost.command(name="refresh")
     async def refresh_list(self, ctx: commands.Context):
-        """Manuell aktualisieren: Aushilfe-Übersicht im Ziel-Channel."""
+        """Manuell aktualisieren: Muhhelfer-Übersicht im Ziel-Channel."""
         author: discord.Member = ctx.author
         guild: discord.Guild = ctx.guild
 
@@ -151,14 +158,14 @@ class TriggerPost(commands.Cog):
         data = await self.config.guild(guild).all()
         target_id = data["target_channel_id"]
         if not target_id:
-            return await ctx.send("⚠️ Kein Ziel-Channel gesetzt. `°triggerpost setchannel #hilfe`")
+            return await ctx.send("⚠️ Kein Ziel-Channel gesetzt. `°triggerpost setchannel #bot-test`")
         channel = guild.get_channel(target_id)
         if not channel:
             return await ctx.send("⚠️ Ziel-Channel nicht gefunden oder keine Rechte.")
 
         embed = await self._build_embed(guild, author)
         await self._post_or_edit(channel, embed, data["message_id"])
-        await ctx.send("✅ Aushilfe-Liste aktualisiert.", delete_after=5)
+        await ctx.send("✅ Muhhelfer-Liste aktualisiert.", delete_after=5)
 
     # ========= Listener =========
     @commands.Cog.listener()
@@ -180,7 +187,7 @@ class TriggerPost(commands.Cog):
         if not any(t in content for t in data["triggers"]):
             return
 
-        # Cooldown (still), Admin/Manage_Guild/Offiziere bypass
+        # Cooldown (still); Admin/Manage_Guild/Offiziere bypass
         now = time.time()
         until = self._cooldown_until.get(message.channel.id, 0)
         is_admin = (
@@ -197,6 +204,3 @@ class TriggerPost(commands.Cog):
         # Embed bauen & posten/aktualisieren
         embed = await self._build_embed(guild, message.author)
         await self._post_or_edit(message.channel, embed, data["message_id"])
-
-
-
