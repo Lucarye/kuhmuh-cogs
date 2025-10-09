@@ -91,7 +91,13 @@ class TriggerPost(commands.Cog):
         )
 
     # ========= Embed Builder =========
-    async def _build_embed(self, guild: discord.Guild, author: discord.Member, manual_info: str | None = None) -> discord.Embed:
+    async def _build_embed(
+        self,
+        guild: discord.Guild,
+        author: discord.Member,
+        manual_info: str | None = None,
+        footer_note: str | None = None,
+    ) -> discord.Embed:
         try:
             await guild.chunk()
         except Exception:
@@ -130,17 +136,30 @@ class TriggerPost(commands.Cog):
             color=discord.Color.blue(),
         )
 
-        # 🖼️ Muhkuh als Thumbnail oben rechts
+        # Muhkuh als Thumbnail oben rechts
         embed.set_thumbnail(url=MUHKU_THUMBNAIL)
 
-        embed.set_footer(text=f"Angefragt von: {author.display_name}")
+        # Footer (klein/grau) – inkl. optionalem Auto-Delete-Hinweis
+        footer = f"Angefragt von: {author.display_name}"
+        if footer_note:
+            footer += f" • {footer_note}"
+        embed.set_footer(text=footer)
+
         embed.timestamp = discord.utils.utcnow()
         return embed
 
-    async def _post_or_edit(self, channel: discord.TextChannel, embed: discord.Embed, msg_id: int | None, *, target_id: int | None) -> discord.Message:
+    async def _post_or_edit(
+        self,
+        channel: discord.TextChannel,
+        embed: discord.Embed,
+        msg_id: int | None,
+        *,
+        target_id: int | None,
+        autodelete_after_min: int | None = None,
+    ) -> discord.Message:
         """Postet/editiert die Nachricht.
         - Im Zielchannel: alte Muhhelfer-Posts des Bots automatisch löschen
-        - In anderen Channels: nichts löschen; ggf. Auto-Delete nach X Minuten
+        - In anderen Channels: nichts löschen; ggf. Auto-Delete nach X Minuten (mit Fußzeilen-Hinweis)
         """
         view = self._PingView(self)
         data = await self.config.guild(channel.guild).all()
@@ -154,7 +173,6 @@ class TriggerPost(commands.Cog):
 
         # Nur im Zielchannel aufräumen
         if is_target:
-            # Alte Muhhelfer-Posts (vom Bot) im Zielchannel löschen – bis zu 500 Nachrichten
             async for m in channel.history(limit=500):
                 if m.author == self.bot.user and "Muhhelfer – Übersicht" in (m.content or ""):
                     try:
@@ -176,7 +194,7 @@ class TriggerPost(commands.Cog):
 
         # In Nicht-Zielchannels: optional Auto-Delete
         if not is_target:
-            minutes = int(data.get("autodelete_minutes") or 0)
+            minutes = int(autodelete_after_min or 0)
             if minutes > 0 and sent_message:
                 try:
                     await sent_message.delete(delay=minutes * 60)
@@ -192,12 +210,14 @@ class TriggerPost(commands.Cog):
         """Muhhelfer-Tools und Konfiguration."""
         pass
 
-    # --- Öffentlicher Post (überall für Offis/Admins) ---
+    # --- Öffentlicher Post (überall für Offis/Admins), optional: Minuten-Override ---
     @muhhelfer.command(name="post")
-    async def manual_post(self, ctx: commands.Context):
+    async def manual_post(self, ctx: commands.Context, minutes: int = None):
         """Postet die Muhhelfer-Nachricht.
         - Admins/Offiziere dürfen überall posten
         - Normale Mitglieder nur im Zielchannel (mit Cooldown)
+        - Optional: Minuten für Auto-Delete angeben (nur außerhalb Zielchannel wirksam)
+          z.B. °muhhelfer post 20
         """
         guild = ctx.guild
         author = ctx.author
@@ -224,13 +244,36 @@ class TriggerPost(commands.Cog):
                 return
             self._cooldown_until[ctx.channel.id] = now + cd
 
+        # Minuten-Override nur validieren, wenn angegeben
+        minutes_override = None
+        if minutes is not None:
+            if minutes < 0 or minutes > 1440:
+                return await ctx.send("⚠️ Bitte Minuten zwischen 0 und 1440 angeben.")
+            minutes_override = minutes
+
+        # Auto-Delete-Einstellung ermitteln (nur für Nicht-Zielchannel relevant)
+        is_target = ctx.channel.id == target_id
+        autodelete_conf = int(data.get("autodelete_minutes") or 0)
+        autodelete_used = None if is_target else (minutes_override if minutes_override is not None else autodelete_conf)
+
+        # Footer-Hinweis bauen (klein/grau), nur wenn Auto-Delete aktiv und nicht im Zielchannel
+        footer_note = None
+        if not is_target and autodelete_used and autodelete_used > 0:
+            footer_note = f"Auto-Delete in {autodelete_used} Min"
+
         # Embed bauen & posten
         manual_info = None
-        if (is_admin or is_offizier) and ctx.channel.id != target_id:
+        if (is_admin or is_offizier) and not is_target:
             manual_info = f"manuell ausgelöst von {author.display_name}"
 
-        embed = await self._build_embed(guild, author, manual_info)
-        await self._post_or_edit(ctx.channel, embed, data["message_id"], target_id=target_id)
+        embed = await self._build_embed(guild, author, manual_info=manual_info, footer_note=footer_note)
+        await self._post_or_edit(
+            ctx.channel,
+            embed,
+            data["message_id"],
+            target_id=target_id,
+            autodelete_after_min=autodelete_used,
+        )
         await ctx.send("✅ Muhhelfer-Nachricht gepostet.", delete_after=5)
 
     # --- Admin/Offizier: Trigger & Übersicht ---
