@@ -5,7 +5,7 @@ from discord import ui, AllowedMentions
 from redbot.core import commands, Config
 from redbot.core.bot import Red
 
-# ====== Server-spezifische IDs ======
+# ====== Server-spezifische IDs (gemerkt) ======
 ROLE_NORMAL = 1424768638157852682            # Muhhelfer – Normal
 ROLE_SCHWER = 1424769286790054050            # Muhhelfer – Schwer
 ROLE_OFFIZIERE_BYPASS = 1198652039312453723  # Offiziere: Cooldown-Bypass
@@ -16,23 +16,24 @@ EMOJI_NORMAL = discord.PartialEmoji(name="muh_normal", id=1424467460228124803)
 EMOJI_SCHWER = discord.PartialEmoji(name="muh_schwer", id=1424467458118647849)
 
 DEFAULT_GUILD = {
-    "triggers": ["hilfe"],
-    "target_channel_id": None,
-    "message_id": None,
-    "cooldown_seconds": 30,
-    "intro_text": "Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? 🐮",
+    "triggers": ["hilfe"],                  # weitere Trigger per Command hinzufügen
+    "target_channel_id": None,              # MUSS gesetzt werden (Channel, in dem getriggert wird)
+    "message_id": None,                     # optional: bestehende Nachricht zum Editieren
+    "cooldown_seconds": 30,                 # Standard-Cooldown (Text-Trigger)
+    "intro_text": "Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? :muhkuh:",
 }
 
 class TriggerPost(commands.Cog):
-    """Postet/aktualisiert eine Muhhelfer-Übersicht bei Triggerwörtern (nur online Mitglieder) + Ping-Buttons."""
+    """Postet/aktualisiert eine Muhhelfer-Übersicht bei Triggern (nur online Mitglieder) + Ping-Buttons."""
 
+    # separater Ping-Cooldown (für Button-Pings)
     _ping_cd_until: dict[int, float] = {}
 
     def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=81521025, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
-        self._cooldown_until = {}
+        self._cooldown_until = {}  # channel_id -> timestamp
 
     # ========= Buttons / View =========
     class _PingView(ui.View):
@@ -71,7 +72,7 @@ class TriggerPost(commands.Cog):
         is_admin = user.guild_permissions.administrator or user.guild_permissions.manage_guild
         has_bypass_role = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(user, "roles", []))
 
-        # Cooldown (pro Channel)
+        # Cooldown (pro Channel) – nur für Nicht-Bypass
         now = time.time()
         until = self._ping_cd_until.get(channel.id, 0)
         PING_CD = 60
@@ -87,7 +88,7 @@ class TriggerPost(commands.Cog):
                     return
             self._ping_cd_until[channel.id] = now + PING_CD
 
-        # Ping senden
+        # Ping senden (Rolle muss mentionable sein ODER AllowedMentions.roles=True)
         role_mention = f"<@&{role_id}>"
         content = f"🔔 {role_mention} – angefragt von {user.mention}"
         try:
@@ -104,6 +105,7 @@ class TriggerPost(commands.Cog):
     # ========= Helpers =========
     async def _build_embed(self, guild: discord.Guild, author: discord.Member) -> discord.Embed:
         """Baut das Embed (nur online/idle/dnd) und formatiert die Abschnitte."""
+        # Präsenzdaten sicherstellen (Presence/Member-Intents im Dev-Portal aktivieren!)
         try:
             await guild.chunk()
         except Exception:
@@ -174,7 +176,10 @@ class TriggerPost(commands.Cog):
 
     @triggerpost.command(name="addtrigger")
     async def add_trigger(self, ctx: commands.Context, *, phrase: str):
+        """Fügt einen Trigger hinzu. '+' verbindet UND-Kombinationen (z. B. 'loml+hard')."""
         phrase = phrase.strip().casefold()
+        if not phrase:
+            return await ctx.send("⚠️ Leerer Trigger ist nicht erlaubt.")
         async with self.config.guild(ctx.guild).triggers() as t:
             if phrase in t:
                 return await ctx.send("⚠️ Dieser Trigger existiert bereits.")
@@ -274,20 +279,36 @@ class TriggerPost(commands.Cog):
     # ========= Listener =========
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
+        # Bots/DMs ignorieren
         if message.author.bot or not message.guild:
             return
 
         guild = message.guild
         data = await self.config.guild(guild).all()
 
+        # Nur im gesetzten Channel reagieren
         target_id = data["target_channel_id"]
         if not target_id or message.channel.id != target_id:
             return
 
+        # Trigger prüfen – unterstützt UND-Kombinationen via "+"
         content = message.content.casefold()
-        if not any(t in content for t in data["triggers"]):
+
+        matched = False
+        for trigger in data["triggers"]:
+            if "+" in trigger:
+                parts = [p.strip() for p in trigger.split("+") if p.strip()]
+                if parts and all(p in content for p in parts):
+                    matched = True
+                    break
+            elif trigger in content:
+                matched = True
+                break
+
+        if not matched:
             return
 
+        # Cooldown (still); Admin/Manage_Guild/Offiziere bypass
         now = time.time()
         until = self._cooldown_until.get(message.channel.id, 0)
         is_admin = (
@@ -298,8 +319,9 @@ class TriggerPost(commands.Cog):
         if not (is_admin or has_bypass_role):
             cd = data.get("cooldown_seconds", 30)
             if now < until:
-                return
+                return  # still: keine Nachricht
             self._cooldown_until[message.channel.id] = now + cd
 
+        # Embed bauen & posten/aktualisieren (mit Buttons)
         embed = await self._build_embed(guild, message.author)
         await self._post_or_edit(message.channel, embed, data["message_id"])
