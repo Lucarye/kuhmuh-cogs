@@ -26,10 +26,11 @@ class KuhmuhTools(commands.Cog):
     # ---- Hilfsfunktionen ----
 
     async def _repo_update(self, ctx: commands.Context, repo_alias: str):
-        await ctx.invoke(self.bot.get_command("repo update"), repo=repo_alias)
+        # Kein Keyword-Argument verwenden – Red erwartet Positionsargumente.
+        await ctx.invoke(self.bot.get_command("repo update"), repo_alias)
 
     async def _cog_list(self, ctx: commands.Context, repo_alias: str):
-        await ctx.invoke(self.bot.get_command("cog list"), repo=repo_alias)
+        await ctx.invoke(self.bot.get_command("cog list"), repo_alias)
 
     def _is_loaded(self, cog_name: str) -> bool:
         return cog_name in self.bot.cogs
@@ -71,9 +72,10 @@ class KuhmuhTools(commands.Cog):
             try:
                 await ctx.send(f"♻️ Update & Reload `{cog}` …")
                 try:
-                    await ctx.invoke(self.bot.get_command("cog update"), repo=repo, cog=cog)
+                    # Kein Keyword – Red erwartet repo_alias als ersten Parameter, cog als zweiten
+                    await ctx.invoke(self.bot.get_command("cog update"), repo, cog)
                 except Exception:
-                    pass  # nicht schlimm, wenn cog update nicht unterstützt wird
+                    pass  # ignorieren, wenn cog update nicht unterstützt wird
                 await self._safe_reload(ctx, cog)
                 summary.append(f"✅ {cog}")
             except Exception as e:
@@ -95,7 +97,7 @@ class KuhmuhTools(commands.Cog):
 
         try:
             try:
-                await ctx.invoke(self.bot.get_command("cog update"), repo=repo, cog=cog)
+                await ctx.invoke(self.bot.get_command("cog update"), repo, cog)
             except Exception:
                 pass
             await self._safe_reload(ctx, cog)
