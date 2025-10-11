@@ -2,7 +2,7 @@ import traceback
 from redbot.core import commands
 
 DEFAULT_REPO_ALIAS = "kuhmuh"  # Dein Repo-Alias aus: °repo add kuhmuh <URL>
-__KUHMUH_TOOLS_VERSION__ = "1.0.3"
+__KUHMUH_TOOLS_VERSION__ = "1.0.4"
 
 class KuhmuhTools(commands.Cog):
     """
@@ -33,10 +33,13 @@ class KuhmuhTools(commands.Cog):
         return cog_name in self.bot.cogs
 
     async def _safe_reload(self, ctx: commands.Context, cog: str):
+        """
+        Lädt einen Cog (re)load – mit Positionsargumenten (kein 'module='!).
+        """
         if self._is_loaded(cog):
-            await ctx.invoke(self.bot.get_command("reload"), module=cog)
+            await ctx.invoke(self.bot.get_command("reload"), cog)
         else:
-            await ctx.invoke(self.bot.get_command("load"), module=cog)
+            await ctx.invoke(self.bot.get_command("load"), cog)
 
     # -------- Commands --------
 
@@ -70,7 +73,7 @@ class KuhmuhTools(commands.Cog):
     async def kuhmuh_update(self, ctx: commands.Context, *, repo: str = DEFAULT_REPO_ALIAS):
         """
         Aktualisiert alle bekannten Cogs via 'cog update' und lädt sie neu.
-        (Kein direkter 'repo update' Aufruf, da Red dabei einen Repo-Typ erwartet.)
+        (Kein direkter 'repo update' Aufruf – manche Setups erwarten dort Objekte statt Strings.)
         """
         await ctx.send(f"🔄 Aktualisiere Cogs aus **{repo}** …")
 
@@ -79,10 +82,10 @@ class KuhmuhTools(commands.Cog):
             try:
                 await ctx.send(f"♻️ Update & Reload `{cog}` …")
                 try:
-                    # Wichtig: Positionsargumente verwenden (repo, cog)
+                    # Positionsargumente verwenden: (repo, cog)
                     await ctx.invoke(self.bot.get_command("cog update"), repo, cog)
                 except Exception:
-                    # Manche Setups brauchen kein gezieltes 'cog update' – dann einfach reloaden
+                    # Falls dein Manager kein gezieltes 'cog update' braucht, ignorieren
                     pass
                 await self._safe_reload(ctx, cog)
                 summary.append(f"✅ {cog}")
