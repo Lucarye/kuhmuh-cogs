@@ -1,0 +1,8 @@
+{
+  "author": ["Kuhmuh"],
+  "install_msg": "kuhmuh_tools installiert. Befehle: °kuhmuhupdate, °kuhmuhupdatecog, °kuhmuhlist",
+  "name": "kuhmuh_tools",
+  "short": "Ein-Knopf-Update für Repo-Cogs",
+  "description": "Aktualisiert alle oder einzelne Cogs aus einem Repo und lädt sie neu. Zeigt außerdem den Installationsstatus.",
+  "tags": ["utility", "admin", "update"]
+}
