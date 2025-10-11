@@ -2,15 +2,17 @@ import traceback
 from redbot.core import commands
 
 DEFAULT_REPO_ALIAS = "kuhmuh"  # Dein Repo-Alias aus: °repo add kuhmuh <URL>
+__KUHMUH_TOOLS_VERSION__ = "1.0.2"  # zum Gegenprüfen, ob die neue Version geladen ist
 
 class KuhmuhTools(commands.Cog):
     """
     :muhkuh: Kuhmuh Tools – Owner-Utilities für schnelle Repo-Updates (nur Prefix-Befehle).
-    
+
     Befehle:
       °kuhmuhupdate [repo=<alias>]           -> Update+Reload aller Cogs aus Repo
       °kuhmuhupdatecog <cog> [repo=<alias>]  -> Update+Reload eines Cogs
       °kuhmuhlist [repo=<alias>]             -> zeigt installierte/verfügbare Cogs
+      °kuhmuhtoolsver                        -> zeigt die geladene Versionsnummer dieses Cogs
     """
 
     def __init__(self, bot):
@@ -26,7 +28,7 @@ class KuhmuhTools(commands.Cog):
     # ---- Hilfsfunktionen ----
 
     async def _repo_update(self, ctx: commands.Context, repo_alias: str):
-        # Kein Keyword-Argument verwenden – Red erwartet Positionsargumente.
+        # Wichtig: KEINE Keyword-Argumente, Red erwartet Positionsargumente.
         await ctx.invoke(self.bot.get_command("repo update"), repo_alias)
 
     async def _cog_list(self, ctx: commands.Context, repo_alias: str):
@@ -42,6 +44,12 @@ class KuhmuhTools(commands.Cog):
             await ctx.invoke(self.bot.get_command("load"), module=cog)
 
     # ---- Befehle ----
+
+    @commands.is_owner()
+    @commands.command(name="kuhmuhtoolsver")
+    async def kuhmuh_tools_ver(self, ctx: commands.Context):
+        """Zeigt die geladene Version dieses Cogs an (zum Gegenchecken nach Updates)."""
+        await ctx.send(f"kuhmuh_tools Version: **{__KUHMUH_TOOLS_VERSION__}**")
 
     @commands.is_owner()
     @commands.command(name="kuhmuhlist")
@@ -72,10 +80,11 @@ class KuhmuhTools(commands.Cog):
             try:
                 await ctx.send(f"♻️ Update & Reload `{cog}` …")
                 try:
-                    # Kein Keyword – Red erwartet repo_alias als ersten Parameter, cog als zweiten
+                    # Wichtig: Positionsargumente verwenden
                     await ctx.invoke(self.bot.get_command("cog update"), repo, cog)
                 except Exception:
-                    pass  # ignorieren, wenn cog update nicht unterstützt wird
+                    # nicht schlimm, wenn dein Manager kein gezieltes 'cog update' unterstützt
+                    pass
                 await self._safe_reload(ctx, cog)
                 summary.append(f"✅ {cog}")
             except Exception as e:
