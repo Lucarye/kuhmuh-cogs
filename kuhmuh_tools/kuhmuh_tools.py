@@ -2,34 +2,29 @@ import traceback
 from redbot.core import commands
 
 DEFAULT_REPO_ALIAS = "kuhmuh"  # Dein Repo-Alias aus: °repo add kuhmuh <URL>
-__KUHMUH_TOOLS_VERSION__ = "1.0.2"  # zum Gegenprüfen, ob die neue Version geladen ist
+__KUHMUH_TOOLS_VERSION__ = "1.0.3"
 
 class KuhmuhTools(commands.Cog):
     """
     :muhkuh: Kuhmuh Tools – Owner-Utilities für schnelle Repo-Updates (nur Prefix-Befehle).
 
     Befehle:
-      °kuhmuhupdate [repo=<alias>]           -> Update+Reload aller Cogs aus Repo
+      °kuhmuhupdate [repo=<alias>]           -> Update+Reload aller Cogs aus Repo (ohne 'repo update')
       °kuhmuhupdatecog <cog> [repo=<alias>]  -> Update+Reload eines Cogs
+      °kuhmuhrepotipp [repo=<alias>]         -> zeigt den manuellen Repo-Update-Befehl
       °kuhmuhlist [repo=<alias>]             -> zeigt installierte/verfügbare Cogs
-      °kuhmuhtoolsver                        -> zeigt die geladene Versionsnummer dieses Cogs
+      °kuhmuhtoolsver                        -> zeigt die geladene Version dieses Cogs
     """
 
     def __init__(self, bot):
         self.bot = bot
-
-        # Diese Liste enthält alle Cogs, die automatisch mit °kuhmuhupdate aktualisiert & neu geladen werden.
         self.known_repo_cogs = [
             "nachrichteninfo",
             "triggerpost",
             "kuhmuh_tools",
         ]
 
-    # ---- Hilfsfunktionen ----
-
-    async def _repo_update(self, ctx: commands.Context, repo_alias: str):
-        # Wichtig: KEINE Keyword-Argumente, Red erwartet Positionsargumente.
-        await ctx.invoke(self.bot.get_command("repo update"), repo_alias)
+    # -------- Helpers --------
 
     async def _cog_list(self, ctx: commands.Context, repo_alias: str):
         await ctx.invoke(self.bot.get_command("cog list"), repo_alias)
@@ -43,7 +38,7 @@ class KuhmuhTools(commands.Cog):
         else:
             await ctx.invoke(self.bot.get_command("load"), module=cog)
 
-    # ---- Befehle ----
+    # -------- Commands --------
 
     @commands.is_owner()
     @commands.command(name="kuhmuhtoolsver")
@@ -65,25 +60,29 @@ class KuhmuhTools(commands.Cog):
             await ctx.send("ℹ️ Keine Cogs geladen oder Red listet sie nicht unter diesem Alias.")
 
     @commands.is_owner()
+    @commands.command(name="kuhmuhrepotipp")
+    async def kuhmuh_repo_tipp(self, ctx: commands.Context, *, repo: str = DEFAULT_REPO_ALIAS):
+        """Zeigt den manuellen Repo-Update-Befehl an (falls du ihn separat ausführen willst)."""
+        await ctx.send(f"ℹ️ Wenn du das Repo explizit aktualisieren willst:\n`{ctx.prefix}repo update {repo}`")
+
+    @commands.is_owner()
     @commands.command(name="kuhmuhupdate")
     async def kuhmuh_update(self, ctx: commands.Context, *, repo: str = DEFAULT_REPO_ALIAS):
-        """Aktualisiert das Repo und lädt alle bekannten Cogs neu."""
-        await ctx.send(f"🔄 Aktualisiere Repo **{repo}** …")
-
-        try:
-            await self._repo_update(ctx, repo)
-        except Exception as e:
-            return await ctx.send(f"❌ Repo-Update fehlgeschlagen: `{e}`")
+        """
+        Aktualisiert alle bekannten Cogs via 'cog update' und lädt sie neu.
+        (Kein direkter 'repo update' Aufruf, da Red dabei einen Repo-Typ erwartet.)
+        """
+        await ctx.send(f"🔄 Aktualisiere Cogs aus **{repo}** …")
 
         summary = []
         for cog in self.known_repo_cogs:
             try:
                 await ctx.send(f"♻️ Update & Reload `{cog}` …")
                 try:
-                    # Wichtig: Positionsargumente verwenden
+                    # Wichtig: Positionsargumente verwenden (repo, cog)
                     await ctx.invoke(self.bot.get_command("cog update"), repo, cog)
                 except Exception:
-                    # nicht schlimm, wenn dein Manager kein gezieltes 'cog update' unterstützt
+                    # Manche Setups brauchen kein gezieltes 'cog update' – dann einfach reloaden
                     pass
                 await self._safe_reload(ctx, cog)
                 summary.append(f"✅ {cog}")
@@ -97,13 +96,7 @@ class KuhmuhTools(commands.Cog):
     @commands.command(name="kuhmuhupdatecog")
     async def kuhmuh_update_cog(self, ctx: commands.Context, cog: str, *, repo: str = DEFAULT_REPO_ALIAS):
         """Aktualisiert & reloadet genau einen Cog (z. B. °kuhmuhupdatecog nachrichteninfo)."""
-        await ctx.send(f"🔄 Aktualisiere Repo **{repo}** …")
-
-        try:
-            await self._repo_update(ctx, repo)
-        except Exception as e:
-            return await ctx.send(f"❌ Repo-Update fehlgeschlagen: `{e}`")
-
+        await ctx.send(f"🔄 Aktualisiere `{cog}` aus **{repo}** …")
         try:
             try:
                 await ctx.invoke(self.bot.get_command("cog update"), repo, cog)
