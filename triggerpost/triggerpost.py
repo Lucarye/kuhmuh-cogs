@@ -117,7 +117,7 @@ class TriggerPost(commands.Cog):
         self,
         *,
         guild: discord.Guild,
-        channel: discord.abc.MessageableChannel,
+        channel,
         role: discord.Role,
         content: str,
     ):
@@ -259,26 +259,19 @@ class TriggerPost(commands.Cog):
         e.set_thumbnail(url=MUHKU_THUMBNAIL)
 
         if tab == "overview":
-            # nur Kopf
             pass
         elif tab == "normal":
-            if normal:
-                e.add_field(
-                    name="Muhhelfer – normal",
-                    value="\n".join(f"{_status_icon(m)} {m.mention}" for m in normal),
-                    inline=False,
-                )
-            else:
-                e.add_field(name="Muhhelfer – normal", value="– aktuell niemand –", inline=False)
+            e.add_field(
+                name="Muhhelfer – normal",
+                value=("\n".join(f"{_status_icon(m)} {m.mention}" for m in normal) if normal else "– aktuell niemand –"),
+                inline=False,
+            )
         elif tab == "schwer":
-            if schwer:
-                e.add_field(
-                    name="Muhhelfer – schwer",
-                    value="\n".join(f"{_status_icon(m)} {m.mention}" for m in schwer),
-                    inline=False,
-                )
-            else:
-                e.add_field(name="Muhhelfer – schwer", value="– aktuell niemand –", inline=False)
+            e.add_field(
+                name="Muhhelfer – schwer",
+                value=("\n".join(f"{_status_icon(m)} {m.mention}" for m in schwer) if schwer else "– aktuell niemand –"),
+                inline=False,
+            )
 
         e.set_footer(text=f"Letzte Aktualisierung: {self._now_str()}")
         e.timestamp = discord.utils.utcnow()
@@ -328,7 +321,7 @@ class TriggerPost(commands.Cog):
     # ====== Post/Edit Helper ======
     async def _post_or_edit(
         self,
-        channel: discord.TextChannel,
+        channel,
         embed: discord.Embed,
         msg_id: Optional[int],
         *,
@@ -392,7 +385,12 @@ class TriggerPost(commands.Cog):
             guild = interaction.guild
             if not guild:
                 return await interaction.response.send_message("⚠️ Nur im Server.", ephemeral=True)
-            embed = await self.parent._embed_columns(guild, interaction.user) if "Spaltenansicht" in (interaction.message.embeds[0].title if interaction.message.embeds else "") else await self.parent._embed_main(guild, interaction.user)
+            # Heuristik: Titel prüfen
+            title = interaction.message.embeds[0].title if interaction.message.embeds else ""
+            if "Spaltenansicht" in (title or ""):
+                embed = await self.parent._embed_columns(guild, interaction.user)
+            else:
+                embed = await self.parent._embed_main(guild, interaction.user)
             await interaction.response.edit_message(embed=embed, view=self)
 
     class ColumnsView(PingView):
@@ -405,7 +403,6 @@ class TriggerPost(commands.Cog):
             super().__init__(timeout=None)
             self.parent = parent
             self.with_role_button = with_role_button
-            # Standard-Tab = Übersicht
             self.current_tab = "overview"
 
         # Tabs
@@ -460,10 +457,6 @@ class TriggerPost(commands.Cog):
             if not link:
                 return await interaction.response.send_message("ℹ️ Kein Rollen-Link hinterlegt.", ephemeral=True)
             await interaction.response.send_message(f"🔗 Rollen holen: {link}", ephemeral=True)
-
-        async def on_timeout(self):
-            # persistente Views: nichts
-            pass
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             # Button „Rolle holen“ nur anzeigen, wenn with_role_button und rolesource vorhanden
@@ -528,7 +521,6 @@ class TriggerPost(commands.Cog):
                 return
             self._cooldown_until[ctx.channel.id] = now + cd
 
-        # Auto-Delete nur außerhalb Zielchannel
         is_target = ctx.channel.id == target_id
         autodelete_conf = int(data.get("autodelete_minutes") or 0)
         minutes_override = None
@@ -599,7 +591,6 @@ class TriggerPost(commands.Cog):
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
         is_offi = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
         if not (is_admin or is_offi):
-            # Member sehen nur Member/Offi-Teil (ohne Admin)
             e = await self._embed_commands(False)
             return await ctx.send(embed=e, view=self.CommandsView(self, show_admin=False))
         e = await self._embed_commands(False)
@@ -701,7 +692,6 @@ class TriggerPost(commands.Cog):
     async def rolesource_set(self, ctx: commands.Context, *, link_or_mention: str):
         """Akzeptiert Nachrichtenlink ODER Channel-Link/Mention."""
         link_or_mention = link_or_mention.strip()
-        # einfache Validierung: URL oder <#id>
         chan_match = re.match(r"<#(\d+)>", link_or_mention)
         url_match = re.match(r"https?://", link_or_mention)
         if not (chan_match or url_match):
@@ -848,7 +838,7 @@ class TriggerPost(commands.Cog):
         await self._post_or_edit(message.channel, embed, data["message_id"], target_id=target_id, view=view, intro_text=intro, identifier_for_cleanup="Muhhelfer – Übersicht")
 
     # ====== Auto-Refresh ======
-    @tasks.loop(seconds=30)  # per-Guild Intervallsteuerung
+    @tasks.loop(seconds=30)
     async def _auto_refresher(self):
         now = time.time()
         for guild in self.bot.guilds:
@@ -865,7 +855,7 @@ class TriggerPost(commands.Cog):
                 self._last_refresh_ts[guild.id] = now
 
                 channel = guild.get_channel(target_id)
-                if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.ForumChannel, discord.VoiceChannel)):
+                if channel is None:
                     continue
 
                 sig = self._signature_for_guild(guild)
