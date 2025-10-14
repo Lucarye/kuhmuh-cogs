@@ -1,4 +1,4 @@
-# triggerpost.py
+# triggerpost.py  —  Auto-Refresh postet NIE neu; editiert nur bestehende Nachricht
 import re
 import time
 from datetime import datetime
@@ -29,10 +29,10 @@ DEFAULT_GUILD = {
     "message_id": None,
     "cooldown_seconds": 30,
     "intro_text": "Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? <:muhkuh:1207038544510586890>:",
-    "autodelete_minutes": 10,             # Posts außerhalb Zielchannel werden nach X Minuten gelöscht (0 = aus)
-    "force_role_ping": True,              # Rolle kurzzeitig erwähnbar machen, wenn nötig (erfordert Manage Roles)
-    "auto_refresh_seconds": 0,            # 0 = aus
-    "rolesource_url": None,               # Optional: Link zu Rollen-Nachricht ODER Channel-URL/Mention
+    "autodelete_minutes": 10,
+    "force_role_ping": True,
+    "auto_refresh_seconds": 0,
+    "rolesource_url": None,
 }
 
 # ====== Status & Sortierung ======
@@ -74,9 +74,8 @@ class TriggerPost(commands.Cog):
         self.config = Config.get_conf(self, identifier=81521025, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
         self._cooldown_until = {}
-        self._last_signature: dict[int, str] = {}   # guild_id -> letzte Embed-Signatur
-        self._last_refresh_ts: dict[int, float] = {}  # guild_id -> letzter Auto-Refresh-Check
-        # Persistente Views registrieren
+        self._last_signature: dict[int, str] = {}
+        self._last_refresh_ts: dict[int, float] = {}
         try:
             self.bot.add_view(self.PingView(self))
             self.bot.add_view(self.ColumnsView(self))
@@ -113,34 +112,17 @@ class TriggerPost(commands.Cog):
             return ",".join(map(str, ids))
         return f"N:{sig_for_role(ROLE_NORMAL)}|S:{sig_for_role(ROLE_SCHWER)}"
 
-    async def _force_role_mention_once(
-        self,
-        *,
-        guild: discord.Guild,
-        channel,
-        role: discord.Role,
-        content: str,
-    ):
-        """Erzwingt Pings, wenn nötig (Rolle kurz mentionable setzen)."""
+    async def _force_role_mention_once(self, *, guild: discord.Guild, channel, role: discord.Role, content: str):
         me: discord.Member = guild.me  # type: ignore
         perms = channel.permissions_for(me)
         if perms.mention_everyone or role.mentionable:
-            return await channel.send(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
-            )
+            return await channel.send(content, allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False))
         can_manage = perms.manage_roles and (role.position < (me.top_role.position if me.top_role else 0))
         if not can_manage:
-            return await channel.send(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
-            )
+            return await channel.send(content, allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False))
         try:
             await role.edit(mentionable=True, reason="Force role ping (temporary)")
-            msg = await channel.send(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
-            )
+            msg = await channel.send(content, allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False))
         finally:
             try:
                 await role.edit(mentionable=False, reason="Force role ping (revert)")
@@ -158,17 +140,13 @@ class TriggerPost(commands.Cog):
         is_admin = user.guild_permissions.administrator or user.guild_permissions.manage_guild
         has_bypass = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(user, "roles", []))
 
-        # einfacher Kanal-Cooldown für Pings
         now = time.time()
         until = self._ping_cd_until.get(channel.id, 0)
         PING_CD = 60
         if not (is_admin or has_bypass):
             if now < until:
                 remaining = int(until - now)
-                return await interaction.response.send_message(
-                    f"⏱️ Bitte warte **{remaining}s**, bevor erneut gepingt wird.",
-                    ephemeral=True,
-                )
+                return await interaction.response.send_message(f"⏱️ Bitte warte **{remaining}s**.", ephemeral=True)
             self._ping_cd_until[channel.id] = now + PING_CD
 
         role = guild.get_role(role_id)
@@ -181,10 +159,7 @@ class TriggerPost(commands.Cog):
         if force_on:
             await self._force_role_mention_once(guild=guild, channel=channel, role=role, content=content)
         else:
-            await channel.send(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
-            )
+            await channel.send(content, allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False))
 
     # ====== Member-Listen ======
     @staticmethod
@@ -194,16 +169,13 @@ class TriggerPost(commands.Cog):
             return []
         members = [
             m for m in role.members
-            if getattr(m, "status", discord.Status.offline) in (
-                discord.Status.online, discord.Status.idle, discord.Status.dnd
-            )
+            if getattr(m, "status", discord.Status.offline) in (discord.Status.online, discord.Status.idle, discord.Status.dnd)
         ]
         members.sort(key=_sort_key)
         return members
 
     # ====== EMBEDS ======
     async def _embed_main(self, guild: discord.Guild, author: discord.Member, *, manual_info: Optional[str] = None, footer_note: Optional[str] = None):
-        """Mainlayout: Vollansicht mit Status-Icons."""
         normal = self._online_members(guild, ROLE_NORMAL)
         schwer = self._online_members(guild, ROLE_SCHWER)
 
@@ -227,7 +199,6 @@ class TriggerPost(commands.Cog):
         return e
 
     async def _embed_columns(self, guild: discord.Guild, author: discord.Member):
-        """Layout 1: Spaltenansicht (Normal/Schwer in je einem Field)."""
         normal = self._online_members(guild, ROLE_NORMAL)
         schwer = self._online_members(guild, ROLE_SCHWER)
 
@@ -247,7 +218,6 @@ class TriggerPost(commands.Cog):
         return e
 
     async def _embed_dashboard(self, guild: discord.Guild, tab: str):
-        """Layout 2/3: Dashboard mit Tabs (Übersicht | Normal | Schwer)."""
         normal = self._online_members(guild, ROLE_NORMAL)
         schwer = self._online_members(guild, ROLE_SCHWER)
         in_voice_n = sum(1 for m in normal if getattr(m, "voice", None))
@@ -261,42 +231,19 @@ class TriggerPost(commands.Cog):
         if tab == "overview":
             pass
         elif tab == "normal":
-            e.add_field(
-                name="Muhhelfer – normal",
-                value=("\n".join(f"{_status_icon(m)} {m.mention}" for m in normal) if normal else "– aktuell niemand –"),
-                inline=False,
-            )
+            e.add_field(name="Muhhelfer – normal", value=("\n".join(f"{_status_icon(m)} {m.mention}" for m in normal) if normal else "– aktuell niemand –"), inline=False)
         elif tab == "schwer":
-            e.add_field(
-                name="Muhhelfer – schwer",
-                value=("\n".join(f"{_status_icon(m)} {m.mention}" for m in schwer) if schwer else "– aktuell niemand –"),
-                inline=False,
-            )
+            e.add_field(name="Muhhelfer – schwer", value=("\n".join(f"{_status_icon(m)} {m.mention}" for m in schwer) if schwer else "– aktuell niemand –"), inline=False)
 
         e.set_footer(text=f"Letzte Aktualisierung: {self._now_str()}")
         e.timestamp = discord.utils.utcnow()
         return e
 
     async def _embed_commands(self, show_admin: bool):
-        """Layout 4: Befehlsübersicht (Embed)."""
-        e = discord.Embed(
-            title=f"{EMOJI_TITLE} Muhhelfer – Befehlsübersicht",
-            description="Tippe auf **Admin anzeigen**, um zusätzliche Befehle einzublenden.",
-            color=discord.Color.blue(),
-        )
+        e = discord.Embed(title=f"{EMOJI_TITLE} Muhhelfer – Befehlsübersicht", description="Tippe auf **Admin anzeigen**, um zusätzliche Befehle einzublenden.", color=discord.Color.blue())
         e.set_thumbnail(url=MUHKU_THUMBNAIL)
-
-        # Member
         e.add_field(name="Member", value="```\n°muhhelfer post [min]\n```", inline=False)
-
-        # Offizier/Admin
-        e.add_field(
-            name="Offizier / Admin",
-            value="```\n°muhhelfer addtrigger <text>\n°muhhelfer removetrigger <text>\n°muhhelfer list\n°muhhelfer refresh\n```",
-            inline=False,
-        )
-
-        # Admin (toggle)
+        e.add_field(name="Offizier / Admin", value="```\n°muhhelfer addtrigger <text>\n°muhhelfer removetrigger <text>\n°muhhelfer list\n°muhhelfer refresh\n```", inline=False)
         if show_admin:
             e.add_field(
                 name="Admin",
@@ -313,7 +260,6 @@ class TriggerPost(commands.Cog):
                 ),
                 inline=False,
             )
-
         e.set_footer(text=f"Letzte Aktualisierung: {self._now_str()}")
         e.timestamp = discord.utils.utcnow()
         return e
@@ -331,8 +277,13 @@ class TriggerPost(commands.Cog):
         intro_text: Optional[str] = None,
         cleanup_in_target: bool = True,
         identifier_for_cleanup: Optional[str] = None,
+        allow_create_if_missing: bool = True,   # <<< NEU: steuert, ob neu gepostet werden darf
     ) -> discord.Message:
-        """Postet/editiert Content. Im Zielchannel räumen wir optional alte Posts des Bots auf (identifier match im content)."""
+        """
+        Postet/editiert Content.
+        - Im Zielchannel können (optional) alte Bot-Posts mit bestimmtem Identifier entfernt werden.
+        - Wenn allow_create_if_missing=False, wird NICHT neu gepostet, falls die Ziel-Nachricht fehlt.
+        """
         content = intro_text or ""
         is_target = (target_id is not None) and (channel.id == target_id)
 
@@ -345,29 +296,33 @@ class TriggerPost(commands.Cog):
                     except discord.Forbidden:
                         pass
 
-        sent: Optional[discord.Message] = None
-        try:
-            if msg_id and is_target and view is not None:
+        # Versuche zu editieren, wenn msg_id existiert
+        if msg_id and is_target:
+            try:
                 old = await channel.fetch_message(int(msg_id))
                 await old.edit(content=content, embed=embed, view=view)
-                sent = old
-            else:
-                sent = await channel.send(content=content, embed=embed, view=view)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return old
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                if not allow_create_if_missing:
+                    # Keine Neuerstellung gewünscht → nichts tun
+                    raise
+
+        # Falls Neuanlage erlaubt (z. B. manuelle Posts/Trigger)
+        if allow_create_if_missing:
             sent = await channel.send(content=content, embed=embed, view=view)
+            # Auto-Delete (nur außerhalb Zielchannel)
+            if not is_target and autodelete_after_min and autodelete_after_min > 0:
+                try:
+                    await sent.delete(delay=autodelete_after_min * 60)
+                except Exception:
+                    pass
+            return sent
 
-        # Auto-Delete (nur außerhalb Zielchannel)
-        if not is_target and autodelete_after_min and autodelete_after_min > 0 and sent:
-            try:
-                await sent.delete(delay=autodelete_after_min * 60)
-            except Exception:
-                pass
-
-        return sent
+        # Nichts getan (Auto-Refresh ohne bestehende Nachricht)
+        raise RuntimeError("Auto-Refresh: Zielnachricht existiert nicht; kein Neuerstellen.")
 
     # ====== VIEWS ======
     class PingView(ui.View):
-        """Buttons: Normal/Schwer ping. Wird im Main & Columns genutzt."""
         def __init__(self, parent: "TriggerPost"):
             super().__init__(timeout=None)
             self.parent = parent
@@ -385,7 +340,6 @@ class TriggerPost(commands.Cog):
             guild = interaction.guild
             if not guild:
                 return await interaction.response.send_message("⚠️ Nur im Server.", ephemeral=True)
-            # Heuristik: Titel prüfen
             title = interaction.message.embeds[0].title if interaction.message.embeds else ""
             if "Spaltenansicht" in (title or ""):
                 embed = await self.parent._embed_columns(guild, interaction.user)
@@ -394,18 +348,15 @@ class TriggerPost(commands.Cog):
             await interaction.response.edit_message(embed=embed, view=self)
 
     class ColumnsView(PingView):
-        """Für Layout1 identisch zu PingView (Ping + Refresh)."""
         pass
 
     class DashboardView(ui.View):
-        """Layout 2/3: Tabs + kontextsensitive Ping-Buttons + optional Rollenbutton."""
         def __init__(self, parent: "TriggerPost", *, with_role_button: bool = False):
             super().__init__(timeout=None)
             self.parent = parent
             self.with_role_button = with_role_button
             self.current_tab = "overview"
 
-        # Tabs
         @ui.button(label="Übersicht", style=discord.ButtonStyle.secondary, custom_id="muh_tab_overview")
         async def tab_overview(self, interaction: discord.Interaction, _button: ui.Button):
             await self._switch_tab(interaction, "overview")
@@ -426,7 +377,6 @@ class TriggerPost(commands.Cog):
             embed = await self.parent._embed_dashboard(guild, tab)
             await interaction.response.edit_message(embed=embed, view=self)
 
-        # Kontextsensitive Ping-Buttons
         @ui.button(label="Normal pingen", style=discord.ButtonStyle.primary, emoji=EMOJI_NORMAL, custom_id="muh_dash_ping_normal")
         async def dash_ping_normal(self, interaction: discord.Interaction, _button: ui.Button):
             if self.current_tab != "normal":
@@ -447,7 +397,6 @@ class TriggerPost(commands.Cog):
             embed = await self.parent._embed_dashboard(guild, self.current_tab)
             await interaction.response.edit_message(embed=embed, view=self)
 
-        # Optionaler Rollenbutton (nur Layout 3)
         @ui.button(label="Rolle holen", style=discord.ButtonStyle.success, custom_id="muh_dash_rolebtn")
         async def role_button(self, interaction: discord.Interaction, _button: ui.Button):
             if not self.with_role_button:
@@ -459,14 +408,12 @@ class TriggerPost(commands.Cog):
             await interaction.response.send_message(f"🔗 Rollen holen: {link}", ephemeral=True)
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
-            # Button „Rolle holen“ nur anzeigen, wenn with_role_button und rolesource vorhanden
             for child in self.children:
                 if isinstance(child, ui.Button) and child.custom_id == "muh_dash_rolebtn":
                     child.disabled = not self.with_role_button
             return True
 
     class CommandsView(ui.View):
-        """Layout 4: Befehlsübersicht – Admin toggeln, ‚Alle Befehle (kopieren)‘ ephemer senden."""
         def __init__(self, parent: "TriggerPost", show_admin: bool = False):
             super().__init__(timeout=None)
             self.parent = parent
@@ -490,16 +437,14 @@ class TriggerPost(commands.Cog):
             )
             await interaction.response.send_message(txt, ephemeral=True)
 
-    # ====== COMMANDS: Main & Setup ======
+    # ====== COMMANDS ======
     @commands.guild_only()
     @commands.group(name="muhhelfer", aliases=["triggerpost"])
     async def muhhelfer(self, ctx: commands.Context):
-        """Muhhelfer-Tools und Konfiguration."""
         pass
 
     @muhhelfer.command(name="post")
     async def manual_post(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Mainlayout posten (Member im Zielchannel, Offiziere/Admins überall)."""
         guild = ctx.guild
         author = ctx.author
         data = await self.config.guild(guild).all()
@@ -538,22 +483,16 @@ class TriggerPost(commands.Cog):
             manual_info = f"manuell ausgelöst von {author.display_name}"
 
         embed = await self._embed_main(guild, author, manual_info=manual_info, footer_note=footer_note)
-        intro = (f"{data.get('intro_text')}\n\n{EMOJI_TITLE} Muhhelfer – Übersicht:" if data.get("intro_text")
-                 else f"{EMOJI_TITLE} Muhhelfer – Übersicht:")
+        intro = (f"{data.get('intro_text')}\n\n{EMOJI_TITLE} Muhhelfer – Übersicht:" if data.get("intro_text") else f"{EMOJI_TITLE} Muhhelfer – Übersicht:")
         view = self.PingView(self)
         await self._post_or_edit(
-            ctx.channel,
-            embed,
-            data["message_id"],
-            target_id=target_id,
-            autodelete_after_min=autodel,
-            view=view,
-            intro_text=intro,
-            identifier_for_cleanup="Muhhelfer – Übersicht",
+            ctx.channel, embed, data["message_id"],
+            target_id=target_id, autodelete_after_min=autodel, view=view,
+            intro_text=intro, identifier_for_cleanup="Muhhelfer – Übersicht",
+            allow_create_if_missing=True,   # manuell: darf neu posten
         )
         await ctx.send("✅ Muhhelfer-Nachricht gepostet.", delete_after=5)
 
-    # Trigger-Verwaltung
     @muhhelfer.command(name="addtrigger")
     async def add_trigger(self, ctx: commands.Context, *, phrase: str):
         author = ctx.author
@@ -586,7 +525,6 @@ class TriggerPost(commands.Cog):
 
     @muhhelfer.command(name="list")
     async def list_triggers(self, ctx: commands.Context):
-        """Zeigt (neu) das Befehls-Embed (Layout 4) statt Textwand."""
         author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
         is_offi = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
@@ -610,87 +548,23 @@ class TriggerPost(commands.Cog):
         channel = ctx.guild.get_channel(target_id)
         embed = await self._embed_main(ctx.guild, ctx.author)
         view = self.PingView(self)
-        await self._post_or_edit(channel, embed, data["message_id"], target_id=target_id, view=view, intro_text=f"{EMOJI_TITLE} Muhhelfer – Übersicht:", identifier_for_cleanup="Muhhelfer – Übersicht")
+        await self._post_or_edit(
+            channel, embed, data["message_id"],
+            target_id=target_id, view=view,
+            intro_text=f"{EMOJI_TITLE} Muhhelfer – Übersicht:",
+            identifier_for_cleanup="Muhhelfer – Übersicht",
+            allow_create_if_missing=True,   # refresh per Command: darf neu posten
+        )
         await ctx.send("✅ Muhhelfer-Liste aktualisiert.", delete_after=5)
 
-    # Admin/Setup
-    @muhhelfer.command(name="setchannel")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_channel(self, ctx: commands.Context, channel: discord.TextChannel = None):
-        if not channel:
-            return await ctx.send("⚠️ Bitte gib einen Channel an.")
-        await self.config.guild(ctx.guild).target_channel_id.set(channel.id)
-        await ctx.send(f"📍 Ziel-Channel gesetzt: {channel.mention}")
-
-    @muhhelfer.command(name="setmessage")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_message(self, ctx: commands.Context, message_id: int = None):
-        await self.config.guild(ctx.guild).message_id.set(message_id)
-        await ctx.send(f"🧷 Message-ID gesetzt: `{message_id}`")
-
-    @muhhelfer.command(name="cooldown")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_cooldown(self, ctx: commands.Context, seconds: int):
-        if seconds < 0 or seconds > 3600:
-            return await ctx.send("⚠️ Bitte 0–3600 Sekunden.")
-        await self.config.guild(ctx.guild).cooldown_seconds.set(seconds)
-        await ctx.send(f"⏱️ Cooldown gesetzt: {seconds}s")
-
-    @muhhelfer.command(name="intro")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_intro(self, ctx: commands.Context, *, text: str = None):
-        if not text:
-            intro = await self.config.guild(ctx.guild).intro_text()
-            return await ctx.send(f"📜 Aktuell: {intro or '— kein Text —'}")
-        if text.lower() in ("clear", "none", "off"):
-            await self.config.guild(ctx.guild).intro_text.set(None)
-            return await ctx.send("🧹 Intro gelöscht.")
-        await self.config.guild(ctx.guild).intro_text.set(text)
-        await ctx.send(f"✅ Intro gesetzt auf:\n> {text}")
-
-    @muhhelfer.command(name="autodelete")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_autodelete(self, ctx: commands.Context, minutes: int):
-        if minutes < 0 or minutes > 1440:
-            return await ctx.send("⚠️ Bitte 0–1440 Minuten.")
-        await self.config.guild(ctx.guild).autodelete_minutes.set(minutes)
-        await ctx.send(f"🗑️ Auto-Delete (außerhalb Zielchannel): **{minutes} min**")
-
-    @muhhelfer.command(name="forceping")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_forceping(self, ctx: commands.Context, state: str):
-        state_l = (state or "").strip().lower()
-        if state_l not in {"on", "off"}:
-            return await ctx.send("⚠️ Nutzung: `°muhhelfer forceping on` oder `off`")
-        await self.config.guild(ctx.guild).force_role_ping.set(state_l == "on")
-        await ctx.send(f"🔧 force_role_ping: **{state_l}**")
-
-    @muhhelfer.command(name="autorefresh")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_autorefresh(self, ctx: commands.Context, seconds: str):
-        s = (seconds or "").strip().lower()
-        if s in {"off", "0"}:
-            await self.config.guild(ctx.guild).auto_refresh_seconds.set(0)
-            return await ctx.send("🛑 Auto-Refresh: **aus**")
-        try:
-            val = int(s)
-        except ValueError:
-            return await ctx.send("⚠️ Zahl in Sekunden oder `off` angeben.")
-        if val < 60 or val > 3600:
-            return await ctx.send("⚠️ Bitte zwischen **60** und **3600** Sekunden wählen.")
-        await self.config.guild(ctx.guild).auto_refresh_seconds.set(val)
-        await ctx.send(f"🔁 Auto-Refresh: **alle {val}s** (nur Zielchannel, nur bei Änderungen).")
-
-    # ====== Role-Source (für Layout 3) ======
+    # ====== Role-Source ======
     @muhhelfer.group(name="rolesource")
     @commands.admin_or_permissions(manage_guild=True)
     async def rolesource(self, ctx: commands.Context):
-        """Rollen-Quelle für ‚Rolle holen‘-Button setzen/anzeigen/löschen."""
         pass
 
     @rolesource.command(name="set")
     async def rolesource_set(self, ctx: commands.Context, *, link_or_mention: str):
-        """Akzeptiert Nachrichtenlink ODER Channel-Link/Mention."""
         link_or_mention = link_or_mention.strip()
         chan_match = re.match(r"<#(\d+)>", link_or_mention)
         url_match = re.match(r"https?://", link_or_mention)
@@ -712,59 +586,49 @@ class TriggerPost(commands.Cog):
     # ====== TEST-LAYOUTS ======
     @muhhelfer.group(name="test")
     async def test_layouts(self, ctx: commands.Context):
-        """Test-Layouts posten (beeinflusst Main nicht)."""
         pass
 
     @test_layouts.command(name="layout1")
     async def test_layout1(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Layout 1 – Spaltenansicht."""
         embed = await self._embed_columns(ctx.guild, ctx.author)
         view = self.ColumnsView(self)
         await self._post_or_edit(
             ctx.channel, embed, None, target_id=None, autodelete_after_min=minutes, view=view,
-            intro_text=f"{EMOJI_TITLE} Muhhelfer – Spaltenansicht:",
-            cleanup_in_target=False
+            intro_text=f"{EMOJI_TITLE} Muhhelfer – Spaltenansicht:", cleanup_in_target=False
         )
 
     @test_layouts.command(name="layout2")
     async def test_layout2(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Layout 2 – Dashboard (ohne Rollenbutton)."""
         embed = await self._embed_dashboard(ctx.guild, "overview")
         view = self.DashboardView(self, with_role_button=False)
         await self._post_or_edit(
             ctx.channel, embed, None, target_id=None, autodelete_after_min=minutes, view=view,
-            intro_text=f"{EMOJI_TITLE} Muhhelfer – Dashboard:",
-            cleanup_in_target=False
+            intro_text=f"{EMOJI_TITLE} Muhhelfer – Dashboard:", cleanup_in_target=False
         )
 
     @test_layouts.command(name="layout3")
     async def test_layout3(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Layout 3 – Dashboard + Rollenbutton (nutzt gespeicherte rolesource)."""
         data = await self.config.guild(ctx.guild).all()
         has_link = bool(data.get("rolesource_url"))
         embed = await self._embed_dashboard(ctx.guild, "overview")
         view = self.DashboardView(self, with_role_button=has_link)
         await self._post_or_edit(
             ctx.channel, embed, None, target_id=None, autodelete_after_min=minutes, view=view,
-            intro_text=f"{EMOJI_TITLE} Muhhelfer – Dashboard:",
-            cleanup_in_target=False
+            intro_text=f"{EMOJI_TITLE} Muhhelfer – Dashboard:", cleanup_in_target=False
         )
 
     @test_layouts.command(name="layout4")
     async def test_layout4(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Layout 4 – Befehlsübersicht (Embed mit Buttons)."""
         embed = await self._embed_commands(show_admin=False)
         view = self.CommandsView(self, show_admin=False)
         await self._post_or_edit(
             ctx.channel, embed, None, target_id=None, autodelete_after_min=minutes, view=view,
-            intro_text=f"{EMOJI_TITLE} Muhhelfer – Befehlsübersicht:",
-            cleanup_in_target=False
+            intro_text=f"{EMOJI_TITLE} Muhhelfer – Befehlsübersicht:", cleanup_in_target=False
         )
 
-    # Alle Layouts auf einmal posten (1..n)
+    # ====== Layout-Verwaltung ======
     @muhhelfer.group(name="layouts")
     async def layouts(self, ctx: commands.Context):
-        """Layout-Funktionen (Liste, alle posten)."""
         pass
 
     @layouts.command(name="postall")
@@ -776,7 +640,6 @@ class TriggerPost(commands.Cog):
 
     @muhhelfer.command(name="layout")
     async def layout_single(self, ctx: commands.Context, sub: str = None):
-        """Alias: °muhhelfer layout list"""
         if (sub or "").lower() == "list":
             await self.layout_list(ctx)
         else:
@@ -832,12 +695,15 @@ class TriggerPost(commands.Cog):
             self._cooldown_until[message.channel.id] = now + cd
 
         embed = await self._embed_main(guild, author)
-        intro = (f"{data.get('intro_text')}\n\n{EMOJI_TITLE} Muhhelfer – Übersicht:" if data.get("intro_text")
-                 else f"{EMOJI_TITLE} Muhhelfer – Übersicht:")
+        intro = (f"{data.get('intro_text')}\n\n{EMOJI_TITLE} Muhhelfer – Übersicht:" if data.get("intro_text") else f"{EMOJI_TITLE} Muhhelfer – Übersicht:")
         view = self.PingView(self)
-        await self._post_or_edit(message.channel, embed, data["message_id"], target_id=target_id, view=view, intro_text=intro, identifier_for_cleanup="Muhhelfer – Übersicht")
+        await self._post_or_edit(
+            message.channel, embed, data["message_id"], target_id=target_id, view=view,
+            intro_text=intro, identifier_for_cleanup="Muhhelfer – Übersicht",
+            allow_create_if_missing=True,   # Trigger: darf neu posten
+        )
 
-    # ====== Auto-Refresh ======
+    # ====== Auto-Refresh (editiert nur, erstellt nie neu) ======
     @tasks.loop(seconds=30)
     async def _auto_refresher(self):
         now = time.time()
@@ -846,7 +712,8 @@ class TriggerPost(commands.Cog):
                 data = await self.config.guild(guild).all()
                 interval = int(data.get("auto_refresh_seconds") or 0)
                 target_id = data.get("target_channel_id")
-                if not interval or not target_id:
+                message_id = data.get("message_id")
+                if not interval or not target_id or not message_id:
                     continue
 
                 last_ts = self._last_refresh_ts.get(guild.id, 0.0)
@@ -858,15 +725,32 @@ class TriggerPost(commands.Cog):
                 if channel is None:
                     continue
 
+                # prüfe, ob die Zielnachricht existiert – sonst KEIN neuer Post
+                try:
+                    await channel.fetch_message(int(message_id))
+                except Exception:
+                    # Nachricht existiert nicht -> Auto-Refresh überspringen
+                    continue
+
                 sig = self._signature_for_guild(guild)
                 if self._last_signature.get(guild.id) == sig:
                     continue
 
-                author = guild.me  # Footer
+                author = guild.me
                 embed = await self._embed_main(guild, author)  # type: ignore
                 view = self.PingView(self)
-                await self._post_or_edit(channel, embed, data["message_id"], target_id=target_id, view=view, intro_text=f"{EMOJI_TITLE} Muhhelfer – Übersicht:", identifier_for_cleanup="Muhhelfer – Übersicht")
-                self._last_signature[guild.id] = sig
+                try:
+                    await self._post_or_edit(
+                        channel, embed, message_id,
+                        target_id=target_id, view=view,
+                        intro_text=f"{EMOJI_TITLE} Muhhelfer – Übersicht:",
+                        identifier_for_cleanup="Muhhelfer – Übersicht",
+                        allow_create_if_missing=False,  # <<< WICHTIG: nie neu erstellen
+                    )
+                    self._last_signature[guild.id] = sig
+                except Exception:
+                    # nichts tun – Regel: kein Neupost beim Auto-Refresh
+                    pass
             except Exception:
                 continue
 
