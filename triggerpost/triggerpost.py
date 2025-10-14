@@ -1,71 +1,43 @@
-# triggerpost.py
-import re
+from __future__ import annotations
+
 import time
-from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Tuple
 
 import discord
 from discord import ui, AllowedMentions
-from discord.ext import tasks
 from redbot.core import commands, Config
 from redbot.core.bot import Red
+
 
 # ====== Server-spezifische IDs ======
 ROLE_NORMAL = 1424768638157852682            # Muhhelfer – Normal
 ROLE_SCHWER = 1424769286790054050            # Muhhelfer – Schwer
 ROLE_OFFIZIERE_BYPASS = 1198652039312453723  # Offiziere: Bypass + erweiterte Rechte
 
-# Custom Emojis
-EMOJI_TITLE = "<:muhkuh:1207038544510586890>"
+# ====== Emojis / Visuals ======
+EMOJI_TITLE = "<:muhkuh:1207038544510586890>"  # Titel-Emoji (mit ID)
 EMOJI_NORMAL = discord.PartialEmoji(name="muh_normal", id=1424467460228124803)
 EMOJI_SCHWER = discord.PartialEmoji(name="muh_schwer", id=1424467458118647849)
 
 # Muhkuh-Bild (Thumbnail oben rechts)
 MUHKU_THUMBNAIL = "https://cdn.discordapp.com/attachments/1404063753946796122/1404063845491671160/muhku.png?ex=68e8451b&is=68e6f39b&hm=92c4de08b4562cdb9779ffaf1177dfa141515658028cd9335a29f2670618c9c0&"
 
+# ====== Default-Config ======
 DEFAULT_GUILD = {
     "triggers": ["hilfe"],
     "target_channel_id": None,
     "message_id": None,
     "cooldown_seconds": 30,
-    "intro_text": "Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? <:muhkuh:1207038544510586890>:",
-    "autodelete_minutes": 10,             # Posts außerhalb Zielchannel werden nach X Minuten gelöscht (0 = aus)
-    "force_role_ping": True,              # Rolle kurzzeitig erwähnbar machen, wenn nötig (erfordert Manage Roles)
-    "auto_refresh_seconds": 0,            # 0 = aus
-    "rolesource_url": None,               # Optional: Link zu Rollen-Nachricht ODER Channel-URL/Mention
+    "intro_text": f"Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? {EMOJI_TITLE}:",
+    "autodelete_minutes": 10,   # Posts außerhalb des Zielchannels werden nach X Minuten gelöscht (0 = aus)
+    "layout_mode": 1            # 1=Standard, 2=Kompakt, 3=Event, 4=Admin/Debug
 }
 
-# ====== Status & Sortierung ======
-def _status_icon(member: discord.Member) -> str:
-    st = getattr(member, "status", discord.Status.offline)
-    if st is discord.Status.online:
-        base = "🟢"
-    elif st is discord.Status.idle:
-        base = "🟠"
-    elif st is discord.Status.dnd:
-        base = "🔴"
-    else:
-        base = "⚫"
-    in_voice = bool(getattr(member, "voice", None))
-    return ("🎙️" if in_voice else "") + base
-
-def _sort_key(member: discord.Member):
-    in_voice = bool(getattr(member, "voice", None))
-    st = getattr(member, "status", discord.Status.offline)
-    voice_rank = 0 if in_voice else 1
-    if st is discord.Status.online:
-        st_rank = 0
-    elif st is discord.Status.idle:
-        st_rank = 1
-    elif st is discord.Status.dnd:
-        st_rank = 2
-    else:
-        st_rank = 3
-    return (voice_rank, st_rank, member.display_name.lower())
+PING_COOLDOWN_SECONDS = 60  # Button-Ping-Cooldown pro Channel (nicht für Offiziere/Admins)
 
 
 class TriggerPost(commands.Cog):
-    """Muhhelfer-System: Trigger, Main-Embed, Test-Layouts, Buttons, Auto-Refresh, Role-Source-Link."""
+    """Muhhelfer-System mit Triggern, Embed, Buttons und Pings (nur Präfix-Befehle, keine DMs/Threads)."""
 
     _ping_cd_until: dict[int, float] = {}
 
@@ -73,259 +45,223 @@ class TriggerPost(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=81521025, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
-        self._cooldown_until = {}
-        self._last_signature: dict[int, str] = {}   # guild_id -> letzte Embed-Signatur
-        self._last_refresh_ts: dict[int, float] = {}  # guild_id -> letzter Auto-Refresh-Check
-        # Persistente Views registrieren
-        try:
-            self.bot.add_view(self.PingView(self))
-            self.bot.add_view(self.ColumnsView(self))
-            self.bot.add_view(self.DashboardView(self))
-            self.bot.add_view(self.CommandsView(self))
-        except Exception:
-            pass
-        self._auto_refresher.start()
+        self._cooldown_until: dict[int, float] = {}
 
-    def cog_unload(self):
+    # ---------------- Lifecycle: Views sicher registrieren ----------------
+    async def cog_load(self) -> None:
         try:
-            self._auto_refresher.cancel()
+            self.bot.add_view(self._PingView(self))
         except Exception:
+            # Wenn Red gerade keine Views akzeptiert (z. B. beim Reload), stillschweigend ignorieren.
             pass
 
-    # ====== Utility ======
-    @staticmethod
-    def _now_str() -> str:
-        return datetime.now().strftime("%d.%m.%Y, %H:%M")
+    # ---------------- Persistente Buttons ----------------
+    class _PingView(ui.View):
+        def __init__(self, parent: "TriggerPost"):
+            super().__init__(timeout=None)
+            self.parent = parent
 
-    def _signature_for_guild(self, guild: discord.Guild) -> str:
-        def sig_for_role(role_id: int):
-            role = guild.get_role(role_id)
-            if not role:
-                return ""
-            mems = [
-                m for m in role.members
-                if getattr(m, "status", discord.Status.offline) in (
-                    discord.Status.online, discord.Status.idle, discord.Status.dnd
-                )
-            ]
-            mems.sort(key=_sort_key)
-            ids = [m.id for m in mems]
-            return ",".join(map(str, ids))
-        return f"N:{sig_for_role(ROLE_NORMAL)}|S:{sig_for_role(ROLE_SCHWER)}"
+        @ui.button(
+            label="Muhhelfer – normal ping",
+            style=discord.ButtonStyle.primary,
+            emoji=EMOJI_NORMAL,
+            custom_id="muh_ping_normal",
+        )
+        async def ping_normal(self, interaction: discord.Interaction, button: ui.Button):
+            await self.parent._handle_ping(interaction, ROLE_NORMAL, "Muhhelfer – normal")
 
-    async def _force_role_mention_once(
-        self,
-        *,
-        guild: discord.Guild,
-        channel: discord.abc.MessageableChannel,
-        role: discord.Role,
-        content: str,
-    ):
-        """Erzwingt Pings, wenn nötig (Rolle kurz mentionable setzen)."""
-        me: discord.Member = guild.me  # type: ignore
-        perms = channel.permissions_for(me)
-        if perms.mention_everyone or role.mentionable:
-            return await channel.send(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
-            )
-        can_manage = perms.manage_roles and (role.position < (me.top_role.position if me.top_role else 0))
-        if not can_manage:
-            return await channel.send(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
-            )
-        try:
-            await role.edit(mentionable=True, reason="Force role ping (temporary)")
-            msg = await channel.send(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
-            )
-        finally:
-            try:
-                await role.edit(mentionable=False, reason="Force role ping (revert)")
-            except Exception:
-                pass
-        return msg
+        @ui.button(
+            label="Muhhelfer – schwer ping",
+            style=discord.ButtonStyle.danger,
+            emoji=EMOJI_SCHWER,
+            custom_id="muh_ping_schwer",
+        )
+        async def ping_schwer(self, interaction: discord.Interaction, button: ui.Button):
+            await self.parent._handle_ping(interaction, ROLE_SCHWER, "Muhhelfer – schwer")
 
-    async def _handle_ping_button(self, interaction: discord.Interaction, role_id: int):
+    async def _handle_ping(self, interaction: discord.Interaction, role_id: int, label: str):
+        # Keine DMs/Threads unterstützen – nur Guild TextChannels
         channel = interaction.channel
         guild = interaction.guild
         user = interaction.user
-        if not channel or not guild:
-            return await interaction.response.send_message("⚠️ Nur in Server-Channels nutzbar.", ephemeral=True)
+        if not isinstance(channel, discord.TextChannel) or not guild:
+            try:
+                await interaction.response.send_message("⚠️ Nur in Server-Textkanälen nutzbar.", ephemeral=True)
+            except discord.HTTPException:
+                await interaction.followup.send("⚠️ Nur in Server-Textkanälen nutzbar.", ephemeral=True)
+            return
 
         is_admin = user.guild_permissions.administrator or user.guild_permissions.manage_guild
         has_bypass = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(user, "roles", []))
 
-        # einfacher Kanal-Cooldown für Pings
         now = time.time()
         until = self._ping_cd_until.get(channel.id, 0)
-        PING_CD = 60
         if not (is_admin or has_bypass):
             if now < until:
                 remaining = int(until - now)
-                return await interaction.response.send_message(
-                    f"⏱️ Bitte warte **{remaining}s**, bevor erneut gepingt wird.",
-                    ephemeral=True,
-                )
-            self._ping_cd_until[channel.id] = now + PING_CD
+                try:
+                    await interaction.response.send_message(
+                        f"⏱️ Bitte warte **{remaining}s**, bevor erneut gepingt wird.",
+                        ephemeral=True,
+                    )
+                except discord.HTTPException:
+                    await interaction.followup.send(
+                        f"⏱️ Bitte warte **{remaining}s**, bevor erneut gepingt wird.",
+                        ephemeral=True,
+                    )
+                return
+            self._ping_cd_until[channel.id] = now + PING_COOLDOWN_SECONDS
 
-        role = guild.get_role(role_id)
-        if not role:
-            return await interaction.response.send_message("⚠️ Rolle nicht gefunden.", ephemeral=True)
-
-        content = f"🔔 {role.mention} – angefragt von {user.mention}"
-        await interaction.response.defer(ephemeral=False, thinking=False)
-        force_on = await self.config.guild(guild).force_role_ping()
-        if force_on:
-            await self._force_role_mention_once(guild=guild, channel=channel, role=role, content=content)
-        else:
-            await channel.send(
-                content,
-                allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False),
+        role_mention = f"<@&{role_id}>"
+        content = f"🔔 {role_mention} – angefragt von {user.mention}"
+        try:
+            await interaction.response.send_message(
+                content, allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False)
+            )
+        except discord.HTTPException:
+            await interaction.followup.send(
+                content, allowed_mentions=AllowedMentions(roles=True, users=True, everyone=False)
             )
 
-    # ====== Member-Listen ======
-    @staticmethod
-    def _online_members(guild: discord.Guild, role_id: int):
+    # ---------------- Helpers: Daten & Layout ----------------
+    async def _fetch_members_by_role(self, guild: discord.Guild, role_id: int) -> List[discord.Member]:
         role = guild.get_role(role_id)
         if not role:
             return []
+        # Optional: Presence/Member-Intents nötig für Status; wir filtern auf sichtbar aktiv
         members = [
             m for m in role.members
             if getattr(m, "status", discord.Status.offline) in (
                 discord.Status.online, discord.Status.idle, discord.Status.dnd
             )
         ]
-        members.sort(key=_sort_key)
+        members.sort(key=lambda x: x.display_name.lower())
         return members
 
-    # ====== EMBEDS ======
-    async def _embed_main(self, guild: discord.Guild, author: discord.Member, *, manual_info: Optional[str] = None, footer_note: Optional[str] = None):
-        """Mainlayout: Vollansicht mit Status-Icons."""
-        normal = self._online_members(guild, ROLE_NORMAL)
-        schwer = self._online_members(guild, ROLE_SCHWER)
+    def _fmt_section(self, title: str, members: List[discord.Member], show_count: bool = True) -> Tuple[str, str]:
+        count = len(members)
+        head = f"**{title} ({count})**" if show_count else f"**{title}**"
+        if count == 0:
+            body = "– aktuell niemand –"
+        else:
+            body = "\n".join(m.mention for m in members)
+        return head, body
 
-        def render(name, members):
-            if not members:
-                return f"{name}:\n– aktuell niemand –"
-            return f"{name}:\n" + "\n".join(f"{_status_icon(m)} {m.mention}" for m in members)
+    async def _build_embed(
+        self,
+        guild: discord.Guild,
+        author: discord.Member,
+        *,
+        manual_info: Optional[str] = None,
+        footer_note: Optional[str] = None,
+        mode: int = 1,
+        intro_text: Optional[str] = None
+    ) -> discord.Embed:
 
-        desc = f"{render('Muhhelfer – normal', normal)}\n\n{render('Muhhelfer – schwer', schwer)}"
-        title_text = f"{EMOJI_TITLE} Muhhelfer – Übersicht"
-        if manual_info:
-            title_text += f"\n*({manual_info})*"
-
-        e = discord.Embed(title=title_text, description=desc, color=discord.Color.blue())
-        e.set_thumbnail(url=MUHKU_THUMBNAIL)
-        foot = f"Angefragt von: {author.display_name} • Letzte Aktualisierung: {self._now_str()}"
-        if footer_note:
-            foot += f" • {footer_note}"
-        e.set_footer(text=foot)
-        e.timestamp = discord.utils.utcnow()
-        return e
-
-    async def _embed_columns(self, guild: discord.Guild, author: discord.Member):
-        """Layout 1: Spaltenansicht (Normal/Schwer in je einem Field)."""
-        normal = self._online_members(guild, ROLE_NORMAL)
-        schwer = self._online_members(guild, ROLE_SCHWER)
-
-        def block(members):
-            if not members:
-                return "– aktuell niemand –"
-            return "\n".join(f"{_status_icon(m)} {m.mention}" for m in members)
-
-        title = f"{EMOJI_TITLE} Muhhelfer – Spaltenansicht"
-        e = discord.Embed(title=title, color=discord.Color.blue())
-        e.description = f"**Normal:** {len(normal)} • **Schwer:** {len(schwer)}"
-        e.set_thumbnail(url=MUHKU_THUMBNAIL)
-        e.add_field(name="Muhhelfer – normal", value=block(normal), inline=True)
-        e.add_field(name="Muhhelfer – schwer", value=block(schwer), inline=True)
-        e.set_footer(text=f"Letzte Aktualisierung: {self._now_str()}")
-        e.timestamp = discord.utils.utcnow()
-        return e
-
-    async def _embed_dashboard(self, guild: discord.Guild, tab: str):
-        """Layout 2/3: Dashboard mit Tabs (Übersicht | Normal | Schwer)."""
-        normal = self._online_members(guild, ROLE_NORMAL)
-        schwer = self._online_members(guild, ROLE_SCHWER)
-        in_voice_n = sum(1 for m in normal if getattr(m, "voice", None))
-        in_voice_s = sum(1 for m in schwer if getattr(m, "voice", None))
-
-        title = f"{EMOJI_TITLE} Muhhelfer – Dashboard"
-        head = f"📊 **Normal:** {len(normal)} online • **Schwer:** {len(schwer)} online • 🎙️ Voice: N {in_voice_n} | S {in_voice_s}"
-        e = discord.Embed(title=title, description=head, color=discord.Color.blue())
-        e.set_thumbnail(url=MUHKU_THUMBNAIL)
-
-        if tab == "overview":
-            # nur Kopf
+        try:
+            await guild.chunk()
+        except Exception:
             pass
-        elif tab == "normal":
-            if normal:
-                e.add_field(
-                    name="Muhhelfer – normal",
-                    value="\n".join(f"{_status_icon(m)} {m.mention}" for m in normal),
-                    inline=False,
-                )
+
+        normal = await self._fetch_members_by_role(guild, ROLE_NORMAL)
+        schwer = await self._fetch_members_by_role(guild, ROLE_SCHWER)
+
+        # Shared header
+        base_title = f"{EMOJI_TITLE} Muhhelfer – Übersicht"
+        title = base_title
+        if manual_info:
+            # Kursive Zusatzzeile unter dem Titel: wird später als erste Zeile in description eingefügt
+            pass
+
+        # ---------------- Layout switch ----------------
+        if mode == 1:
+            # Standard
+            embed = discord.Embed(color=discord.Color.blue())
+            embed.title = title
+
+            desc_parts = []
+            if intro_text:
+                desc_parts.append(intro_text)
+
+            if manual_info:
+                desc_parts.append(f"*({manual_info})*")
+
+            head1, body1 = self._fmt_section("Muhhelfer – normal", normal, True)
+            head2, body2 = self._fmt_section("Muhhelfer – schwer", schwer, True)
+            desc_parts.append(f"{head1}\n{body1}")
+            desc_parts.append(f"{head2}\n{body2}")
+
+            embed.description = "\n\n".join(desc_parts)
+            embed.set_thumbnail(url=MUHKU_THUMBNAIL)
+
+        elif mode == 2:
+            # Kompakt
+            embed = discord.Embed(color=discord.Color.light_grey())
+            embed.title = title
+
+            lines = []
+            if manual_info:
+                lines.append(f"*({manual_info})*")
+
+            n_count = len(normal)
+            s_count = len(schwer)
+            n_text = "– aktuell niemand –" if n_count == 0 else ", ".join(m.mention for m in normal)
+            s_text = "– aktuell niemand –" if s_count == 0 else ", ".join(m.mention for m in schwer)
+            lines.append(f"• **Normal ({n_count})**: {n_text}")
+            lines.append(f"• **Schwer ({s_count})**: {s_text}")
+
+            embed.description = "\n".join(lines)
+
+        elif mode == 3:
+            # Event
+            embed = discord.Embed(color=discord.Color.orange())
+            embed.title = f"🎉 {title}"
+
+            desc_parts = []
+            if intro_text:
+                desc_parts.append(f"**Event-Ping!**\n{intro_text}")
             else:
-                e.add_field(name="Muhhelfer – normal", value="– aktuell niemand –", inline=False)
-        elif tab == "schwer":
-            if schwer:
-                e.add_field(
-                    name="Muhhelfer – schwer",
-                    value="\n".join(f"{_status_icon(m)} {m.mention}" for m in schwer),
-                    inline=False,
-                )
-            else:
-                e.add_field(name="Muhhelfer – schwer", value="– aktuell niemand –", inline=False)
+                desc_parts.append("**Event-Ping!**")
 
-        e.set_footer(text=f"Letzte Aktualisierung: {self._now_str()}")
-        e.timestamp = discord.utils.utcnow()
-        return e
+            if manual_info:
+                desc_parts.append(f"*({manual_info})*")
 
-    async def _embed_commands(self, show_admin: bool):
-        """Layout 4: Befehlsübersicht (Embed)."""
-        e = discord.Embed(
-            title=f"{EMOJI_TITLE} Muhhelfer – Befehlsübersicht",
-            description="Tippe auf **Admin anzeigen**, um zusätzliche Befehle einzublenden.",
-            color=discord.Color.blue(),
-        )
-        e.set_thumbnail(url=MUHKU_THUMBNAIL)
+            head1, body1 = self._fmt_section("Muhhelfer – NORMAL", normal, True)
+            head2, body2 = self._fmt_section("Muhhelfer – SCHWER", schwer, True)
+            desc_parts.append(f"{head1}\n{body1}")
+            desc_parts.append(f"{head2}\n{body2}")
+            embed.description = "\n\n".join(desc_parts)
+            embed.set_thumbnail(url=MUHKU_THUMBNAIL)
 
-        # Member
-        e.add_field(name="Member", value="```\n°muhhelfer post [min]\n```", inline=False)
+        else:
+            # Admin/Debug (4)
+            embed = discord.Embed(color=discord.Color.dark_grey())
+            embed.title = f"{title} • Admin/Debug"
 
-        # Offizier/Admin
-        e.add_field(
-            name="Offizier / Admin",
-            value="```\n°muhhelfer addtrigger <text>\n°muhhelfer removetrigger <text>\n°muhhelfer list\n°muhhelfer refresh\n```",
-            inline=False,
-        )
+            # Namen statt Mentions
+            n_names = [m.display_name for m in normal]
+            s_names = [m.display_name for m in schwer]
+            n_count = len(n_names)
+            s_count = len(s_names)
+            n_text = "– aktuell niemand –" if n_count == 0 else ", ".join(n_names)
+            s_text = "– aktuell niemand –" if s_count == 0 else ", ".join(s_names)
 
-        # Admin (toggle)
-        if show_admin:
-            e.add_field(
-                name="Admin",
-                value=(
-                    "```\n"
-                    "°muhhelfer setchannel #channel\n"
-                    "°muhhelfer setmessage <id>\n"
-                    "°muhhelfer cooldown <sek>\n"
-                    "°muhhelfer intro <text|clear>\n"
-                    "°muhhelfer autodelete <min>\n"
-                    "°muhhelfer forceping on|off\n"
-                    "°muhhelfer autorefresh <sek|off>\n"
-                    "```"
-                ),
-                inline=False,
-            )
+            desc_parts = []
+            if manual_info:
+                desc_parts.append(f"*({manual_info})*")
+            desc_parts.append(f"**Normal ({n_count})**: {n_text}")
+            desc_parts.append(f"**Schwer ({s_count})**: {s_text}")
+            # weitere technische Infos werden in list/preview separat gezeigt; hier bleibt es knapp
+            embed.description = "\n".join(desc_parts)
 
-        e.set_footer(text=f"Letzte Aktualisierung: {self._now_str()}")
-        e.timestamp = discord.utils.utcnow()
-        return e
+        footer = f"Angefragt von: {author.display_name}"
+        if footer_note:
+            footer += f" • {footer_note}"
+        embed.set_footer(text=footer)
+        embed.timestamp = discord.utils.utcnow()
 
-    # ====== Post/Edit Helper ======
+        return embed
+
     async def _post_or_edit(
         self,
         channel: discord.TextChannel,
@@ -334,241 +270,145 @@ class TriggerPost(commands.Cog):
         *,
         target_id: Optional[int],
         autodelete_after_min: Optional[int] = None,
-        view: Optional[ui.View] = None,
-        intro_text: Optional[str] = None,
-        cleanup_in_target: bool = True,
-        identifier_for_cleanup: Optional[str] = None,
+        intro_text: Optional[str] = None
     ) -> discord.Message:
-        """Postet/editiert Content. Im Zielchannel räumen wir optional alte Posts des Bots auf (identifier match im content)."""
-        content = intro_text or ""
+
+        view = self._PingView(self)
         is_target = (target_id is not None) and (channel.id == target_id)
 
-        # Zielchannel: alte identische Posts löschen (sauber halten)
-        if is_target and cleanup_in_target and identifier_for_cleanup:
-            async for m in channel.history(limit=500):
-                if m.author == self.bot.user and identifier_for_cleanup in (m.content or ""):
-                    try:
+        # Nur im Zielchannel aufräumen (alte Bot-Posts mit Überschrift)
+        if is_target:
+            async for m in channel.history(limit=300):
+                try:
+                    if m.author == self.bot.user and isinstance(m.content, str) and "Muhhelfer – Übersicht" in m.content:
                         await m.delete()
-                    except discord.Forbidden:
-                        pass
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
 
-        sent: Optional[discord.Message] = None
+        # Intro über dem Embed als Content:
+        intro = None
+        if intro_text:
+            intro = f"{intro_text}\n\n{EMOJI_TITLE} Muhhelfer – Übersicht:"
+        else:
+            intro = f"{EMOJI_TITLE} Muhhelfer – Übersicht:"
+
+        sent_message: Optional[discord.Message] = None
         try:
-            if msg_id and is_target and view is not None:
+            if msg_id and is_target:
                 old = await channel.fetch_message(int(msg_id))
-                await old.edit(content=content, embed=embed, view=view)
-                sent = old
+                await old.edit(content=intro, embed=embed, view=view)
+                sent_message = old
             else:
-                sent = await channel.send(content=content, embed=embed, view=view)
+                sent_message = await channel.send(content=intro, embed=embed, view=view)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            sent = await channel.send(content=content, embed=embed, view=view)
+            sent_message = await channel.send(content=intro, embed=embed, view=view)
 
-        # Auto-Delete (nur außerhalb Zielchannel)
-        if not is_target and autodelete_after_min and autodelete_after_min > 0 and sent:
-            try:
-                await sent.delete(delay=autodelete_after_min * 60)
-            except Exception:
-                pass
+        # In Nicht-Zielchannels: optional Auto-Delete
+        if not is_target:
+            minutes = int(autodelete_after_min or 0)
+            if minutes > 0 and sent_message:
+                try:
+                    await sent_message.delete(delay=minutes * 60)
+                except Exception:
+                    pass
 
-        return sent
+        return sent_message
 
-    # ====== VIEWS ======
-    class PingView(ui.View):
-        """Buttons: Normal/Schwer ping. Wird im Main & Columns genutzt."""
-        def __init__(self, parent: "TriggerPost"):
-            super().__init__(timeout=None)
-            self.parent = parent
-
-        @ui.button(label="Muhhelfer – normal ping", style=discord.ButtonStyle.primary, emoji=EMOJI_NORMAL, custom_id="muh_ping_normal")
-        async def ping_normal(self, interaction: discord.Interaction, _button: ui.Button):
-            await self.parent._handle_ping_button(interaction, ROLE_NORMAL)
-
-        @ui.button(label="Muhhelfer – schwer ping", style=discord.ButtonStyle.danger, emoji=EMOJI_SCHWER, custom_id="muh_ping_schwer")
-        async def ping_schwer(self, interaction: discord.Interaction, _button: ui.Button):
-            await self.parent._handle_ping_button(interaction, ROLE_SCHWER)
-
-        @ui.button(label="Aktualisieren", style=discord.ButtonStyle.secondary, custom_id="muh_refresh_simple")
-        async def refresh_simple(self, interaction: discord.Interaction, _button: ui.Button):
-            guild = interaction.guild
-            if not guild:
-                return await interaction.response.send_message("⚠️ Nur im Server.", ephemeral=True)
-            embed = await self.parent._embed_columns(guild, interaction.user) if "Spaltenansicht" in (interaction.message.embeds[0].title if interaction.message.embeds else "") else await self.parent._embed_main(guild, interaction.user)
-            await interaction.response.edit_message(embed=embed, view=self)
-
-    class ColumnsView(PingView):
-        """Für Layout1 identisch zu PingView (Ping + Refresh)."""
-        pass
-
-    class DashboardView(ui.View):
-        """Layout 2/3: Tabs + kontextsensitive Ping-Buttons + optional Rollenbutton."""
-        def __init__(self, parent: "TriggerPost", *, with_role_button: bool = False):
-            super().__init__(timeout=None)
-            self.parent = parent
-            self.with_role_button = with_role_button
-            # Standard-Tab = Übersicht
-            self.current_tab = "overview"
-
-        # Tabs
-        @ui.button(label="Übersicht", style=discord.ButtonStyle.secondary, custom_id="muh_tab_overview")
-        async def tab_overview(self, interaction: discord.Interaction, _button: ui.Button):
-            await self._switch_tab(interaction, "overview")
-
-        @ui.button(label="Normal", style=discord.ButtonStyle.primary, emoji=EMOJI_NORMAL, custom_id="muh_tab_normal")
-        async def tab_normal(self, interaction: discord.Interaction, _button: ui.Button):
-            await self._switch_tab(interaction, "normal")
-
-        @ui.button(label="Schwer", style=discord.ButtonStyle.danger, emoji=EMOJI_SCHWER, custom_id="muh_tab_schwer")
-        async def tab_schwer(self, interaction: discord.Interaction, _button: ui.Button):
-            await self._switch_tab(interaction, "schwer")
-
-        async def _switch_tab(self, interaction: discord.Interaction, tab: str):
-            guild = interaction.guild
-            if not guild:
-                return await interaction.response.send_message("⚠️ Nur im Server.", ephemeral=True)
-            self.current_tab = tab
-            embed = await self.parent._embed_dashboard(guild, tab)
-            await interaction.response.edit_message(embed=embed, view=self)
-
-        # Kontextsensitive Ping-Buttons
-        @ui.button(label="Normal pingen", style=discord.ButtonStyle.primary, emoji=EMOJI_NORMAL, custom_id="muh_dash_ping_normal")
-        async def dash_ping_normal(self, interaction: discord.Interaction, _button: ui.Button):
-            if self.current_tab != "normal":
-                return await interaction.response.send_message("ℹ️ Öffne zuerst den **Normal**-Tab.", ephemeral=True)
-            await self.parent._handle_ping_button(interaction, ROLE_NORMAL)
-
-        @ui.button(label="Schwer pingen", style=discord.ButtonStyle.danger, emoji=EMOJI_SCHWER, custom_id="muh_dash_ping_schwer")
-        async def dash_ping_schwer(self, interaction: discord.Interaction, _button: ui.Button):
-            if self.current_tab != "schwer":
-                return await interaction.response.send_message("ℹ️ Öffne zuerst den **Schwer**-Tab.", ephemeral=True)
-            await self.parent._handle_ping_button(interaction, ROLE_SCHWER)
-
-        @ui.button(label="Aktualisieren", style=discord.ButtonStyle.secondary, custom_id="muh_dash_refresh")
-        async def dash_refresh(self, interaction: discord.Interaction, _button: ui.Button):
-            guild = interaction.guild
-            if not guild:
-                return await interaction.response.send_message("⚠️ Nur im Server.", ephemeral=True)
-            embed = await self.parent._embed_dashboard(guild, self.current_tab)
-            await interaction.response.edit_message(embed=embed, view=self)
-
-        # Optionaler Rollenbutton (nur Layout 3)
-        @ui.button(label="Rolle holen", style=discord.ButtonStyle.success, custom_id="muh_dash_rolebtn")
-        async def role_button(self, interaction: discord.Interaction, _button: ui.Button):
-            if not self.with_role_button:
-                return await interaction.response.send_message("ℹ️ Kein Rollen-Link hinterlegt.", ephemeral=True)
-            data = await self.parent.config.guild(interaction.guild).all()
-            link = data.get("rolesource_url")
-            if not link:
-                return await interaction.response.send_message("ℹ️ Kein Rollen-Link hinterlegt.", ephemeral=True)
-            await interaction.response.send_message(f"🔗 Rollen holen: {link}", ephemeral=True)
-
-        async def on_timeout(self):
-            # persistente Views: nichts
-            pass
-
-        async def interaction_check(self, interaction: discord.Interaction) -> bool:
-            # Button „Rolle holen“ nur anzeigen, wenn with_role_button und rolesource vorhanden
-            for child in self.children:
-                if isinstance(child, ui.Button) and child.custom_id == "muh_dash_rolebtn":
-                    child.disabled = not self.with_role_button
-            return True
-
-    class CommandsView(ui.View):
-        """Layout 4: Befehlsübersicht – Admin toggeln, ‚Alle Befehle (kopieren)‘ ephemer senden."""
-        def __init__(self, parent: "TriggerPost", show_admin: bool = False):
-            super().__init__(timeout=None)
-            self.parent = parent
-            self.show_admin = show_admin
-
-        @ui.button(label="Admin anzeigen/ausblenden", style=discord.ButtonStyle.secondary, custom_id="muh_cmd_toggle_admin")
-        async def toggle_admin(self, interaction: discord.Interaction, _button: ui.Button):
-            embed = await self.parent._embed_commands(not self.show_admin)
-            self.show_admin = not self.show_admin
-            await interaction.response.edit_message(embed=embed, view=self)
-
-        @ui.button(label="Alle Befehle (kopieren)", style=discord.ButtonStyle.primary, custom_id="muh_cmd_copy_all")
-        async def copy_all(self, interaction: discord.Interaction, _button: ui.Button):
-            txt = (
-                "**Member**\n"
-                "```\n°muhhelfer post [min]\n```\n"
-                "**Offizier / Admin**\n"
-                "```\n°muhhelfer addtrigger <text>\n°muhhelfer removetrigger <text>\n°muhhelfer list\n°muhhelfer refresh\n```\n"
-                "**Admin**\n"
-                "```\n°muhhelfer setchannel #channel\n°muhhelfer setmessage <id>\n°muhhelfer cooldown <sek>\n°muhhelfer intro <text|clear>\n°muhhelfer autodelete <min>\n°muhhelfer forceping on|off\n°muhhelfer autorefresh <sek|off>\n```"
-            )
-            await interaction.response.send_message(txt, ephemeral=True)
-
-    # ====== COMMANDS: Main & Setup ======
+    # ---------------- Commands (nur Präfix) ----------------
     @commands.guild_only()
-    @commands.group(name="muhhelfer", aliases=["triggerpost"])
+    @commands.group(name="muhhelfer", aliases=["triggerpost"], invoke_without_command=True)
     async def muhhelfer(self, ctx: commands.Context):
-        """Muhhelfer-Tools und Konfiguration."""
-        pass
+        prefix = (await self.bot.get_valid_prefixes(ctx.guild))[0]
+        await ctx.send(
+            "**📜 Commands:**\n"
+            f"• `{prefix}muhhelfer post [min]` – Übersicht posten (Auto-Delete optional)\n"
+            f"• `{prefix}muhhelfer addtrigger <text>` / `removetrigger <text>`\n"
+            f"• `{prefix}muhhelfer list` – Einstellungen anzeigen\n"
+            f"• `{prefix}muhhelfer refresh` – Übersicht im Zielchannel aktualisieren\n"
+            f"• `{prefix}muhhelfer layout` / `layout <1-4>` / `layout preview <1-4>`\n"
+            f"• `{prefix}muhhelfer setchannel #chan` · `setmessage <id>` · `cooldown <sek>` · `intro <text|clear>` · `autodelete <min>`\n"
+        )
 
     @muhhelfer.command(name="post")
     async def manual_post(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Mainlayout posten (Member im Zielchannel, Offiziere/Admins überall)."""
         guild = ctx.guild
         author = ctx.author
         data = await self.config.guild(guild).all()
-        target_id = data["target_channel_id"]
+
+        target_id = data.get("target_channel_id")
         if not target_id:
             return await ctx.send("⚠️ Kein Ziel-Channel gesetzt.")
 
+        # Nur Server-Textkanäle
+        if not isinstance(ctx.channel, discord.TextChannel):
+            return await ctx.send("⚠️ Nur in Server-Textkanälen nutzbar.", delete_after=5)
+
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
-        is_offi = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
-        if not (is_admin or is_offi) and ctx.channel.id != target_id:
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(author, "roles", []))
+
+        # Normale User: nur im Zielchannel erlaubt
+        if not (is_admin or is_offizier) and ctx.channel.id != target_id:
             target = guild.get_channel(target_id)
             return await ctx.send(f"⚠️ Bitte nutze den Befehl im {target.mention}.", delete_after=5)
 
+        # Cooldown für Nicht-Bypass
         now = time.time()
         until = self._cooldown_until.get(ctx.channel.id, 0)
-        if not (is_admin or is_offi):
-            cd = (await self.config.guild(guild).cooldown_seconds())
+        if not (is_admin or is_offizier):
+            cd = int(data.get("cooldown_seconds") or 30)
             if now < until:
                 return
             self._cooldown_until[ctx.channel.id] = now + cd
 
-        # Auto-Delete nur außerhalb Zielchannel
-        is_target = ctx.channel.id == target_id
-        autodelete_conf = int(data.get("autodelete_minutes") or 0)
+        # Minuten-Override prüfen
         minutes_override = None
         if minutes is not None:
             if minutes < 0 or minutes > 1440:
                 return await ctx.send("⚠️ Bitte Minuten zwischen 0 und 1440 angeben.")
             minutes_override = minutes
-        autodel = None if is_target else (minutes_override if minutes_override is not None else autodelete_conf)
 
+        # Auto-Delete (nur für Nicht-Zielchannel relevant)
+        is_target = ctx.channel.id == target_id
+        autodelete_conf = int(data.get("autodelete_minutes") or 0)
+        autodelete_used = None if is_target else (minutes_override if minutes_override is not None else autodelete_conf)
+
+        # Footer-Hinweis (nur außerhalb Zielchannel, wenn aktiv)
         footer_note = None
-        if not is_target and autodel and autodel > 0:
-            footer_note = f"Auto-Delete in {autodel} Min"
+        if not is_target and autodelete_used and autodelete_used > 0:
+            footer_note = f"Auto-Delete in {autodelete_used} Min"
+
         manual_info = None
-        if (is_admin or is_offi) and not is_target:
+        if (is_admin or is_offizier) and not is_target:
             manual_info = f"manuell ausgelöst von {author.display_name}"
 
-        embed = await self._embed_main(guild, author, manual_info=manual_info, footer_note=footer_note)
-        intro = (f"{data.get('intro_text')}\n\n{EMOJI_TITLE} Muhhelfer – Übersicht:" if data.get("intro_text")
-                 else f"{EMOJI_TITLE} Muhhelfer – Übersicht:")
-        view = self.PingView(self)
+        mode = int(data.get("layout_mode") or 1)
+        embed = await self._build_embed(
+            guild,
+            author,
+            manual_info=manual_info,
+            footer_note=footer_note,
+            mode=mode,
+            intro_text=data.get("intro_text")
+        )
         await self._post_or_edit(
             ctx.channel,
             embed,
-            data["message_id"],
+            data.get("message_id"),
             target_id=target_id,
-            autodelete_after_min=autodel,
-            view=view,
-            intro_text=intro,
-            identifier_for_cleanup="Muhhelfer – Übersicht",
+            autodelete_after_min=autodelete_used,
+            intro_text=data.get("intro_text")
         )
         await ctx.send("✅ Muhhelfer-Nachricht gepostet.", delete_after=5)
 
-    # Trigger-Verwaltung
+    # --- Trigger-Verwaltung ---
     @muhhelfer.command(name="addtrigger")
     async def add_trigger(self, ctx: commands.Context, *, phrase: str):
         author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
-        is_offi = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
-        if not (is_admin or is_offi):
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(author, "roles", []))
+        if not (is_admin or is_offizier):
             return await ctx.send("🚫 Du darfst diesen Befehl nicht verwenden.")
+
         phrase = (phrase or "").strip().casefold()
         if not phrase:
             return await ctx.send("⚠️ Leerer Trigger ist nicht erlaubt.")
@@ -582,9 +422,10 @@ class TriggerPost(commands.Cog):
     async def remove_trigger(self, ctx: commands.Context, *, phrase: str):
         author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
-        is_offi = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
-        if not (is_admin or is_offi):
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(author, "roles", []))
+        if not (is_admin or is_offizier):
             return await ctx.send("🚫 Du darfst diesen Befehl nicht verwenden.")
+
         phrase = (phrase or "").strip().casefold()
         async with self.config.guild(ctx.guild).triggers() as t:
             if phrase not in t:
@@ -594,46 +435,115 @@ class TriggerPost(commands.Cog):
 
     @muhhelfer.command(name="list")
     async def list_triggers(self, ctx: commands.Context):
-        """Zeigt (neu) das Befehls-Embed (Layout 4) statt Textwand."""
         author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
-        is_offi = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
-        if not (is_admin or is_offi):
-            # Member sehen nur Member/Offi-Teil (ohne Admin)
-            e = await self._embed_commands(False)
-            return await ctx.send(embed=e, view=self.CommandsView(self, show_admin=False))
-        e = await self._embed_commands(False)
-        await ctx.send(embed=e, view=self.CommandsView(self, show_admin=False))
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(author, "roles", []))
+        if not (is_admin or is_offizier):
+            return await ctx.send("🚫 Du darfst diesen Befehl nicht verwenden.")
+
+        data = await self.config.guild(ctx.guild).all()
+        triggers = ", ".join(f"`{x}`" for x in data.get("triggers", [])) or "—"
+        ch = ctx.guild.get_channel(data.get("target_channel_id")) if data.get("target_channel_id") else None
+        layout_mode = int(data.get("layout_mode") or 1)
+        layout_name = {1: "Standard", 2: "Kompakt", 3: "Event", 4: "Admin/Debug"}.get(layout_mode, "Standard")
+
+        commands_block = (
+            "**📜 Commands (Präfix):**\n"
+            "• `muhhelfer post [min]` – Embed posten (Offis/Admins überall; User nur im Zielchannel). Optional Auto-Delete-Minuten.\n"
+            "• `muhhelfer addtrigger <text>` – Trigger hinzufügen (mit `+` für UND).\n"
+            "• `muhhelfer removetrigger <text>` – Trigger entfernen.\n"
+            "• `muhhelfer list` – Diese Übersicht.\n"
+            "• `muhhelfer refresh` – Embed im Zielchannel neu aufbauen.\n"
+            "• `muhhelfer layout` · `layout <1-4>` · `layout preview <1-4>`\n"
+            "• `muhhelfer setchannel #channel` · `setmessage <id>` · `cooldown <sek>` · `intro <text|clear>` · `autodelete <min>`\n"
+        )
+
+        await ctx.send(
+            f"**Trigger:** {triggers}\n"
+            f"**Ziel-Channel:** {ch.mention if ch else '— nicht gesetzt —'}\n"
+            f"**Message-ID:** `{data.get('message_id')}`\n"
+            f"**Cooldown:** {data.get('cooldown_seconds')}s\n"
+            f"**Auto-Delete (andere Channels):** {data.get('autodelete_minutes', 0)} min\n"
+            f"**Layout:** {layout_name} ({layout_mode})\n"
+            f"**Bypass-Rolle:** <@&{ROLE_OFFIZIERE_BYPASS}>\n"
+            f"**Intro:** {data.get('intro_text') or '— kein Text —'}\n\n"
+            f"{commands_block}"
+        )
 
     @muhhelfer.command(name="refresh")
     async def refresh_list(self, ctx: commands.Context):
         author = ctx.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
-        is_offi = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
-        if not (is_admin or is_offi):
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(author, "roles", []))
+        if not (is_admin or is_offizier):
             return await ctx.send("🚫 Du darfst diesen Befehl nicht verwenden.")
+
         data = await self.config.guild(ctx.guild).all()
-        target_id = data["target_channel_id"]
+        target_id = data.get("target_channel_id")
         if not target_id:
             return await ctx.send("⚠️ Kein Ziel-Channel gesetzt.")
         channel = ctx.guild.get_channel(target_id)
-        embed = await self._embed_main(ctx.guild, ctx.author)
-        view = self.PingView(self)
-        await self._post_or_edit(channel, embed, data["message_id"], target_id=target_id, view=view, intro_text=f"{EMOJI_TITLE} Muhhelfer – Übersicht:", identifier_for_cleanup="Muhhelfer – Übersicht")
+        if not isinstance(channel, discord.TextChannel):
+            return await ctx.send("⚠️ Ziel-Channel ist kein Textkanal.", delete_after=5)
+
+        mode = int(data.get("layout_mode") or 1)
+        embed = await self._build_embed(ctx.guild, ctx.author, mode=mode, intro_text=data.get("intro_text"))
+        await self._post_or_edit(channel, embed, data.get("message_id"), target_id=target_id, intro_text=data.get("intro_text"))
         await ctx.send("✅ Muhhelfer-Liste aktualisiert.", delete_after=5)
 
-    # Admin/Setup
+    # --- Layout-Management ---
+    @muhhelfer.command(name="layout")
+    async def layout_cmd(self, ctx: commands.Context, action: Optional[str] = None, arg: Optional[str] = None):
+        author = ctx.author
+        is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
+        is_offizier = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(author, "roles", []))
+        if not (is_admin or is_offizier):
+            return await ctx.send("🚫 Du darfst diesen Befehl nicht verwenden.")
+
+        data = await self.config.guild(ctx.guild).all()
+
+        # No args -> show help/current
+        if action is None:
+            mode = int(data.get("layout_mode") or 1)
+            name = {1: "Standard", 2: "Kompakt", 3: "Event", 4: "Admin/Debug"}.get(mode, "Standard")
+            return await ctx.send(
+                f"Aktuelles Layout: **{name} ({mode})**\n"
+                f"Verfügbare Layouts: `1` – Standard · `2` – Kompakt · `3` – Event · `4` – Admin/Debug\n"
+                f"• `muhhelfer layout <1-4>` – Layout wechseln\n"
+                f"• `muhhelfer layout preview <1-4>` – Vorschau anzeigen"
+            )
+
+        if action.lower() == "preview":
+            if not arg or not arg.isdigit():
+                return await ctx.send("⚠️ Bitte `muhhelfer layout preview <1-4>` verwenden.")
+            mode = max(1, min(4, int(arg)))
+            embed = await self._build_embed(
+                ctx.guild, ctx.author, mode=mode, intro_text=(await self.config.guild(ctx.guild).intro_text())
+            )
+            await ctx.send(embed=embed, delete_after=25)
+            return
+
+        # Otherwise treat as mode switch
+        if action.isdigit():
+            mode = max(1, min(4, int(action)))
+            await self.config.guild(ctx.guild).layout_mode.set(mode)
+            name = {1: "Standard", 2: "Kompakt", 3: "Event", 4: "Admin/Debug"}.get(mode, "Standard")
+            return await ctx.send(f"✅ Layout geändert auf **{name} ({mode})**")
+        else:
+            return await ctx.send("⚠️ Unbekannter Parameter. Nutze `muhhelfer layout`, `muhhelfer layout <1-4>` oder `muhhelfer layout preview <1-4>`.")
+
+    # --- Admin-only: Setup ---
     @muhhelfer.command(name="setchannel")
     @commands.admin_or_permissions(manage_guild=True)
-    async def set_channel(self, ctx: commands.Context, channel: discord.TextChannel = None):
-        if not channel:
-            return await ctx.send("⚠️ Bitte gib einen Channel an.")
+    async def set_channel(self, ctx: commands.Context, channel: Optional[discord.TextChannel] = None):
+        if not channel or not isinstance(channel, discord.TextChannel):
+            return await ctx.send("⚠️ Bitte gib einen **Text**-Channel an.")
         await self.config.guild(ctx.guild).target_channel_id.set(channel.id)
         await ctx.send(f"📍 Ziel-Channel gesetzt: {channel.mention}")
 
     @muhhelfer.command(name="setmessage")
     @commands.admin_or_permissions(manage_guild=True)
-    async def set_message(self, ctx: commands.Context, message_id: int = None):
+    async def set_message(self, ctx: commands.Context, message_id: Optional[int] = None):
         await self.config.guild(ctx.guild).message_id.set(message_id)
         await ctx.send(f"🧷 Message-ID gesetzt: `{message_id}`")
 
@@ -647,8 +557,8 @@ class TriggerPost(commands.Cog):
 
     @muhhelfer.command(name="intro")
     @commands.admin_or_permissions(manage_guild=True)
-    async def set_intro(self, ctx: commands.Context, *, text: str = None):
-        if not text:
+    async def set_intro(self, ctx: commands.Context, *, text: Optional[str] = None):
+        if text is None:
             intro = await self.config.guild(ctx.guild).intro_text()
             return await ctx.send(f"📜 Aktuell: {intro or '— kein Text —'}")
         if text.lower() in ("clear", "none", "off"):
@@ -665,160 +575,24 @@ class TriggerPost(commands.Cog):
         await self.config.guild(ctx.guild).autodelete_minutes.set(minutes)
         await ctx.send(f"🗑️ Auto-Delete (außerhalb Zielchannel): **{minutes} min**")
 
-    @muhhelfer.command(name="forceping")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_forceping(self, ctx: commands.Context, state: str):
-        state_l = (state or "").strip().lower()
-        if state_l not in {"on", "off"}:
-            return await ctx.send("⚠️ Nutzung: `°muhhelfer forceping on` oder `off`")
-        await self.config.guild(ctx.guild).force_role_ping.set(state_l == "on")
-        await ctx.send(f"🔧 force_role_ping: **{state_l}**")
-
-    @muhhelfer.command(name="autorefresh")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def set_autorefresh(self, ctx: commands.Context, seconds: str):
-        s = (seconds or "").strip().lower()
-        if s in {"off", "0"}:
-            await self.config.guild(ctx.guild).auto_refresh_seconds.set(0)
-            return await ctx.send("🛑 Auto-Refresh: **aus**")
-        try:
-            val = int(s)
-        except ValueError:
-            return await ctx.send("⚠️ Zahl in Sekunden oder `off` angeben.")
-        if val < 60 or val > 3600:
-            return await ctx.send("⚠️ Bitte zwischen **60** und **3600** Sekunden wählen.")
-        await self.config.guild(ctx.guild).auto_refresh_seconds.set(val)
-        await ctx.send(f"🔁 Auto-Refresh: **alle {val}s** (nur Zielchannel, nur bei Änderungen).")
-
-    # ====== Role-Source (für Layout 3) ======
-    @muhhelfer.group(name="rolesource")
-    @commands.admin_or_permissions(manage_guild=True)
-    async def rolesource(self, ctx: commands.Context):
-        """Rollen-Quelle für ‚Rolle holen‘-Button setzen/anzeigen/löschen."""
-        pass
-
-    @rolesource.command(name="set")
-    async def rolesource_set(self, ctx: commands.Context, *, link_or_mention: str):
-        """Akzeptiert Nachrichtenlink ODER Channel-Link/Mention."""
-        link_or_mention = link_or_mention.strip()
-        # einfache Validierung: URL oder <#id>
-        chan_match = re.match(r"<#(\d+)>", link_or_mention)
-        url_match = re.match(r"https?://", link_or_mention)
-        if not (chan_match or url_match):
-            return await ctx.send("⚠️ Bitte eine Nachrichten-URL oder Channel-Mention/Link angeben.")
-        await self.config.guild(ctx.guild).rolesource_url.set(link_or_mention)
-        await ctx.send(f"✅ Rollen-Quelle gesetzt: {link_or_mention}")
-
-    @rolesource.command(name="show")
-    async def rolesource_show(self, ctx: commands.Context):
-        link = await self.config.guild(ctx.guild).rolesource_url()
-        await ctx.send(f"🔗 Rollen-Quelle: {link or '— nicht gesetzt —'}")
-
-    @rolesource.command(name="clear")
-    async def rolesource_clear(self, ctx: commands.Context):
-        await self.config.guild(ctx.guild).rolesource_url.set(None)
-        await ctx.send("🧹 Rollen-Quelle gelöscht.")
-
-    # ====== TEST-LAYOUTS ======
-    @muhhelfer.group(name="test")
-    async def test_layouts(self, ctx: commands.Context):
-        """Test-Layouts posten (beeinflusst Main nicht)."""
-        pass
-
-    @test_layouts.command(name="layout1")
-    async def test_layout1(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Layout 1 – Spaltenansicht."""
-        embed = await self._embed_columns(ctx.guild, ctx.author)
-        view = self.ColumnsView(self)
-        await self._post_or_edit(
-            ctx.channel, embed, None, target_id=None, autodelete_after_min=minutes, view=view,
-            intro_text=f"{EMOJI_TITLE} Muhhelfer – Spaltenansicht:",
-            cleanup_in_target=False
-        )
-
-    @test_layouts.command(name="layout2")
-    async def test_layout2(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Layout 2 – Dashboard (ohne Rollenbutton)."""
-        embed = await self._embed_dashboard(ctx.guild, "overview")
-        view = self.DashboardView(self, with_role_button=False)
-        await self._post_or_edit(
-            ctx.channel, embed, None, target_id=None, autodelete_after_min=minutes, view=view,
-            intro_text=f"{EMOJI_TITLE} Muhhelfer – Dashboard:",
-            cleanup_in_target=False
-        )
-
-    @test_layouts.command(name="layout3")
-    async def test_layout3(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Layout 3 – Dashboard + Rollenbutton (nutzt gespeicherte rolesource)."""
-        data = await self.config.guild(ctx.guild).all()
-        has_link = bool(data.get("rolesource_url"))
-        embed = await self._embed_dashboard(ctx.guild, "overview")
-        view = self.DashboardView(self, with_role_button=has_link)
-        await self._post_or_edit(
-            ctx.channel, embed, None, target_id=None, autodelete_after_min=minutes, view=view,
-            intro_text=f"{EMOJI_TITLE} Muhhelfer – Dashboard:",
-            cleanup_in_target=False
-        )
-
-    @test_layouts.command(name="layout4")
-    async def test_layout4(self, ctx: commands.Context, minutes: Optional[int] = None):
-        """Layout 4 – Befehlsübersicht (Embed mit Buttons)."""
-        embed = await self._embed_commands(show_admin=False)
-        view = self.CommandsView(self, show_admin=False)
-        await self._post_or_edit(
-            ctx.channel, embed, None, target_id=None, autodelete_after_min=minutes, view=view,
-            intro_text=f"{EMOJI_TITLE} Muhhelfer – Befehlsübersicht:",
-            cleanup_in_target=False
-        )
-
-    # Alle Layouts auf einmal posten (1..n)
-    @muhhelfer.group(name="layouts")
-    async def layouts(self, ctx: commands.Context):
-        """Layout-Funktionen (Liste, alle posten)."""
-        pass
-
-    @layouts.command(name="postall")
-    async def layouts_postall(self, ctx: commands.Context, minutes: Optional[int] = None):
-        await self.test_layout1.callback(self, ctx, minutes)  # type: ignore
-        await self.test_layout2.callback(self, ctx, minutes)  # type: ignore
-        await self.test_layout3.callback(self, ctx, minutes)  # type: ignore
-        await self.test_layout4.callback(self, ctx, minutes)  # type: ignore
-
-    @muhhelfer.command(name="layout")
-    async def layout_single(self, ctx: commands.Context, sub: str = None):
-        """Alias: °muhhelfer layout list"""
-        if (sub or "").lower() == "list":
-            await self.layout_list(ctx)
-        else:
-            await ctx.send("ℹ️ Nutzung: `°muhhelfer layout list`")
-
-    async def layout_list(self, ctx: commands.Context):
-        txt = (
-            "**Verfügbare Layouts:**\n"
-            "• **Layout 1 – Spaltenansicht** (Normal/Schwer in Spalten, beide Ping-Buttons)\n"
-            "• **Layout 2 – Dashboard** (Übersicht + Tabs; Ping nur im aktiven Tab)\n"
-            "• **Layout 3 – Dashboard + Rollenbutton** (wie 2, plus ‚Rolle holen‘ bei hinterlegter Quelle)\n"
-            "• **Layout 4 – Befehlsübersicht** (Embed mit Admin-Toggle & Kopier-Button)\n"
-            "\n"
-            "Posten: `°muhhelfer test layout1|layout2|layout3|layout4 [min]`\n"
-            "Alle: `°muhhelfer layouts postall [min]`\n"
-        )
-        await ctx.send(txt)
-
-    # ====== Listener: Trigger im Zielchannel ======
+    # --- Listener für Trigger ---
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
+        # Nur Server-Textkanäle unterstützen
+        if not isinstance(message.channel, discord.TextChannel):
+            return
+
         guild = message.guild
         data = await self.config.guild(guild).all()
-        target_id = data["target_channel_id"]
+        target_id = data.get("target_channel_id")
         if not target_id or message.channel.id != target_id:
             return
 
-        content = message.content.casefold()
+        content = (message.content or "").casefold()
         matched = False
-        for trigger in data["triggers"]:
+        for trigger in data.get("triggers", []):
             if "+" in trigger:
                 parts = [p.strip() for p in trigger.split("+") if p.strip()]
                 if parts and all(p in content for p in parts):
@@ -834,52 +608,13 @@ class TriggerPost(commands.Cog):
         until = self._cooldown_until.get(message.channel.id, 0)
         author = message.author
         is_admin = author.guild_permissions.administrator or author.guild_permissions.manage_guild
-        has_bypass = any(r.id == ROLE_OFFIZIERE_BYPASS for r in author.roles)
+        has_bypass = any(r.id == ROLE_OFFIZIERE_BYPASS for r in getattr(author, "roles", []))
         if not (is_admin or has_bypass):
-            cd = data.get("cooldown_seconds", 30)
+            cd = int(data.get("cooldown_seconds") or 30)
             if now < until:
                 return
             self._cooldown_until[message.channel.id] = now + cd
 
-        embed = await self._embed_main(guild, author)
-        intro = (f"{data.get('intro_text')}\n\n{EMOJI_TITLE} Muhhelfer – Übersicht:" if data.get("intro_text")
-                 else f"{EMOJI_TITLE} Muhhelfer – Übersicht:")
-        view = self.PingView(self)
-        await self._post_or_edit(message.channel, embed, data["message_id"], target_id=target_id, view=view, intro_text=intro, identifier_for_cleanup="Muhhelfer – Übersicht")
-
-    # ====== Auto-Refresh ======
-    @tasks.loop(seconds=30)  # per-Guild Intervallsteuerung
-    async def _auto_refresher(self):
-        now = time.time()
-        for guild in self.bot.guilds:
-            try:
-                data = await self.config.guild(guild).all()
-                interval = int(data.get("auto_refresh_seconds") or 0)
-                target_id = data.get("target_channel_id")
-                if not interval or not target_id:
-                    continue
-
-                last_ts = self._last_refresh_ts.get(guild.id, 0.0)
-                if (now - last_ts) < interval:
-                    continue
-                self._last_refresh_ts[guild.id] = now
-
-                channel = guild.get_channel(target_id)
-                if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.ForumChannel, discord.VoiceChannel)):
-                    continue
-
-                sig = self._signature_for_guild(guild)
-                if self._last_signature.get(guild.id) == sig:
-                    continue
-
-                author = guild.me  # Footer
-                embed = await self._embed_main(guild, author)  # type: ignore
-                view = self.PingView(self)
-                await self._post_or_edit(channel, embed, data["message_id"], target_id=target_id, view=view, intro_text=f"{EMOJI_TITLE} Muhhelfer – Übersicht:", identifier_for_cleanup="Muhhelfer – Übersicht")
-                self._last_signature[guild.id] = sig
-            except Exception:
-                continue
-
-    @_auto_refresher.before_loop
-    async def _before_refresher(self):
-        await self.bot.wait_until_ready()
+        mode = int(data.get("layout_mode") or 1)
+        embed = await self._build_embed(guild, author, mode=mode, intro_text=data.get("intro_text"))
+        await self._post_or_edit(message.channel, embed, data.get("message_id"), target_id=target_id, intro_text=data.get("intro_text"))
