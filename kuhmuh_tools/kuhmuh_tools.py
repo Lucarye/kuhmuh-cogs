@@ -1,115 +1,89 @@
-import traceback
+# kuhmuh_tools.py (Ausschnitt)
 from redbot.core import commands
 
-DEFAULT_REPO_ALIAS = "kuhmuh"  # Dein Repo-Alias aus: °repo add kuhmuh <URL>
-__KUHMUH_TOOLS_VERSION__ = "1.0.4"
-
 class KuhmuhTools(commands.Cog):
-    """
-    :muhkuh: Kuhmuh Tools – Owner-Utilities für schnelle Repo-Updates (nur Prefix-Befehle).
-
-    Befehle:
-      °kuhmuhupdate [repo=<alias>]           -> Update+Reload aller Cogs aus Repo (ohne 'repo update')
-      °kuhmuhupdatecog <cog> [repo=<alias>]  -> Update+Reload eines Cogs
-      °kuhmuhrepotipp [repo=<alias>]         -> zeigt den manuellen Repo-Update-Befehl
-      °kuhmuhlist [repo=<alias>]             -> zeigt installierte/verfügbare Cogs
-      °kuhmuhtoolsver                        -> zeigt die geladene Version dieses Cogs
-    """
+    """Hilfsbefehle für Kuhmuh-Setup & Updates."""
 
     def __init__(self, bot):
         self.bot = bot
-        self.known_repo_cogs = [
-            "nachrichteninfo",
-            "triggerpost",
-            "kuhmuh_tools",
-        ]
 
-    # -------- Helpers --------
-
-    async def _cog_list(self, ctx: commands.Context, repo_alias: str):
-        await ctx.invoke(self.bot.get_command("cog list"), repo_alias)
-
-    def _is_loaded(self, cog_name: str) -> bool:
-        return cog_name in self.bot.cogs
-
-    async def _safe_reload(self, ctx: commands.Context, cog: str):
-        """
-        Lädt einen Cog (re)load – mit Positionsargumenten (kein 'module='!).
-        """
-        if self._is_loaded(cog):
-            await ctx.invoke(self.bot.get_command("reload"), cog)
-        else:
-            await ctx.invoke(self.bot.get_command("load"), cog)
-
-    # -------- Commands --------
-
-    @commands.is_owner()
-    @commands.command(name="kuhmuhtoolsver")
-    async def kuhmuh_tools_ver(self, ctx: commands.Context):
-        """Zeigt die geladene Version dieses Cogs an (zum Gegenchecken nach Updates)."""
-        await ctx.send(f"kuhmuh_tools Version: **{__KUHMUH_TOOLS_VERSION__}**")
-
-    @commands.is_owner()
-    @commands.command(name="kuhmuhlist")
-    async def kuhmuh_list(self, ctx: commands.Context, *, repo: str = DEFAULT_REPO_ALIAS):
-        """Zeigt installierte/verfügbare Cogs und aktuell geladene an."""
-        await ctx.send(f"📦 Prüfe Repo **{repo}** …")
-        await self._cog_list(ctx, repo)
-
-        loaded = sorted(self.bot.cogs.keys())
-        if loaded:
-            await ctx.send("✅ Geladen: " + ", ".join(loaded))
-        else:
-            await ctx.send("ℹ️ Keine Cogs geladen oder Red listet sie nicht unter diesem Alias.")
-
-    @commands.is_owner()
-    @commands.command(name="kuhmuhrepotipp")
-    async def kuhmuh_repo_tipp(self, ctx: commands.Context, *, repo: str = DEFAULT_REPO_ALIAS):
-        """Zeigt den manuellen Repo-Update-Befehl an (falls du ihn separat ausführen willst)."""
-        await ctx.send(f"ℹ️ Wenn du das Repo explizit aktualisieren willst:\n`{ctx.prefix}repo update {repo}`")
-
-    @commands.is_owner()
     @commands.command(name="kuhmuhupdate")
-    async def kuhmuh_update(self, ctx: commands.Context, *, repo: str = DEFAULT_REPO_ALIAS):
-        """
-        Aktualisiert alle bekannten Cogs via 'cog update' und lädt sie neu.
-        (Kein direkter 'repo update' Aufruf – manche Setups erwarten dort Objekte statt Strings.)
-        """
-        await ctx.send(f"🔄 Aktualisiere Cogs aus **{repo}** …")
+    @commands.admin_or_permissions(manage_guild=True)
+    async def kuhmuhupdate(self, ctx: commands.Context):
+        """Aktualisiert Repo 'kuhmuh', updated/reinstalled Cogs und lädt sie neu (mit Versionsanzeige)."""
+        await ctx.send("🔄 **Starte Update aller Cogs aus 'kuhmuh'...**")
 
-        summary = []
-        for cog in self.known_repo_cogs:
+        # 1️⃣ Downloader sicherstellen
+        if not self.bot.get_cog("Downloader"):
             try:
-                await ctx.send(f"♻️ Update & Reload `{cog}` …")
-                try:
-                    # Positionsargumente verwenden: (repo, cog)
-                    await ctx.invoke(self.bot.get_command("cog update"), repo, cog)
-                except Exception:
-                    # Falls dein Manager kein gezieltes 'cog update' braucht, ignorieren
-                    pass
-                await self._safe_reload(ctx, cog)
-                summary.append(f"✅ {cog}")
-            except Exception as e:
-                summary.append(f"❌ {cog}: {e}")
-                await ctx.send(f"```py\n{traceback.format_exc()}\n```")
+                await ctx.invoke(self.bot.get_command("load"), "downloader")
+            except Exception:
+                await ctx.send("⚠️ Downloader konnte nicht geladen werden, fahre trotzdem fort...")
 
-        await ctx.send("**Fertig.**\n" + "\n".join(summary))
-
-    @commands.is_owner()
-    @commands.command(name="kuhmuhupdatecog")
-    async def kuhmuh_update_cog(self, ctx: commands.Context, cog: str, *, repo: str = DEFAULT_REPO_ALIAS):
-        """Aktualisiert & reloadet genau einen Cog (z. B. °kuhmuhupdatecog nachrichteninfo)."""
-        await ctx.send(f"🔄 Aktualisiere `{cog}` aus **{repo}** …")
+        # 2️⃣ Repo & Cogs updaten
         try:
+            await ctx.invoke(self.bot.get_command("repo"), "update", "kuhmuh")
+        except Exception:
+            await ctx.send("⚠️ Repo-Update fehlgeschlagen (übersprungen).")
+
+        try:
+            await ctx.invoke(self.bot.get_command("cog"), "update", "kuhmuh")
+        except Exception:
+            await ctx.send("⚠️ Cog-Update fehlgeschlagen (übersprungen).")
+
+        # 3️⃣ Alle Cogs aus Repo 'kuhmuh' sammeln
+        reponame = "kuhmuh"
+        target_cogs = set()
+        dl = self.bot.get_cog("Downloader")
+
+        try:
+            rm = getattr(dl, "_repo_manager", None)
+            if rm:
+                repo = await rm.get_repo(reponame)
+                if repo:
+                    for cog_meta in repo.available_cogs:
+                        name = getattr(cog_meta, "name", None)
+                        if name:
+                            target_cogs.add(name)
+        except Exception:
+            pass
+
+        # Fallback falls API nichts liefert
+        if not target_cogs:
+            target_cogs.update({"triggerpost", "kuhmuh_tools"})
+
+        # 4️⃣ Installiere / Reinstalliere
+        for cog in target_cogs:
             try:
-                await ctx.invoke(self.bot.get_command("cog update"), repo, cog)
+                await ctx.invoke(self.bot.get_command("cog"), "install", reponame, cog, "--force")
+            except Exception:
+                try:
+                    await ctx.invoke(self.bot.get_command("cog"), "reinstall", cog)
+                except Exception:
+                    pass
+
+        # 5️⃣ Reload aller geladenen Cogs
+        reloaded = []
+        for cog in target_cogs:
+            try:
+                await ctx.invoke(self.bot.get_command("unload"), cog)
             except Exception:
                 pass
-            await self._safe_reload(ctx, cog)
-            await ctx.send(f"✅ `{cog}` aktualisiert & neu geladen.")
-        except Exception as e:
-            await ctx.send(f"❌ `{cog}` fehlgeschlagen: `{e}`")
-            await ctx.send(f"```py\n{traceback.format_exc()}\n```")
+            try:
+                await ctx.invoke(self.bot.get_command("load"), cog)
+                reloaded.append(cog)
+            except Exception:
+                pass
 
-async def setup(bot):
-    await bot.add_cog(KuhmuhTools(bot))
+        # 6️⃣ Versionen ausgeben
+        version_lines = []
+        for cog in reloaded:
+            c = self.bot.get_cog(cog)
+            version = getattr(c, "__version__", "—")
+            version_lines.append(f"• **{cog}** → v{version}")
+
+        if not version_lines:
+            version_lines.append("– keine Cogs geladen oder Version nicht verfügbar –")
+
+        summary = "\n".join(version_lines)
+        await ctx.send(f"✅ **Update abgeschlossen.**\n\n{summary}")
