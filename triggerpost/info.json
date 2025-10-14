@@ -1,12 +1,12 @@
 {
-  "author": ["Lucarye"],
-  "install_msg": "triggerpost installiert. Nutze °load triggerpost, dann °triggerpost setchannel #hilfe.",
   "name": "triggerpost",
-  "short": "Postet/aktualisiert eine Aushilfe-Liste per Trigger.",
-  "description": "Listet online Mitglieder zweier Rollen (Normal/Schwer) bei Triggerworten. Enthält Cooldown, Channel-Gating und Admin/Offiziere-Bypass.",
-  "tags": ["utility", "trigger", "roles", "presence"],
-  "requirements": [],
+  "short": "Postet/Aktualisiert die Muhhelfer-Übersicht.",
+  "description": "Muhhelfer-System mit Triggern, Embed, Buttons und Layoutumschaltung.",
+  "install_msg": "🐮 Das Muhhelfer-Cog wurde erfolgreich installiert!",
+  "author": ["Lucarye"],
+  "tags": ["muhkuh", "trigger", "embed", "roles"],
   "min_bot_version": "3.5.0",
-  "end_user_data_statement": "Speichert pro Guild: Trigger, Ziel-Channel, Message-ID, Cooldown.",
+  "hidden": false,
+  "disabled": false,
   "type": "COG"
 }
