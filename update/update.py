@@ -6,6 +6,7 @@ from redbot.core.bot import Red
 
 ADMIN_ROLE_ID = 1198650646786736240
 REPO_NAME = "kuhmuh"
+GUILD_ID = 1198649628787212458
 
 
 class Update(commands.Cog):
@@ -30,7 +31,8 @@ class Update(commands.Cog):
         # Subcommands registrieren
         self.update_group.add_command(self.kuhmuh_group)
 
-        # KUHMUH: LIST
+        # --------- KUHMUH: SUBCOMMANDS ---------
+
         @self.kuhmuh_group.command(
             name="list",
             description="Zeigt Status aller Cogs im Repo."
@@ -38,7 +40,6 @@ class Update(commands.Cog):
         async def list_cmd(interaction: discord.Interaction):
             await self._cmd_list(interaction)
 
-        # KUHMUH: ADD
         @self.kuhmuh_group.command(
             name="add",
             description="Fügt ein Cog zur Update-Liste hinzu."
@@ -46,7 +47,6 @@ class Update(commands.Cog):
         async def add_cmd(interaction: discord.Interaction, name: str):
             await self._cmd_add(interaction, name)
 
-        # KUHMUH: REMOVE
         @self.kuhmuh_group.command(
             name="remove",
             description="Entfernt ein Cog aus der Update-Liste."
@@ -54,7 +54,6 @@ class Update(commands.Cog):
         async def remove_cmd(interaction: discord.Interaction, name: str):
             await self._cmd_remove(interaction, name)
 
-        # KUHMUH: RUN (alle)
         @self.kuhmuh_group.command(
             name="run",
             description="SMART-Update aller gespeicherten Cogs."
@@ -62,7 +61,6 @@ class Update(commands.Cog):
         async def run_cmd(interaction: discord.Interaction):
             await self._cmd_run_all(interaction)
 
-        # KUHMUH: SINGLE
         @self.kuhmuh_group.command(
             name="single",
             description="SMART-Update eines einzelnen Cogs."
@@ -71,26 +69,33 @@ class Update(commands.Cog):
             await self._cmd_run_single(interaction, name)
 
     # ------------------------------------------------------------
-    # Slash-Command-Registrierung
+    # Slash-Command-Registrierung + FORCE SYNC
     # ------------------------------------------------------------
 
-async def cog_load(self):
-    guild = discord.Object(id=1198649628787212458)
+    async def cog_load(self):
+        """Slash-Befehle registrieren & erzwingen, dass sie SOFORT erscheinen."""
+        guild = discord.Object(id=GUILD_ID)
 
-    # Command hinzufügen
-    self.bot.tree.add_command(self.update_group, guild=guild)
+        # Commands NUR für diese Guild hinzufügen
+        self.bot.tree.add_command(self.update_group, guild=guild)
 
-    # Visibility auf Adminrolle beschränken
-    try:
-        perms = {
-            discord.Object(id=ADMIN_ROLE_ID): discord.Permissions(administrator=True)
-        }
-        await self.bot.get_guild(1198649628787212458).set_app_commands_permissions(permissions=perms)
-    except Exception:
-        pass
+        # Sichtbarkeit auf Adminrolle beschränken
+        try:
+            perms = {
+                discord.Object(id=ADMIN_ROLE_ID): discord.Permissions(administrator=True)
+            }
+            g = self.bot.get_guild(GUILD_ID)
+            if g:
+                await g.set_app_commands_permissions(permissions=perms)
+        except Exception:
+            pass
 
-    # FORCE SYNC (wichtig!)
-    await self.bot.tree.sync(guild=guild)
+        # WICHTIG: FORCE SYNC → macht Commands SOFORT sichtbar
+        try:
+            await self.bot.tree.sync(guild=guild)
+        except Exception:
+            pass
+
     # ------------------------------------------------------------
     # KUHMUH-COMMANDS (INTERN)
     # ------------------------------------------------------------
@@ -161,7 +166,6 @@ async def cog_load(self):
         repo_cogs = await self._fetch_repo_cogs()
 
         result = await self._smart_update(saved_cogs, repo_cogs)
-
         await interaction.followup.send(result, ephemeral=False)
 
     # ------------------------------------------------------------
@@ -179,7 +183,6 @@ async def cog_load(self):
     # ------------------------------------------------------------
 
     async def _fetch_repo_cogs(self):
-        """Liest verfügbare Cogs aus dem Repo."""
         dl = self.bot.get_cog("Downloader")
         if not dl:
             return []
@@ -198,7 +201,7 @@ async def cog_load(self):
         unchanged = []
         failed = []
 
-        # Repo updaten:
+        # Repo aktualisieren:
         try:
             await self.bot.get_command("repo update").callback(self.bot, REPO_NAME)
         except Exception:
@@ -234,4 +237,3 @@ async def cog_load(self):
             msg += "🔴 **Fehler / nicht im Repo:**\n" + "\n".join(f"• {c}: {r}" for c, r in failed)
 
         return msg
-
