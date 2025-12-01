@@ -10,306 +10,221 @@ GUILD_ID = 1198649628787212458
 
 
 class Update(commands.Cog):
-    """SMART-Update-System für das Repo 'kuhmuh'."""
+    """Einfache Update-Funktionen für Cogs aus dem Repo 'kuhmuh'."""
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=982374982374, force_registration=True)
+        self.config = Config.get_conf(self, identifier=123456789, force_registration=True)
         self.config.register_global(cogs=[])
 
-        # Slash Command Groups
+        # Hauptgruppe /update
         self.update_group = app_commands.Group(
             name="update",
             description="Kuhmuh Update-System"
         )
 
+        # Untergruppe /update kuhmuh
         self.kuhmuh_group = app_commands.Group(
             name="kuhmuh",
-            description="Update-Funktionen für das Kuhmuh-Repo"
+            description="Update-Funktionen für das Repo 'kuhmuh'"
         )
 
-        # Subgroup unter /update
         self.update_group.add_command(self.kuhmuh_group)
 
-        # --------- KUHMUH: SUBCOMMANDS ---------
+        # ------------------ SUBCOMMANDS ------------------
 
-        @self.kuhmuh_group.command(
-            name="list",
-            description="Zeigt Status aller Cogs im Repo 'kuhmuh'."
-        )
+        @self.kuhmuh_group.command(name="list", description="Zeigt alle hinzugefügten Cogs.")
         async def list_cmd(interaction: discord.Interaction):
             await self._cmd_list(interaction)
 
-        @self.kuhmuh_group.command(
-            name="add",
-            description="Fügt ein Cog zur Update-Liste hinzu."
-        )
-        async def add_cmd(interaction: discord.Interaction, name: str):
-            await self._cmd_add(interaction, name)
+        @self.kuhmuh_group.command(name="add", description="Fügt ein Cog zur Updateliste hinzu.")
+        async def add_cmd(interaction: discord.Interaction, cog: str):
+            await self._cmd_add(interaction, cog)
 
-        @self.kuhmuh_group.command(
-            name="remove",
-            description="Entfernt ein Cog aus der Update-Liste."
-        )
-        async def remove_cmd(interaction: discord.Interaction, name: str):
-            await self._cmd_remove(interaction, name)
+        @self.kuhmuh_group.command(name="remove", description="Entfernt ein Cog aus der Updateliste.")
+        async def remove_cmd(interaction: discord.Interaction, cog: str):
+            await self._cmd_remove(interaction, cog)
 
-        @self.kuhmuh_group.command(
-            name="run",
-            description="SMART-Update aller gespeicherten Cogs aus dem Repo 'kuhmuh'."
-        )
+        @self.kuhmuh_group.command(name="single", description="Updated ein einzelnes Cog.")
+        async def single_cmd(interaction: discord.Interaction, cog: str):
+            await self._cmd_single(interaction, cog)
+
+        @self.kuhmuh_group.command(name="run", description="Updated alle Cogs aus der Liste.")
         async def run_cmd(interaction: discord.Interaction):
-            await self._cmd_run_all(interaction)
-
-        @self.kuhmuh_group.command(
-            name="single",
-            description="SMART-Update eines einzelnen Cogs aus dem Repo 'kuhmuh'."
-        )
-        async def single_cmd(interaction: discord.Interaction, name: str):
-            await self._cmd_run_single(interaction, name)
+            await self._cmd_run(interaction)
 
     # ------------------------------------------------------------
-    # Slash-Command-Registrierung + FORCE SYNC
+    # Slash Commands registrieren
     # ------------------------------------------------------------
 
     async def cog_load(self):
-        """Slash-Befehle registrieren & erzwingen, dass sie SOFORT erscheinen."""
         guild = discord.Object(id=GUILD_ID)
 
-        # Commands NUR für diese Guild hinzufügen
+        # Commands nur für diese Guild sichtbar
         self.bot.tree.add_command(self.update_group, guild=guild)
 
-        # Sichtbarkeit auf Adminrolle beschränken
+        # Sichtbarkeit nur für Adminrolle
         try:
-            perms = {
-                discord.Object(id=ADMIN_ROLE_ID): discord.Permissions(administrator=True)
-            }
             g = self.bot.get_guild(GUILD_ID)
             if g:
+                perms = {
+                    discord.Object(id=ADMIN_ROLE_ID): discord.Permissions(administrator=True)
+                }
                 await g.set_app_commands_permissions(permissions=perms)
         except Exception:
             pass
 
-        # WICHTIG: FORCE SYNC → macht Commands SOFORT sichtbar
+        # FORCE SYNC → sofort sichtbar machen
         try:
             await self.bot.tree.sync(guild=guild)
         except Exception:
             pass
 
     # ------------------------------------------------------------
-    # KUHMUH-COMMANDS (INTERN)
+    # LIST
     # ------------------------------------------------------------
 
     async def _cmd_list(self, interaction: discord.Interaction):
-        """Zeigt nur Cogs aus deinem Repo an."""
-        repo_cogs = await self._fetch_repo_cogs()          # alle Cogs aus Repo "kuhmuh"
-        loaded_all = list(self.bot.cogs.keys())            # alle geladenen Cogs
-        saved_cogs = await self.config.cogs()              # deine Update-Liste
+        cogs = await self.config.cogs()
 
-        # Nur dein Repo betrachten
-        loaded_repo_cogs = [c for c in loaded_all if c in repo_cogs]
-        not_loaded_repo_cogs = [c for c in repo_cogs if c not in loaded_repo_cogs]
-        missing_in_repo = [c for c in saved_cogs if c not in repo_cogs]
+        loaded = list(self.bot.cogs.keys())
 
-        msg = (
-            "📦 **Repo-Cogs (`kuhmuh`):**\n" +
-            ("\n".join(f"• {c}" for c in repo_cogs) if repo_cogs else "– keine –") +
-            "\n\n🔧 **Cogs in deiner Update-Liste:**\n" +
-            ("\n".join(f"• {c}" for c in saved_cogs) if saved_cogs else "– leer –") +
-            "\n\n🟢 **Geladene Repo-Cogs:**\n" +
-            ("\n".join(f"• {c}" for c in loaded_repo_cogs) if loaded_repo_cogs else "– keine –") +
-            "\n\n🔴 **Nicht geladene Repo-Cogs:**\n" +
-            ("\n".join(f"• {c}" for c in not_loaded_repo_cogs) if not_loaded_repo_cogs else "– keine –")
-        )
+        msg = "📦 **Cogs in deiner Liste:**\n"
 
-        if missing_in_repo:
-            msg += (
-                "\n\n⚠️ **Cogs in deiner Liste, aber nicht im Repo `kuhmuh`:**\n" +
-                "\n".join(f"• {c}" for c in missing_in_repo)
-            )
+        if not cogs:
+            msg += "– keine –"
+        else:
+            for c in cogs:
+                if c in loaded:
+                    msg += f"🟢 {c} (geladen)\n"
+                else:
+                    msg += f"🔴 {c} (nicht geladen)\n"
 
         await interaction.response.send_message(msg, ephemeral=False)
 
     # ------------------------------------------------------------
+    # ADD
+    # ------------------------------------------------------------
 
-    async def _cmd_add(self, interaction: discord.Interaction, name: str):
+    async def _cmd_add(self, interaction: discord.Interaction, cog: str):
         cogs = await self.config.cogs()
-        if name in cogs:
-            await interaction.response.send_message(
-                f"⚠️ **{name}** ist bereits in der Update-Liste.", ephemeral=False
-            )
+        if cog in cogs:
+            await interaction.response.send_message(f"⚠️ **{cog}** ist bereits in der Liste.", ephemeral=False)
             return
 
-        cogs.append(name)
+        cogs.append(cog)
         await self.config.cogs.set(cogs)
 
-        await interaction.response.send_message(
-            f"➕ Cog **{name}** wurde zur Update-Liste hinzugefügt.", ephemeral=False
-        )
+        await interaction.response.send_message(f"➕ Cog **{cog}** hinzugefügt.", ephemeral=False)
 
     # ------------------------------------------------------------
+    # REMOVE
+    # ------------------------------------------------------------
 
-    async def _cmd_remove(self, interaction: discord.Interaction, name: str):
+    async def _cmd_remove(self, interaction: discord.Interaction, cog: str):
         cogs = await self.config.cogs()
-        if name not in cogs:
-            await interaction.response.send_message(
-                f"⚠️ **{name}** ist nicht in der Update-Liste.", ephemeral=False
-            )
+        if cog not in cogs:
+            await interaction.response.send_message(f"⚠️ **{cog}** ist nicht in der Liste.", ephemeral=False)
             return
 
-        cogs.remove(name)
+        cogs.remove(cog)
         await self.config.cogs.set(cogs)
 
-        await interaction.response.send_message(
-            f"➖ Cog **{name}** wurde aus der Update-Liste entfernt.", ephemeral=False
-        )
+        await interaction.response.send_message(f"➖ Cog **{cog}** entfernt.", ephemeral=False)
 
     # ------------------------------------------------------------
+    # SINGLE UPDATE
+    # ------------------------------------------------------------
 
-    async def _cmd_run_all(self, interaction: discord.Interaction):
+    async def _cmd_single(self, interaction: discord.Interaction, cog: str):
         await interaction.response.defer(ephemeral=False)
 
-        saved_cogs = await self.config.cogs()
-        result = await self._smart_update(saved_cogs)
+        msg = await self._update_cog(cog)
 
-        await interaction.followup.send(result, ephemeral=False)
+        await interaction.followup.send(msg, ephemeral=False)
 
     # ------------------------------------------------------------
+    # UPDATE ALL
+    # ------------------------------------------------------------
 
-    async def _cmd_run_single(self, interaction: discord.Interaction, name: str):
+    async def _cmd_run(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
 
-        result = await self._smart_update([name])
+        cogs = await self.config.cogs()
+        if not cogs:
+            await interaction.followup.send("⚠️ Keine Cogs in der Liste.", ephemeral=False)
+            return
 
-        await interaction.followup.send(result, ephemeral=False)
+        output = "🔄 **Aktualisiere Cogs aus kuhmuh ...**\n\n"
+
+        for cog in cogs:
+            output += await self._update_cog(cog)
+
+        await interaction.followup.send(output, ephemeral=False)
 
     # ------------------------------------------------------------
-    # HELPER
+    # UPDATE LOGIK (1:1 wie du gewohnt bist)
     # ------------------------------------------------------------
 
-    async def _fetch_repo_cogs(self):
-        """Liest verfügbare Cogs aus dem Repo `kuhmuh`."""
-        dl = self.bot.get_cog("Downloader")
-        if not dl:
-            return []
+    async def _update_cog(self, cog: str):
+        """Führt aus:
+        repo update kuhmuh
+        cog uninstall <cog>
+        cog install kuhmuh <cog>
+        reload <cog>
+        """
+        out = ""
 
+        # repo update
         try:
-            rm = getattr(dl, "_repo_manager", None)
-            repo = await rm.get_repo(REPO_NAME)
-            return [c.name for c in repo.available_cogs]
-        except Exception:
-            return []
-
-    # ------------------------------------------------------------
-
-    async def _smart_update(self, list_cogs):
-        """SMART-Update: erst Repo updaten, dann aktuelle Repo-Cogs prüfen."""
-        updated = []
-        unchanged = []
-        failed = []
-
-        # 1️⃣ Repo aktualisieren
-        try:
-            cmd = self.bot.get_command("repo")
-            if cmd:
-                # Entspricht: °repo update kuhmuh
-                ctx = await self.bot.get_context(await self._fake_message("repo update kuhmuh"))
-                await ctx.invoke(cmd, "update", REPO_NAME)
+            repo_cmd = self.bot.get_command("repo")
+            ctx = await self._fake_ctx(f"repo update {REPO_NAME}")
+            await ctx.invoke(repo_cmd, "update", REPO_NAME)
         except Exception:
             pass
 
-        # 2️⃣ Frische Liste der Repo-Cogs holen
-        repo_cogs = await self._fetch_repo_cogs()
+        # uninstall
+        try:
+            uninstall_cmd = self.bot.get_command("cog")
+            ctx = await self._fake_ctx(f"cog uninstall {cog}")
+            await ctx.invoke(uninstall_cmd, "uninstall", cog)
+        except Exception:
+            pass
 
-        # 3️⃣ Pro Cog: prüfen, installieren, reloaden
-        for cog in list_cogs:
-            if cog not in repo_cogs:
-                failed.append((cog, "nicht im Repo"))
-                continue
+        # install
+        try:
+            install_cmd = self.bot.get_command("cog")
+            ctx = await self._fake_ctx(f"cog install {REPO_NAME} {cog}")
+            await ctx.invoke(install_cmd, "install", REPO_NAME, cog)
+        except Exception:
+            out += f"❌ Installation fehlgeschlagen für **{cog}**\n"
+            return out
 
-            # Install/force aus Repo
-            try:
-                cmd_cog = self.bot.get_command("cog")
-                if cmd_cog:
-                    ctx = await self.bot.get_context(
-                        await self._fake_message(f"cog install {REPO_NAME} {cog} --force")
-                    )
-                    await ctx.invoke(cmd_cog, "install", REPO_NAME, cog, "--force")
-            except Exception:
-                pass
+        # reload
+        try:
+            reload_cmd = self.bot.get_command("reload")
+            ctx = await self._fake_ctx(f"reload {cog}")
+            await ctx.invoke(reload_cmd, cog)
+        except Exception:
+            out += f"♻️ Update & Reload **{cog}** (Reload fehlgeschlagen – evtl. schon aktiv)\n"
+            return out
 
-            # Reloaden
-            try:
-                reload_cmd = self.bot.get_command("reload")
-                if reload_cmd:
-                    ctx = await self.bot.get_context(
-                        await self._fake_message(f"reload {cog}")
-                    )
-                    await ctx.invoke(reload_cmd, cog)
-                updated.append(cog)
-            except Exception:
-                unchanged.append(cog)
-
-        msg = "🔄 **Update abgeschlossen**\n\n"
-
-        if updated:
-            msg += "🟢 **Aktualisiert:**\n" + "\n".join(f"• {c}" for c in updated) + "\n\n"
-
-        if unchanged:
-            msg += "⚪ **Keine Änderung (evtl. bereits aktuell oder Reload fehlgeschlagen):**\n" + \
-                   "\n".join(f"• {c}" for c in unchanged) + "\n\n"
-
-        if failed:
-            msg += "🔴 **Fehler / nicht im Repo:**\n" + "\n".join(f"• {c}: {r}" for c, r in failed)
-
-        return msg
+        out += f"🍀 Update & Reload **{cog}**\n"
+        return out
 
     # ------------------------------------------------------------
-    # Fake-Message-Helfer, um bestehende Textcommands zu nutzen
+    # Fake-CTX → um bestehende Prefix-Commands zu nutzen
     # ------------------------------------------------------------
 
-    async def _fake_message(self, content: str):
-        """
-        Baut eine Fake-Message im ersten Textkanal der Guild,
-        damit wir bestehende Prefix-Commands via ctx.invoke nutzen können.
-        """
+    async def _fake_ctx(self, content: str):
+        """Baut einen Fake-Context, um bestehende Textbefehle mit ctx.invoke nutzen zu können."""
         guild = self.bot.get_guild(GUILD_ID)
-        if not guild:
-            # Fallback: irgendein Channel aus irgendeiner Guild
-            for g in self.bot.guilds:
-                if g.text_channels:
-                    channel = g.text_channels[0]
-                    break
-            else:
-                raise RuntimeError("Kein gültiger Textkanal gefunden.")
-        else:
-            # Erster Textkanal der Zielguild
-            text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
-            if not text_channels:
-                raise RuntimeError("Keine Textchannels in der Zielguild gefunden.")
-            channel = text_channels[0]
+        channel = guild.text_channels[0]
 
-        # Fake-Objekt für Nachricht bauen
-        message = discord.Message(
-            state=channel._state,
-            channel=channel,
-            data={
-                "id": 0,
-                "channel_id": channel.id,
-                "guild_id": guild.id if guild else None,
-                "content": content,
-                "author": {
-                    "id": self.bot.user.id,
-                    "username": self.bot.user.name,
-                    "discriminator": "0000",
-                    "bot": True
-                },
-                "attachments": [],
-                "embeds": [],
-                "mentions": [],
-                "mention_roles": [],
-                "pinned": False,
-                "type": 0
-            }
-        )
-        return message
+        message = discord.Object(id=0)
+        message.content = content
+        message.channel = channel
+        message.guild = guild
+        message.author = self.bot.user
+
+        return await self.bot.get_context(message)
