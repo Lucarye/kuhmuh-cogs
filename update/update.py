@@ -100,32 +100,35 @@ class Update(commands.Cog):
     # KUHMUH-COMMANDS (INTERN)
     # ------------------------------------------------------------
 
-    async def _cmd_list(self, interaction: discord.Interaction):
-        repo_cogs = await self._fetch_repo_cogs()
-        loaded_cogs = list(self.bot.cogs.keys())
-        saved_cogs = await self.config.cogs()
+        async def _cmd_list(self, interaction: discord.Interaction):
+        repo_cogs = await self._fetch_repo_cogs()          # alle Cogs aus Repo "kuhmuh"
+        loaded_all = list(self.bot.cogs.keys())           # alle geladenen Cogs
+        saved_cogs = await self.config.cogs()             # deine Update-Liste
 
+        # Nur Cogs aus deinem Repo betrachten
+        loaded_repo_cogs = [c for c in loaded_all if c in repo_cogs]
+        not_loaded_repo_cogs = [c for c in repo_cogs if c not in loaded_repo_cogs]
         missing_in_repo = [c for c in saved_cogs if c not in repo_cogs]
-        not_loaded = [c for c in repo_cogs if c not in loaded_cogs]
 
         msg = (
-            "📦 **Repo-Cogs:**\n" +
+            "📦 **Repo-Cogs (kuhmuh):**\n" +
             ("\n".join(f"• {c}" for c in repo_cogs) if repo_cogs else "– keine –") +
             "\n\n🔧 **Cogs in deiner Update-Liste:**\n" +
             ("\n".join(f"• {c}" for c in saved_cogs) if saved_cogs else "– leer –") +
-            "\n\n🟢 **Geladene Cogs:**\n" +
-            ("\n".join(f"• {c}" for c in loaded_cogs) if loaded_cogs else "– keine –") +
+            "\n\n🟢 **Geladene Repo-Cogs:**\n" +
+            ("\n".join(f"• {c}" for c in loaded_repo_cogs) if loaded_repo_cogs else "– keine –") +
             "\n\n🔴 **Nicht geladene Repo-Cogs:**\n" +
-            ("\n".join(f"• {c}" for c in not_loaded) if not_loaded else "– keine –")
+            ("\n".join(f"• {c}" for c in not_loaded_repo_cogs) if not_loaded_repo_cogs else "– keine –")
         )
 
         if missing_in_repo:
             msg += (
-                "\n\n⚠️ **Cogs in deiner Liste, aber nicht im Repo:**\n" +
+                "\n\n⚠️ **Cogs in deiner Liste, aber nicht im Repo `kuhmuh`:**\n" +
                 "\n".join(f"• {c}" for c in missing_in_repo)
             )
 
         await interaction.response.send_message(msg, ephemeral=False)
+
 
     # ------------------------------------------------------------
 
@@ -237,3 +240,4 @@ class Update(commands.Cog):
             msg += "🔴 **Fehler / nicht im Repo:**\n" + "\n".join(f"• {c}: {r}" for c, r in failed)
 
         return msg
+
