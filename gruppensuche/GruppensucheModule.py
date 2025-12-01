@@ -1,7 +1,7 @@
 # gruppensuche.py
 import discord
 from discord import app_commands
-from discord.ext import commands
+from redbot.core import commands
 from typing import Dict, Set
 
 TEST_CHANNEL_ID = 1199322485297000528
@@ -488,3 +488,4 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
