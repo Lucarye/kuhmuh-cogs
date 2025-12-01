@@ -28,14 +28,14 @@ class Update(commands.Cog):
             description="Update-Funktionen für das Kuhmuh-Repo"
         )
 
-        # Subcommands registrieren
+        # Subgroup unter /update
         self.update_group.add_command(self.kuhmuh_group)
 
         # --------- KUHMUH: SUBCOMMANDS ---------
 
         @self.kuhmuh_group.command(
             name="list",
-            description="Zeigt Status aller Cogs im Repo."
+            description="Zeigt Status aller Cogs im Repo 'kuhmuh'."
         )
         async def list_cmd(interaction: discord.Interaction):
             await self._cmd_list(interaction)
@@ -56,14 +56,14 @@ class Update(commands.Cog):
 
         @self.kuhmuh_group.command(
             name="run",
-            description="SMART-Update aller gespeicherten Cogs."
+            description="SMART-Update aller gespeicherten Cogs aus dem Repo 'kuhmuh'."
         )
         async def run_cmd(interaction: discord.Interaction):
             await self._cmd_run_all(interaction)
 
         @self.kuhmuh_group.command(
             name="single",
-            description="SMART-Update eines einzelnen Cogs."
+            description="SMART-Update eines einzelnen Cogs aus dem Repo 'kuhmuh'."
         )
         async def single_cmd(interaction: discord.Interaction, name: str):
             await self._cmd_run_single(interaction, name)
@@ -100,18 +100,19 @@ class Update(commands.Cog):
     # KUHMUH-COMMANDS (INTERN)
     # ------------------------------------------------------------
 
-        async def _cmd_list(self, interaction: discord.Interaction):
+    async def _cmd_list(self, interaction: discord.Interaction):
+        """Zeigt nur Cogs aus deinem Repo an."""
         repo_cogs = await self._fetch_repo_cogs()          # alle Cogs aus Repo "kuhmuh"
-        loaded_all = list(self.bot.cogs.keys())           # alle geladenen Cogs
-        saved_cogs = await self.config.cogs()             # deine Update-Liste
+        loaded_all = list(self.bot.cogs.keys())            # alle geladenen Cogs
+        saved_cogs = await self.config.cogs()              # deine Update-Liste
 
-        # Nur Cogs aus deinem Repo betrachten
+        # Nur dein Repo betrachten
         loaded_repo_cogs = [c for c in loaded_all if c in repo_cogs]
         not_loaded_repo_cogs = [c for c in repo_cogs if c not in loaded_repo_cogs]
         missing_in_repo = [c for c in saved_cogs if c not in repo_cogs]
 
         msg = (
-            "📦 **Repo-Cogs (kuhmuh):**\n" +
+            "📦 **Repo-Cogs (`kuhmuh`):**\n" +
             ("\n".join(f"• {c}" for c in repo_cogs) if repo_cogs else "– keine –") +
             "\n\n🔧 **Cogs in deiner Update-Liste:**\n" +
             ("\n".join(f"• {c}" for c in saved_cogs) if saved_cogs else "– leer –") +
@@ -129,13 +130,14 @@ class Update(commands.Cog):
 
         await interaction.response.send_message(msg, ephemeral=False)
 
-
     # ------------------------------------------------------------
 
     async def _cmd_add(self, interaction: discord.Interaction, name: str):
         cogs = await self.config.cogs()
         if name in cogs:
-            await interaction.response.send_message(f"⚠️ **{name}** ist bereits in der Liste.", ephemeral=False)
+            await interaction.response.send_message(
+                f"⚠️ **{name}** ist bereits in der Update-Liste.", ephemeral=False
+            )
             return
 
         cogs.append(name)
@@ -150,14 +152,16 @@ class Update(commands.Cog):
     async def _cmd_remove(self, interaction: discord.Interaction, name: str):
         cogs = await self.config.cogs()
         if name not in cogs:
-            await interaction.response.send_message(f"⚠️ **{name}** ist nicht in der Liste.", ephemeral=False)
+            await interaction.response.send_message(
+                f"⚠️ **{name}** ist nicht in der Update-Liste.", ephemeral=False
+            )
             return
 
         cogs.remove(name)
         await self.config.cogs.set(cogs)
 
         await interaction.response.send_message(
-            f"➖ Cog **{name}** wurde entfernt.", ephemeral=False
+            f"➖ Cog **{name}** wurde aus der Update-Liste entfernt.", ephemeral=False
         )
 
     # ------------------------------------------------------------
@@ -166,9 +170,8 @@ class Update(commands.Cog):
         await interaction.response.defer(ephemeral=False)
 
         saved_cogs = await self.config.cogs()
-        repo_cogs = await self._fetch_repo_cogs()
+        result = await self._smart_update(saved_cogs)
 
-        result = await self._smart_update(saved_cogs, repo_cogs)
         await interaction.followup.send(result, ephemeral=False)
 
     # ------------------------------------------------------------
@@ -176,8 +179,7 @@ class Update(commands.Cog):
     async def _cmd_run_single(self, interaction: discord.Interaction, name: str):
         await interaction.response.defer(ephemeral=False)
 
-        repo_cogs = await self._fetch_repo_cogs()
-        result = await self._smart_update([name], repo_cogs)
+        result = await self._smart_update([name])
 
         await interaction.followup.send(result, ephemeral=False)
 
@@ -186,6 +188,7 @@ class Update(commands.Cog):
     # ------------------------------------------------------------
 
     async def _fetch_repo_cogs(self):
+        """Liest verfügbare Cogs aus dem Repo `kuhmuh`."""
         dl = self.bot.get_cog("Downloader")
         if not dl:
             return []
@@ -199,31 +202,50 @@ class Update(commands.Cog):
 
     # ------------------------------------------------------------
 
-    async def _smart_update(self, list_cogs, repo_cogs):
+    async def _smart_update(self, list_cogs):
+        """SMART-Update: erst Repo updaten, dann aktuelle Repo-Cogs prüfen."""
         updated = []
         unchanged = []
         failed = []
 
-        # Repo aktualisieren:
+        # 1️⃣ Repo aktualisieren
         try:
-            await self.bot.get_command("repo update").callback(self.bot, REPO_NAME)
+            cmd = self.bot.get_command("repo")
+            if cmd:
+                # Entspricht: °repo update kuhmuh
+                ctx = await self.bot.get_context(await self._fake_message("repo update kuhmuh"))
+                await ctx.invoke(cmd, "update", REPO_NAME)
         except Exception:
             pass
 
+        # 2️⃣ Frische Liste der Repo-Cogs holen
+        repo_cogs = await self._fetch_repo_cogs()
+
+        # 3️⃣ Pro Cog: prüfen, installieren, reloaden
         for cog in list_cogs:
             if cog not in repo_cogs:
                 failed.append((cog, "nicht im Repo"))
                 continue
 
+            # Install/force aus Repo
             try:
-                await self.bot.get_command("cog install").callback(
-                    self.bot, REPO_NAME, cog, "--force"
-                )
+                cmd_cog = self.bot.get_command("cog")
+                if cmd_cog:
+                    ctx = await self.bot.get_context(
+                        await self._fake_message(f"cog install {REPO_NAME} {cog} --force")
+                    )
+                    await ctx.invoke(cmd_cog, "install", REPO_NAME, cog, "--force")
             except Exception:
                 pass
 
+            # Reloaden
             try:
-                await self.bot.get_command("reload").callback(self.bot, cog)
+                reload_cmd = self.bot.get_command("reload")
+                if reload_cmd:
+                    ctx = await self.bot.get_context(
+                        await self._fake_message(f"reload {cog}")
+                    )
+                    await ctx.invoke(reload_cmd, cog)
                 updated.append(cog)
             except Exception:
                 unchanged.append(cog)
@@ -234,10 +256,60 @@ class Update(commands.Cog):
             msg += "🟢 **Aktualisiert:**\n" + "\n".join(f"• {c}" for c in updated) + "\n\n"
 
         if unchanged:
-            msg += "⚪ **Keine Änderung:**\n" + "\n".join(f"• {c}" for c in unchanged) + "\n\n"
+            msg += "⚪ **Keine Änderung (evtl. bereits aktuell oder Reload fehlgeschlagen):**\n" + \
+                   "\n".join(f"• {c}" for c in unchanged) + "\n\n"
 
         if failed:
             msg += "🔴 **Fehler / nicht im Repo:**\n" + "\n".join(f"• {c}: {r}" for c, r in failed)
 
         return msg
 
+    # ------------------------------------------------------------
+    # Fake-Message-Helfer, um bestehende Textcommands zu nutzen
+    # ------------------------------------------------------------
+
+    async def _fake_message(self, content: str):
+        """
+        Baut eine Fake-Message im ersten Textkanal der Guild,
+        damit wir bestehende Prefix-Commands via ctx.invoke nutzen können.
+        """
+        guild = self.bot.get_guild(GUILD_ID)
+        if not guild:
+            # Fallback: irgendein Channel aus irgendeiner Guild
+            for g in self.bot.guilds:
+                if g.text_channels:
+                    channel = g.text_channels[0]
+                    break
+            else:
+                raise RuntimeError("Kein gültiger Textkanal gefunden.")
+        else:
+            # Erster Textkanal der Zielguild
+            text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
+            if not text_channels:
+                raise RuntimeError("Keine Textchannels in der Zielguild gefunden.")
+            channel = text_channels[0]
+
+        # Fake-Objekt für Nachricht bauen
+        message = discord.Message(
+            state=channel._state,
+            channel=channel,
+            data={
+                "id": 0,
+                "channel_id": channel.id,
+                "guild_id": guild.id if guild else None,
+                "content": content,
+                "author": {
+                    "id": self.bot.user.id,
+                    "username": self.bot.user.name,
+                    "discriminator": "0000",
+                    "bot": True
+                },
+                "attachments": [],
+                "embeds": [],
+                "mentions": [],
+                "mention_roles": [],
+                "pinned": False,
+                "type": 0
+            }
+        )
+        return message
