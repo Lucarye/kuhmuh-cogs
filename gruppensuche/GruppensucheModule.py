@@ -317,6 +317,21 @@ class Gruppensuche(commands.Cog):
         self.bot = bot
         self.group_searches: Dict[int, GroupSearchState] = {}
 
+    async def cog_load(self) -> None:
+        """Wird aufgerufen, wenn das Cog geladen wird – hier registrieren wir den Slash-Command."""
+        guild_obj = discord.Object(id=GUILD_ID)
+        self.bot.tree.add_command(self.gruppensuche_command, guild=guild_obj)
+
+    async def cog_unload(self) -> None:
+        """Beim Entladen den Slash-Command wieder entfernen."""
+        guild_obj = discord.Object(id=GUILD_ID)
+        # Name und Typ kommen direkt vom Command-Objekt
+        self.bot.tree.remove_command(
+            self.gruppensuche_command.name,
+            type=self.gruppensuche_command.type,
+            guild=guild_obj,
+        )
+
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(
         name="gruppensuche",
@@ -491,6 +506,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
