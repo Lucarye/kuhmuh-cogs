@@ -1,9 +1,9 @@
 {
   "author": [
-    "DeinName"
+    "Lucarye"
   ],
-  "name": "gruppensuche"
-  "short": "Gruppensuche mit Formular",
+  "name": "gruppensuche",
+  "short": "Gruppensuche",
   "description": "Slash-Command /gruppensuche mit ephemerem Formular (Kategorie, Menge, Dauer, Startzeit) und öffentlicher Gruppensuche mit Anmeldebuttons.",
   "install_msg": "Gruppensuche-Cog installiert. Nutze /gruppensuche, um eine neue Gruppensuche zu starten.",
   "requirements": [],
@@ -16,7 +16,6 @@
   "hidden": false,
   "disabled": false,
   "min_bot_version": "3.5.0",
-  "end_user_data_statement": "Dieses Cog speichert nur temporäre Daten im Speicher (Teilnehmerlisten von Gruppensuchen) und schreibt keine personenbezogenen Daten dauerhaft in Dateien oder externe Systeme.",
+  "end_user_data_statement": "Dieses Cog speichert nur temporäre Daten im Speicher (Teilnehmerlisten von Gruppensuchen) und schreibt keine personenbezogenen Daten dauerhaft.",
   "type": "COG"
 }
-
