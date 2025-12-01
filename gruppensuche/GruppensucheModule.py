@@ -3,7 +3,7 @@ from discord import app_commands
 from redbot.core import commands
 from typing import Dict, Set, Optional
 
-TEST_CHANNEL_ID = 1199322485297000528  # Channel für öffentliche Gruppensuchen
+TEST_CHANNEL_ID = 1199322485297000528  # Channel für öffentliche gruppensuchen
 TEST_ROLE_ID = 1445018518562017373     # Test-Rolle für Ping
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
 
@@ -48,13 +48,13 @@ class CategorySelect(discord.ui.Select):
                 label="Muhhelfer (LoML Bosse)",
                 value="muhhelfer",
                 emoji="🐄",
-                description="Gruppensuche für Muhhelfer / LoML Bosse",
+                description="gruppensuche für Muhhelfer / LoML Bosse",
             ),
             discord.SelectOption(
                 label="Pila Fe Schriftrollen",
                 value="pilafe",
                 emoji="📜",
-                description="Gruppensuche für Pila Fe Schriftrollen",
+                description="gruppensuche für Pila Fe Schriftrollen",
             ),
             discord.SelectOption(
                 label="Gruppenspots",
@@ -94,7 +94,7 @@ class CategorySelectView(discord.ui.View):
 
 # ---------- UI: Modals ----------
 
-class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
+class PilaFeModal(discord.ui.Modal, title="Pila Fe gruppensuche"):
     pilafe_amount = discord.ui.TextInput(
         label="Menge an Schriftrollen",
         placeholder="z. B. 1000",
@@ -136,7 +136,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
 
         detail_line = f"Anzahl Rollen: **{amount}**"
 
-        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+        cog: Optional[gruppensuche] = interaction.client.get_cog("gruppensuche")  # type: ignore[attr-defined]
         if cog is None:
             await interaction.response.send_message(
                 "Interner Fehler: Cog nicht gefunden.", ephemeral=True
@@ -146,7 +146,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
         await cog.create_public_group_message(
             interaction,
             category="pilafe",
-            title="📜 Gruppensuche – Pila Fe Schriftrollen",
+            title="📜 gruppensuche – Pila Fe Schriftrollen",
             subtitle="Pila Fe Schriftrollen",
             detail_line=detail_line,
             duration=duration,
@@ -197,7 +197,7 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
 
         detail_line = f"Spot: **{spot_name}**"
 
-        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+        cog: Optional[gruppensuche] = interaction.client.get_cog("gruppensuche")  # type: ignore[attr-defined]
         if cog is None:
             await interaction.response.send_message(
                 "Interner Fehler: Cog nicht gefunden.", ephemeral=True
@@ -207,7 +207,7 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
         await cog.create_public_group_message(
             interaction,
             category="spot",
-            title="🗺️ Gruppensuche – Spot",
+            title="🗺️ gruppensuche – Spot",
             subtitle="Gruppenspot",
             detail_line=detail_line,
             duration=duration,
@@ -216,7 +216,7 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
         )
 
 
-class MuhhelferModal(discord.ui.Modal, title="Muhhelfer-Gruppensuche"):
+class MuhhelferModal(discord.ui.Modal, title="Muhhelfer-gruppensuche"):
     muhhelfer_target = discord.ui.TextInput(
         label="Boss / Inhalt",
         placeholder="z. B. LoML-Bosse, bestimmter Boss …",
@@ -258,7 +258,7 @@ class MuhhelferModal(discord.ui.Modal, title="Muhhelfer-Gruppensuche"):
 
         detail_line = f"Ziel: **{target}**"
 
-        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+        cog: Optional[gruppensuche] = interaction.client.get_cog("gruppensuche")  # type: ignore[attr-defined]
         if cog is None:
             await interaction.response.send_message(
                 "Interner Fehler: Cog nicht gefunden.", ephemeral=True
@@ -268,7 +268,7 @@ class MuhhelferModal(discord.ui.Modal, title="Muhhelfer-Gruppensuche"):
         await cog.create_public_group_message(
             interaction,
             category="muhhelfer",
-            title="🐄 Gruppensuche – Muhhelfer",
+            title="🐄 gruppensuche – Muhhelfer",
             subtitle="Muhhelfer (LoML Bosse)",
             detail_line=detail_line,
             duration=duration,
@@ -280,7 +280,7 @@ class MuhhelferModal(discord.ui.Modal, title="Muhhelfer-Gruppensuche"):
 # ---------- UI: Join/Leave-View ----------
 
 class GroupSearchView(discord.ui.View):
-    def __init__(self, cog: "Gruppensuche", message_id: int) -> None:
+    def __init__(self, cog: "gruppensuche", message_id: int) -> None:
         super().__init__(timeout=None)
         self.cog = cog
         self.message_id = message_id
@@ -308,8 +308,8 @@ class GroupSearchView(discord.ui.View):
 
 # ---------- Haupt-Cog ----------
 
-class Gruppensuche(commands.Cog):
-    """Cog für /gruppensuche mit ephemerem Formular und öffentlicher Gruppensuche."""
+class gruppensuche(commands.Cog):
+    """Cog für /gruppensuche mit ephemerem Formular und öffentlicher gruppensuche."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -321,11 +321,11 @@ class Gruppensuche(commands.Cog):
 
         # Command im Tree registrieren
         self.bot.tree.add_command(self.gruppensuche_command, guild=guild_obj)
-        print("Gruppensuche: Slash-Command im Tree registriert, synchronisiere ...")
+        print("gruppensuche: Slash-Command im Tree registriert, synchronisiere ...")
 
         # Commands für diese Guild synchronisieren
         await self.bot.tree.sync(guild=guild_obj)
-        print("Gruppensuche: Slash-Commands für Guild gesynct.")
+        print("gruppensuche: Slash-Commands für Guild gesynct.")
 
     async def cog_unload(self) -> None:
         """Beim Entladen: Slash-Command aus dem Tree entfernen."""
@@ -339,12 +339,12 @@ class Gruppensuche(commands.Cog):
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(
         name="gruppensuche",
-        description="Starte eine neue Gruppensuche mit Formular.",
+        description="Starte eine neue gruppensuche mit Formular.",
     )
     async def gruppensuche_command(self, interaction: discord.Interaction) -> None:
         """Slash-Command-Einstieg: ephemerer Kategorie-Select."""
         embed = discord.Embed(
-            title=f"{MUHKUH_EMOJI} Gruppensuche erstellen",
+            title=f"{MUHKUH_EMOJI} gruppensuche erstellen",
             description=(
                 "Wähle, wofür du eine Gruppe suchst.\n\n"
                 "• **Muhhelfer (LoML Bosse)**\n"
@@ -388,7 +388,7 @@ class Gruppensuche(commands.Cog):
             channel, (discord.TextChannel, discord.Thread)
         ):
             await interaction.response.send_message(
-                "Der konfigurierte Channel für Gruppensuchen wurde nicht gefunden.",
+                "Der konfigurierte Channel für gruppensuchen wurde nicht gefunden.",
                 ephemeral=True,
             )
             return
@@ -437,7 +437,7 @@ class Gruppensuche(commands.Cog):
         await sent.edit(view=view)
 
         await interaction.response.send_message(
-            f"Deine Gruppensuche wurde in <#{TEST_CHANNEL_ID}> erstellt.",
+            f"Deine gruppensuche wurde in <#{TEST_CHANNEL_ID}> erstellt.",
             ephemeral=True,
         )
 
@@ -492,7 +492,7 @@ class Gruppensuche(commands.Cog):
         state = self.group_searches.get(message_id)
         if state is None:
             await interaction.response.send_message(
-                "Diese Gruppensuche ist nicht mehr aktiv oder konnte nicht gefunden werden.",
+                "Diese gruppensuche ist nicht mehr aktiv oder konnte nicht gefunden werden.",
                 ephemeral=True,
             )
             return
@@ -508,3 +508,4 @@ class Gruppensuche(commands.Cog):
         view = GroupSearchView(self, message_id=message_id)
 
         await interaction.response.edit_message(embed=embed, view=view)
+
