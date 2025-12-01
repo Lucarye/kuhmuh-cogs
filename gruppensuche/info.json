@@ -2,7 +2,7 @@
   "author": [
     "DeinName"
   ],
-  "name": "Gruppensuche",
+  "name": "gruppensuche"
   "short": "Gruppensuche mit Formular",
   "description": "Slash-Command /gruppensuche mit ephemerem Formular (Kategorie, Menge, Dauer, Startzeit) und öffentlicher Gruppensuche mit Anmeldebuttons.",
   "install_msg": "Gruppensuche-Cog installiert. Nutze /gruppensuche, um eine neue Gruppensuche zu starten.",
@@ -19,3 +19,4 @@
   "end_user_data_statement": "Dieses Cog speichert nur temporäre Daten im Speicher (Teilnehmerlisten von Gruppensuchen) und schreibt keine personenbezogenen Daten dauerhaft in Dateien oder externe Systeme.",
   "type": "COG"
 }
+
