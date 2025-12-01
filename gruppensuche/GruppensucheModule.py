@@ -7,6 +7,8 @@ from typing import Dict, Set
 TEST_CHANNEL_ID = 1199322485297000528
 TEST_ROLE_ID = 1445018518562017373
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
+GUILD_ID = 1198649628787212458
+
 
 CUSTOM_ID_CATEGORY_SELECT = "grpsearch_category_select"
 
@@ -37,7 +39,7 @@ class GroupSearchState:
         self.guild_id: int = guild_id
         self.channel_id: int = channel_id
         self.creator_id: int = creator_id
-        self.category: str = category
+        self.category: str = category    @app_commands.command(
         self.title: str = title
         self.subtitle: str = subtitle
         self.detail_line: str = detail_line
@@ -315,6 +317,7 @@ class Gruppensuche(commands.Cog):
         self.bot = bot
         self.group_searches: Dict[int, GroupSearchState] = {}
 
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(
         name="gruppensuche",
         description="Starte eine neue Gruppensuche mit Formular.",
@@ -488,4 +491,5 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
