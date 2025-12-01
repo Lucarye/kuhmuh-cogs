@@ -9,24 +9,77 @@ REPO_NAME = "kuhmuh"
 
 
 class Update(commands.Cog):
-    """Intelligentes Update-System für das Repo 'kuhmuh'."""
+    """SMART-Update-System für das Repo 'kuhmuh'."""
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=928374928374, force_registration=True)
+        self.config = Config.get_conf(self, identifier=982374982374, force_registration=True)
         self.config.register_global(cogs=[])
 
+        # Slash Command Groups
+        self.update_group = app_commands.Group(
+            name="update",
+            description="Kuhmuh Update-System"
+        )
+
+        self.kuhmuh_group = app_commands.Group(
+            name="kuhmuh",
+            description="Update-Funktionen für das Kuhmuh-Repo"
+        )
+
+        # Subcommands registrieren
+        self.update_group.add_command(self.kuhmuh_group)
+
+        # KUHMUH: LIST
+        @self.kuhmuh_group.command(
+            name="list",
+            description="Zeigt Status aller Cogs im Repo."
+        )
+        async def list_cmd(interaction: discord.Interaction):
+            await self._cmd_list(interaction)
+
+        # KUHMUH: ADD
+        @self.kuhmuh_group.command(
+            name="add",
+            description="Fügt ein Cog zur Update-Liste hinzu."
+        )
+        async def add_cmd(interaction: discord.Interaction, name: str):
+            await self._cmd_add(interaction, name)
+
+        # KUHMUH: REMOVE
+        @self.kuhmuh_group.command(
+            name="remove",
+            description="Entfernt ein Cog aus der Update-Liste."
+        )
+        async def remove_cmd(interaction: discord.Interaction, name: str):
+            await self._cmd_remove(interaction, name)
+
+        # KUHMUH: RUN (alle)
+        @self.kuhmuh_group.command(
+            name="run",
+            description="SMART-Update aller gespeicherten Cogs."
+        )
+        async def run_cmd(interaction: discord.Interaction):
+            await self._cmd_run_all(interaction)
+
+        # KUHMUH: SINGLE
+        @self.kuhmuh_group.command(
+            name="single",
+            description="SMART-Update eines einzelnen Cogs."
+        )
+        async def single_cmd(interaction: discord.Interaction, name: str):
+            await self._cmd_run_single(interaction, name)
+
     # ------------------------------------------------------------
-    # SLASH-COMMAND REGISTRIERUNG
+    # Slash-Command-Registrierung
     # ------------------------------------------------------------
 
     async def cog_load(self):
-        """Beim Laden: Slash Commands registrieren & auf Adminrolle beschränken."""
-        guilds = [g for g in self.bot.guilds]
+        """Slash-Befehle registrieren und Sichtbarkeit auf Adminrolle beschränken."""
+        self.bot.tree.add_command(self.update_group)
 
-        for guild in guilds:
+        for guild in self.bot.guilds:
             try:
-                # Sichtbarkeit NUR für Adminrolle aktivieren
                 perms = {
                     discord.Object(id=ADMIN_ROLE_ID): discord.Permissions(administrator=True)
                 }
@@ -34,27 +87,11 @@ class Update(commands.Cog):
             except Exception:
                 pass
 
-    # Hauptgruppe:
-    @app_commands.guild_only()
-    @app_commands.default_permissions()  # Keine Standardrechte → wir setzen Rollenrechte separat
-    @app_commands.command(name="update", description="Kuhmuh Update-System")
-    async def update_main(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            "Nutze Unterbefehle wie `/update kuhmuh`.",
-            ephemeral=False
-        )
-
-    # Untergruppe „kuhmuh“
-    @update_main.group(name="kuhmuh", description="Update-Funktionen für das Kuhmuh-Repo.")
-    async def update_kuhmuh(self, interaction: discord.Interaction):
-        pass
-
     # ------------------------------------------------------------
-    # LIST
+    # KUHMUH-COMMANDS (INTERN)
     # ------------------------------------------------------------
 
-    @update_kuhmuh.command(name="list", description="Zeigt Status aller Cogs.")
-    async def list_cogs(self, interaction: discord.Interaction):
+    async def _cmd_list(self, interaction: discord.Interaction):
         repo_cogs = await self._fetch_repo_cogs()
         loaded_cogs = list(self.bot.cogs.keys())
         saved_cogs = await self.config.cogs()
@@ -64,7 +101,7 @@ class Update(commands.Cog):
 
         msg = (
             "📦 **Repo-Cogs:**\n" +
-            "\n".join(f"• {c}" for c in repo_cogs) +
+            ("\n".join(f"• {c}" for c in repo_cogs) if repo_cogs else "– keine –") +
             "\n\n🔧 **Cogs in deiner Update-Liste:**\n" +
             ("\n".join(f"• {c}" for c in saved_cogs) if saved_cogs else "– leer –") +
             "\n\n🟢 **Geladene Cogs:**\n" +
@@ -82,11 +119,8 @@ class Update(commands.Cog):
         await interaction.response.send_message(msg, ephemeral=False)
 
     # ------------------------------------------------------------
-    # ADD
-    # ------------------------------------------------------------
 
-    @update_kuhmuh.command(name="add", description="Fügt ein Cog zur Update-Liste hinzu.")
-    async def add_cog(self, interaction: discord.Interaction, name: str):
+    async def _cmd_add(self, interaction: discord.Interaction, name: str):
         cogs = await self.config.cogs()
         if name in cogs:
             await interaction.response.send_message(f"⚠️ **{name}** ist bereits in der Liste.", ephemeral=False)
@@ -96,16 +130,12 @@ class Update(commands.Cog):
         await self.config.cogs.set(cogs)
 
         await interaction.response.send_message(
-            f"➕ Cog **{name}** wurde zur Update-Liste hinzugefügt.",
-            ephemeral=False
+            f"➕ Cog **{name}** wurde zur Update-Liste hinzugefügt.", ephemeral=False
         )
 
     # ------------------------------------------------------------
-    # REMOVE
-    # ------------------------------------------------------------
 
-    @update_kuhmuh.command(name="remove", description="Entfernt ein Cog aus der Update-Liste.")
-    async def remove_cog(self, interaction: discord.Interaction, name: str):
+    async def _cmd_remove(self, interaction: discord.Interaction, name: str):
         cogs = await self.config.cogs()
         if name not in cogs:
             await interaction.response.send_message(f"⚠️ **{name}** ist nicht in der Liste.", ephemeral=False)
@@ -115,16 +145,12 @@ class Update(commands.Cog):
         await self.config.cogs.set(cogs)
 
         await interaction.response.send_message(
-            f"➖ Cog **{name}** wurde entfernt.",
-            ephemeral=False
+            f"➖ Cog **{name}** wurde entfernt.", ephemeral=False
         )
 
     # ------------------------------------------------------------
-    # UPDATE ALLE
-    # ------------------------------------------------------------
 
-    @update_kuhmuh.command(name="run", description="Führt SMART-Update für alle Cogs aus.")
-    async def update_all(self, interaction: discord.Interaction):
+    async def _cmd_run_all(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
 
         saved_cogs = await self.config.cogs()
@@ -135,15 +161,11 @@ class Update(commands.Cog):
         await interaction.followup.send(result, ephemeral=False)
 
     # ------------------------------------------------------------
-    # UPDATE EINZELNER COG
-    # ------------------------------------------------------------
 
-    @update_kuhmuh.command(name="single", description="Update eines einzelnen Cogs.")
-    async def update_single(self, interaction: discord.Interaction, name: str):
+    async def _cmd_run_single(self, interaction: discord.Interaction, name: str):
         await interaction.response.defer(ephemeral=False)
 
         repo_cogs = await self._fetch_repo_cogs()
-
         result = await self._smart_update([name], repo_cogs)
 
         await interaction.followup.send(result, ephemeral=False)
@@ -153,7 +175,7 @@ class Update(commands.Cog):
     # ------------------------------------------------------------
 
     async def _fetch_repo_cogs(self):
-        """Liest verfügbar Cogs aus dem Repo."""
+        """Liest verfügbare Cogs aus dem Repo."""
         dl = self.bot.get_cog("Downloader")
         if not dl:
             return []
@@ -164,6 +186,8 @@ class Update(commands.Cog):
             return [c.name for c in repo.available_cogs]
         except Exception:
             return []
+
+    # ------------------------------------------------------------
 
     async def _smart_update(self, list_cogs, repo_cogs):
         updated = []
