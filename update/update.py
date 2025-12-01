@@ -74,19 +74,23 @@ class Update(commands.Cog):
     # Slash-Command-Registrierung
     # ------------------------------------------------------------
 
-    async def cog_load(self):
-        """Slash-Befehle registrieren und Sichtbarkeit auf Adminrolle beschränken."""
-        self.bot.tree.add_command(self.update_group)
+async def cog_load(self):
+    guild = discord.Object(id=1198649628787212458)
 
-        for guild in self.bot.guilds:
-            try:
-                perms = {
-                    discord.Object(id=ADMIN_ROLE_ID): discord.Permissions(administrator=True)
-                }
-                await guild.set_app_commands_permissions(permissions=perms)
-            except Exception:
-                pass
+    # Command hinzufügen
+    self.bot.tree.add_command(self.update_group, guild=guild)
 
+    # Visibility auf Adminrolle beschränken
+    try:
+        perms = {
+            discord.Object(id=ADMIN_ROLE_ID): discord.Permissions(administrator=True)
+        }
+        await self.bot.get_guild(1198649628787212458).set_app_commands_permissions(permissions=perms)
+    except Exception:
+        pass
+
+    # FORCE SYNC (wichtig!)
+    await self.bot.tree.sync(guild=guild)
     # ------------------------------------------------------------
     # KUHMUH-COMMANDS (INTERN)
     # ------------------------------------------------------------
@@ -230,3 +234,4 @@ class Update(commands.Cog):
             msg += "🔴 **Fehler / nicht im Repo:**\n" + "\n".join(f"• {c}: {r}" for c, r in failed)
 
         return msg
+
