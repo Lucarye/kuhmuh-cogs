@@ -1,5 +1,5 @@
+# kuhmuh_tools.py (Ausschnitt)
 from redbot.core import commands
-
 
 class KuhmuhTools(commands.Cog):
     """Hilfsbefehle für Kuhmuh-Setup & Updates."""
@@ -10,29 +10,28 @@ class KuhmuhTools(commands.Cog):
     @commands.command(name="kuhmuhupdate")
     @commands.admin_or_permissions(manage_guild=True)
     async def kuhmuhupdate(self, ctx: commands.Context):
-        """Aktualisiert Repo 'kuhmuh', updated/reinstalled Cogs und lädt sie neu."""
-        await ctx.send("🔄 **Starte Update aller Cogs aus 'kuhmuh'…**")
+        """Aktualisiert Repo 'kuhmuh', updated/reinstalled Cogs und lädt sie neu (mit Versionsanzeige)."""
+        await ctx.send("🔄 **Starte Update aller Cogs aus 'kuhmuh'...**")
 
         # 1️⃣ Downloader sicherstellen
         if not self.bot.get_cog("Downloader"):
             try:
                 await ctx.invoke(self.bot.get_command("load"), "downloader")
             except Exception:
-                await ctx.send("⚠️ Downloader konnte nicht geladen werden, fahre trotzdem fort…")
+                await ctx.send("⚠️ Downloader konnte nicht geladen werden, fahre trotzdem fort...")
 
-        # 2️⃣ Repo-Update
+        # 2️⃣ Repo & Cogs updaten
         try:
             await ctx.invoke(self.bot.get_command("repo"), "update", "kuhmuh")
         except Exception:
             await ctx.send("⚠️ Repo-Update fehlgeschlagen (übersprungen).")
 
-        # 3️⃣ Cog-Update
         try:
             await ctx.invoke(self.bot.get_command("cog"), "update", "kuhmuh")
         except Exception:
             await ctx.send("⚠️ Cog-Update fehlgeschlagen (übersprungen).")
 
-        # 4️⃣ Cogs aus Repo holen
+        # 3️⃣ Alle Cogs aus Repo 'kuhmuh' sammeln
         reponame = "kuhmuh"
         target_cogs = set()
         dl = self.bot.get_cog("Downloader")
@@ -49,38 +48,24 @@ class KuhmuhTools(commands.Cog):
         except Exception:
             pass
 
-        # 5️⃣ Repo → tatsächliche Cog-Namen mappen
-        name_map = {
-            "gruppensuche": "Gruppensuche",
-            # weitere Cogs falls Struktur abweicht
-        }
-
-        mapped = set()
-        for name in target_cogs:
-            mapped.add(name_map.get(name, name))
-
-        target_cogs = mapped
-
-        # Falls Repo leer → kurze Fallbackliste
+        # Fallback falls API nichts liefert
         if not target_cogs:
             target_cogs.update({"triggerpost", "kuhmuh_tools"})
 
-        # 6️⃣ Installieren / Reinstallieren
+        # 4️⃣ Installiere / Reinstalliere
         for cog in target_cogs:
             try:
-                await ctx.send(f"🔧 Installiere/Reinstalliere **{cog}**…")
                 await ctx.invoke(self.bot.get_command("cog"), "install", reponame, cog, "--force")
             except Exception:
                 try:
                     await ctx.invoke(self.bot.get_command("cog"), "reinstall", cog)
                 except Exception:
-                    await ctx.send(f"⚠️ Konnte {cog} weder installieren noch reinstallen.")
+                    pass
 
-        # 7️⃣ Reload
+        # 5️⃣ Reload aller geladenen Cogs
         reloaded = []
         for cog in target_cogs:
             try:
-                await ctx.send(f"♻️ Reload: **{cog}**…")
                 await ctx.invoke(self.bot.get_command("unload"), cog)
             except Exception:
                 pass
@@ -88,9 +73,9 @@ class KuhmuhTools(commands.Cog):
                 await ctx.invoke(self.bot.get_command("load"), cog)
                 reloaded.append(cog)
             except Exception:
-                await ctx.send(f"⚠️ {cog} konnte nicht neu geladen werden.")
+                pass
 
-        # 8️⃣ Versionen ausgeben
+        # 6️⃣ Versionen ausgeben
         version_lines = []
         for cog in reloaded:
             c = self.bot.get_cog(cog)
@@ -100,10 +85,5 @@ class KuhmuhTools(commands.Cog):
         if not version_lines:
             version_lines.append("– keine Cogs geladen oder Version nicht verfügbar –")
 
-        await ctx.send("✅ **Update abgeschlossen.**\n\n" + "\n".join(version_lines))
-
-
-# 🔚 Setup-Funktion MUSS vorhanden sein
-async def setup(bot):
-    """Erforderlich, damit Red das Cog laden kann."""
-    await bot.add_cog(KuhmuhTools(bot))
+        summary = "\n".join(version_lines)
+        await ctx.send(f"✅ **Update abgeschlossen.**\n\n{summary}")
