@@ -1,0 +1,21 @@
+{
+  "author": [
+    "DeinName"
+  ],
+  "name": "Gruppensuche",
+  "short": "Gruppensuche mit Formular",
+  "description": "Slash-Command /gruppensuche mit ephemerem Formular (Kategorie, Menge, Dauer, Startzeit) und öffentlicher Gruppensuche mit Anmeldebuttons.",
+  "install_msg": "Gruppensuche-Cog installiert. Nutze /gruppensuche, um eine neue Gruppensuche zu starten.",
+  "requirements": [],
+  "tags": [
+    "bdo",
+    "gruppen",
+    "guild",
+    "utility"
+  ],
+  "hidden": false,
+  "disabled": false,
+  "min_bot_version": "3.5.0",
+  "end_user_data_statement": "Dieses Cog speichert nur temporäre Daten im Speicher (Teilnehmerlisten von Gruppensuchen) und schreibt keine personenbezogenen Daten dauerhaft in Dateien oder externe Systeme.",
+  "type": "COG"
+}
