@@ -39,7 +39,7 @@ class GroupSearchState:
         self.guild_id: int = guild_id
         self.channel_id: int = channel_id
         self.creator_id: int = creator_id
-        self.category: str = category    @app_commands.command(
+        self.category: str = category
         self.title: str = title
         self.subtitle: str = subtitle
         self.detail_line: str = detail_line
@@ -491,6 +491,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
