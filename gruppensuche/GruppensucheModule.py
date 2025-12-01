@@ -1,23 +1,13 @@
-# gruppensuche.py
 import discord
 from discord import app_commands
 from redbot.core import commands
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 
-TEST_CHANNEL_ID = 1199322485297000528
-TEST_ROLE_ID = 1445018518562017373
+TEST_CHANNEL_ID = 1199322485297000528  # Channel für öffentliche Gruppensuchen
+TEST_ROLE_ID = 1445018518562017373     # Test-Rolle für Ping
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
-GUILD_ID = 1198649628787212458
 
-
-CUSTOM_ID_CATEGORY_SELECT = "grpsearch_category_select"
-
-CUSTOM_ID_MODAL_PILAFE = "grpsearch_pilafe_modal"
-CUSTOM_ID_MODAL_SPOT = "grpsearch_spot_modal"
-CUSTOM_ID_MODAL_MUHH = "grpsearch_muhhelfer_modal"
-
-CUSTOM_ID_BUTTON_JOIN = "grpsearch_join"
-CUSTOM_ID_BUTTON_LEAVE = "grpsearch_leave"
+GUILD_ID = 1198649628787212458         # Deine Server-ID
 
 
 class GroupSearchState:
@@ -31,9 +21,9 @@ class GroupSearchState:
         title: str,
         subtitle: str,
         detail_line: str,
-        duration: str | None = None,
-        start_time: str | None = None,
-        note: str | None = None,
+        duration: Optional[str] = None,
+        start_time: Optional[str] = None,
+        note: Optional[str] = None,
     ) -> None:
         self.message_id: int = message_id
         self.guild_id: int = guild_id
@@ -43,11 +33,13 @@ class GroupSearchState:
         self.title: str = title
         self.subtitle: str = subtitle
         self.detail_line: str = detail_line
-        self.duration: str | None = duration
-        self.start_time: str | None = start_time
-        self.note: str | None = note
+        self.duration: Optional[str] = duration
+        self.start_time: Optional[str] = start_time
+        self.note: Optional[str] = note
         self.participants: Set[int] = set()
 
+
+# ---------- UI: Kategorie-Select ----------
 
 class CategorySelect(discord.ui.Select):
     def __init__(self) -> None:
@@ -72,7 +64,7 @@ class CategorySelect(discord.ui.Select):
             ),
         ]
         super().__init__(
-            custom_id=CUSTOM_ID_CATEGORY_SELECT,
+            custom_id="grpsearch_category_select",
             placeholder="Kategorie auswählen …",
             min_values=1,
             max_values=1,
@@ -95,10 +87,12 @@ class CategorySelect(discord.ui.Select):
 
 
 class CategorySelectView(discord.ui.View):
-    def __init__(self, timeout: float | None = 300) -> None:
+    def __init__(self, timeout: Optional[float] = 300) -> None:
         super().__init__(timeout=timeout)
         self.add_item(CategorySelect())
 
+
+# ---------- UI: Modals ----------
 
 class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
     pilafe_amount = discord.ui.TextInput(
@@ -142,7 +136,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
 
         detail_line = f"Anzahl Rollen: **{amount}**"
 
-        cog: Gruppensuche | None = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
         if cog is None:
             await interaction.response.send_message(
                 "Interner Fehler: Cog nicht gefunden.", ephemeral=True
@@ -203,7 +197,7 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
 
         detail_line = f"Spot: **{spot_name}**"
 
-        cog: Gruppensuche | None = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
         if cog is None:
             await interaction.response.send_message(
                 "Interner Fehler: Cog nicht gefunden.", ephemeral=True
@@ -264,7 +258,7 @@ class MuhhelferModal(discord.ui.Modal, title="Muhhelfer-Gruppensuche"):
 
         detail_line = f"Ziel: **{target}**"
 
-        cog: Gruppensuche | None = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
         if cog is None:
             await interaction.response.send_message(
                 "Interner Fehler: Cog nicht gefunden.", ephemeral=True
@@ -283,6 +277,8 @@ class MuhhelferModal(discord.ui.Modal, title="Muhhelfer-Gruppensuche"):
         )
 
 
+# ---------- UI: Join/Leave-View ----------
+
 class GroupSearchView(discord.ui.View):
     def __init__(self, cog: "Gruppensuche", message_id: int) -> None:
         super().__init__(timeout=None)
@@ -292,7 +288,7 @@ class GroupSearchView(discord.ui.View):
     @discord.ui.button(
         label="Ich bin dabei",
         style=discord.ButtonStyle.success,
-        custom_id=CUSTOM_ID_BUTTON_JOIN,
+        custom_id="grpsearch_join",
     )
     async def join_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -302,13 +298,15 @@ class GroupSearchView(discord.ui.View):
     @discord.ui.button(
         label="Abmelden",
         style=discord.ButtonStyle.secondary,
-        custom_id=CUSTOM_ID_BUTTON_LEAVE,
+        custom_id="grpsearch_leave",
     )
     async def leave_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         await self.cog.handle_join_leave(interaction, self.message_id, join=False)
 
+
+# ---------- Haupt-Cog ----------
 
 class Gruppensuche(commands.Cog):
     """Cog für /gruppensuche mit ephemerem Formular und öffentlicher Gruppensuche."""
@@ -318,14 +316,20 @@ class Gruppensuche(commands.Cog):
         self.group_searches: Dict[int, GroupSearchState] = {}
 
     async def cog_load(self) -> None:
-        """Wird aufgerufen, wenn das Cog geladen wird – hier registrieren wir den Slash-Command."""
+        """Beim Laden: Slash-Command registrieren und für die Guild syncen."""
         guild_obj = discord.Object(id=GUILD_ID)
+
+        # Command im Tree registrieren
         self.bot.tree.add_command(self.gruppensuche_command, guild=guild_obj)
+        print("Gruppensuche: Slash-Command im Tree registriert, synchronisiere ...")
+
+        # Commands für diese Guild synchronisieren
+        await self.bot.tree.sync(guild=guild_obj)
+        print("Gruppensuche: Slash-Commands für Guild gesynct.")
 
     async def cog_unload(self) -> None:
-        """Beim Entladen den Slash-Command wieder entfernen."""
+        """Beim Entladen: Slash-Command aus dem Tree entfernen."""
         guild_obj = discord.Object(id=GUILD_ID)
-        # Name und Typ kommen direkt vom Command-Objekt
         self.bot.tree.remove_command(
             self.gruppensuche_command.name,
             type=self.gruppensuche_command.type,
@@ -338,6 +342,7 @@ class Gruppensuche(commands.Cog):
         description="Starte eine neue Gruppensuche mit Formular.",
     )
     async def gruppensuche_command(self, interaction: discord.Interaction) -> None:
+        """Slash-Command-Einstieg: ephemerer Kategorie-Select."""
         embed = discord.Embed(
             title=f"{MUHKUH_EMOJI} Gruppensuche erstellen",
             description=(
@@ -366,10 +371,11 @@ class Gruppensuche(commands.Cog):
         title: str,
         subtitle: str,
         detail_line: str,
-        duration: str | None,
-        start_time: str | None,
-        note: str | None,
+        duration: Optional[str],
+        start_time: Optional[str],
+        note: Optional[str],
     ) -> None:
+        """Erstellt die öffentliche Such-Nachricht im Test-Channel."""
         if interaction.guild is None:
             await interaction.response.send_message(
                 "Dieser Befehl kann nur auf einem Server verwendet werden.",
@@ -404,7 +410,7 @@ class Gruppensuche(commands.Cog):
         )
 
         embed = self.build_group_embed(dummy_state, initial=True)
-        view_placeholder = GroupSearchView(self, message_id=0)  # id wird gleich gesetzt
+        view_placeholder = GroupSearchView(self, message_id=0)
 
         sent = await channel.send(
             content=f"<@&{TEST_ROLE_ID}>",
@@ -502,12 +508,3 @@ class Gruppensuche(commands.Cog):
         view = GroupSearchView(self, message_id=message_id)
 
         await interaction.response.edit_message(embed=embed, view=view)
-
-
-async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(Gruppensuche(bot))
-
-
-
-
-
