@@ -3,7 +3,7 @@
     "install_msg": "Das Update-Cog wurde installiert.",
     "name": "update",
     "short": "Verwaltet Updates für Cogs im Repo 'kuhmuh'.",
-    "description": "Bietet SMART-Updates, Cog-Management und Slash-Commands für Repo-Cogs.",
+    "description": "SMART-Update-System, Cog-Verwaltung und Status-Listen.",
     "tags": ["update", "repo", "management"],
     "requirements": [],
     "permissions": [],
