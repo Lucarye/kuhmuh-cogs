@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from redbot.core import commands
 from typing import Dict, Optional, List, Tuple, Set
+import time
 
 # === IDs / Konfiguration ===
 TEST_CHANNEL_ID = 1199322485297000528  # Öffentlicher Test-Channel
@@ -10,7 +11,10 @@ TEST_ROLE_ID = 1445018518562017373     # Test-Rolle fürs "Neue Suche" Ping
 ROLE_NORMAL_ID = 1424768638157852682   # Muhhelfer – Normal
 ROLE_SCHWER_ID = 1424769286790054050   # Muhhelfer – Schwer
 
-ADMIN_ROLE_ID: Optional[int] = 1198650646786736240  # deine Admin-Rolle
+ADMIN_ROLE_ID: Optional[int] = 1198650646786736240     # Admin-Rolle
+OFFIZIER_ROLE_ID: Optional[int] = 1198652039312453723  # Offizier-Rolle (gleich wie Admin)
+
+PING_COOLDOWN_SECONDS = 600  # 10 Minuten Cooldown für Ersteller
 
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
 PILAFE_EMOJI = "<:pilafe:1450051653297504368>"
@@ -53,7 +57,7 @@ class GroupSearchState:
         requirement_akvk: Optional[str] = None,    # Standard oder Override
         ping_role_id: Optional[int] = None,
         max_players: int = 5,
-        tag_runs: Optional[Set[str]] = None,       # boss_keys mit Doppel Run
+        doppel_runs: Optional[Set[str]] = None,    # boss_keys mit Doppel Run
     ) -> None:
         self.message_id = message_id
         self.guild_id = guild_id
@@ -70,22 +74,22 @@ class GroupSearchState:
         self.requirement_akvk = requirement_akvk
         self.ping_role_id = ping_role_id
         self.max_players = max_players
-        self.tag_runs = tag_runs or set()
+        self.doppel_runs = doppel_runs or set()
 
         # Join-Reihenfolge: Liste statt Set
         self.participants_order: List[int] = []
         self.waitlist_order: List[int] = []
 
-        # Ping-Flags (einmalig)
-        self.ping_role_used: bool = False
-        self.ping_waitlist_used: bool = False
+        # Cooldown timestamps (Creator)
+        self.ping_role_last_ts: Optional[float] = None
+        self.ping_waitlist_last_ts: Optional[float] = None
 
 
 class MuhhWizardState:
     """Ephemeral Wizard state pro User."""
     def __init__(self) -> None:
         self.difficulty: Optional[str] = None  # "Normal" / "Schwer"
-        self.max_players: int = 5              # Test: 0–5
+        self.max_players: int = 5              # 1–5
         self.selected_boss_keys: List[str] = []
         self.doppel_run_keys: Set[str] = set()
         self.custom_akvk: Optional[str] = None
@@ -169,7 +173,7 @@ def build_muhh_embed_step_size(state: MuhhWizardState) -> discord.Embed:
         description=(
             f"**Schwierigkeit:** {state.difficulty}\n"
             f"**Empfohlen mind. AK/VK:** {req}\n\n"
-            "Wähle die **maximale Teilnehmerzahl** (Test: 0–5)."
+            "Wähle die **maximale Teilnehmerzahl**."
         ),
         colour=discord.Colour.blurple(),
     )
@@ -192,11 +196,9 @@ def build_muhh_embed_step_bosses(state: MuhhWizardState) -> discord.Embed:
 def build_muhh_embed_step_runs(state: MuhhWizardState) -> discord.Embed:
     req = AKVK_NORMAL if state.difficulty == "Normal" else AKVK_SCHWER
 
-    chosen = state.selected_boss_keys
     boss_label_map = dict(BOSSES)
-
     boss_lines = []
-    for k in chosen:
+    for k in state.selected_boss_keys:
         name = boss_label_map.get(k, k)
         if k in state.doppel_run_keys:
             boss_lines.append(f"• {name} **(Doppel Run)**")
@@ -244,8 +246,8 @@ class MuhhDifficultyView(discord.ui.View):
 
 class MuhhSizeSelect(discord.ui.Select):
     def __init__(self, user_id: int) -> None:
-        # Test: 0–5
-        options = [discord.SelectOption(label=str(i), value=str(i)) for i in range(0, 6)]
+        # 1–5 (final)
+        options = [discord.SelectOption(label=str(i), value=str(i)) for i in range(1, 6)]
         super().__init__(
             placeholder="Max. Teilnehmer auswählen …",
             min_values=1,
@@ -357,8 +359,8 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
         style=discord.TextStyle.short,
     )
     pilafe_duration_hours = discord.ui.TextInput(
-        label="Dauer (in Stunden)",
-        placeholder="z. B. 3",
+        label="Geplante Dauer",
+        placeholder="z. B. 30min, 2h, 90min",
         required=False,
         style=discord.TextStyle.short,
     )
@@ -381,7 +383,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
         start_time_raw = str(self.common_start_time.value).strip()
         note_raw = str(self.common_note.value).strip()
 
-        duration = f"{duration_raw} Stunden" if duration_raw else None
+        duration = duration_raw or None
         start_time = start_time_raw or None
         note = note_raw or None
 
@@ -403,7 +405,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
             difficulty=None,
             requirement_akvk=None,
             ping_role_id=None,
-            max_players=0,  # irrelevant hier
+            max_players=0,  # irrelevant
             doppel_runs=set(),
         )
 
@@ -416,8 +418,8 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
         style=discord.TextStyle.short,
     )
     spot_duration_hours = discord.ui.TextInput(
-        label="Dauer (in Stunden)",
-        placeholder="z. B. 3",
+        label="Geplante Dauer",
+        placeholder="z. B. 30min, 2h, 90min",
         required=False,
         style=discord.TextStyle.short,
     )
@@ -440,7 +442,7 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
         start_time_raw = str(self.common_start_time.value).strip()
         note_raw = str(self.common_note.value).strip()
 
-        duration = f"{duration_raw} Stunden" if duration_raw else None
+        duration = duration_raw or None
         start_time = start_time_raw or None
         note = note_raw or None
 
@@ -468,12 +470,12 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
 
 
 class MuhhDetailsModal(discord.ui.Modal, title="Muhhelfer – Details"):
-    duration_hours = discord.ui.TextInput(
-        label="Dauer (in Stunden)",
-        placeholder="z. B. 2",
+    duration = discord.ui.TextInput(
+        label="Geplante Dauer",
+        placeholder="z. B. 30min, 2h, 90min",
         required=False,
         style=discord.TextStyle.short,
-        custom_id="muhh_duration_hours",
+        custom_id="muhh_duration",
     )
     start_time = discord.ui.TextInput(
         label="Startzeit",
@@ -537,11 +539,37 @@ class Gruppensuche(commands.Cog):
                 "• **Muhhelfer (LoML Bosse)**\n"
                 "• **Pila Fe Schriftrollen**\n"
                 "• **Gruppenspots**\n\n"
-                "Nach der Auswahl kannst du Details wie **Menge**, **Dauer** und **Startzeit** angeben."
+                "Nach der Auswahl kannst du Details wie **Menge**, **Geplante Dauer** und **Startzeit** angeben."
             ),
             colour=discord.Colour.blurple(),
         )
         await interaction.response.send_message(embed=embed, view=CategorySelectView(), ephemeral=True)
+
+    # ===== Rechte / Helper =====
+
+    def is_admin_or_offizier(self, member: discord.Member) -> bool:
+        return any(
+            (ADMIN_ROLE_ID is not None and r.id == ADMIN_ROLE_ID) or
+            (OFFIZIER_ROLE_ID is not None and r.id == OFFIZIER_ROLE_ID)
+            for r in member.roles
+        )
+
+    def is_admin_offizier_or_creator(self, member: discord.Member, creator_id: int) -> bool:
+        return member.id == creator_id or self.is_admin_or_offizier(member) or member.guild_permissions.administrator
+
+    def _remove_from_lists(self, uid: int, state: GroupSearchState) -> None:
+        if uid in state.participants_order:
+            state.participants_order = [x for x in state.participants_order if x != uid]
+        if uid in state.waitlist_order:
+            state.waitlist_order = [x for x in state.waitlist_order if x != uid]
+
+    def _try_fill_from_waitlist(self, state: GroupSearchState) -> None:
+        if state.max_players <= 0:
+            return
+        while len(state.participants_order) < state.max_players and state.waitlist_order:
+            uid = state.waitlist_order.pop(0)
+            if uid not in state.participants_order:
+                state.participants_order.append(uid)
 
     # ===== Muhhelfer Wizard =====
 
@@ -556,7 +584,7 @@ class Gruppensuche(commands.Cog):
         st.difficulty = difficulty
         st.selected_boss_keys = []
         st.doppel_run_keys = set()
-        st.max_players = 5  # Default
+        st.max_players = 5
         await interaction.response.edit_message(embed=build_muhh_embed_step_size(st), view=MuhhSizeView(self, user_id))
 
     async def back_to_muhh_difficulty(self, interaction: discord.Interaction, user_id: int) -> None:
@@ -566,7 +594,7 @@ class Gruppensuche(commands.Cog):
         st = self.muhh_wizard.get(user_id)
         if st is None or st.difficulty is None:
             return await self.back_to_muhh_difficulty(interaction, user_id)
-        st.max_players = max(0, min(5, int(max_players)))
+        st.max_players = max(1, min(5, int(max_players)))
         await interaction.response.edit_message(embed=build_muhh_embed_step_bosses(st), view=MuhhBossView(self, user_id))
 
     async def back_to_muhh_size(self, interaction: discord.Interaction, user_id: int) -> None:
@@ -623,7 +651,6 @@ class Gruppensuche(commands.Cog):
         if st is None or st.difficulty is None or not st.selected_boss_keys:
             return await interaction.response.send_message("Wizard-Status verloren. Bitte /gruppensuche neu starten.", ephemeral=True)
 
-        # Modal values aus interaction.data extrahieren
         fields: Dict[str, str] = {}
         for row in interaction.data.get("components", []):  # type: ignore[union-attr]
             for comp in row.get("components", []):
@@ -632,12 +659,12 @@ class Gruppensuche(commands.Cog):
                 if cid:
                     fields[cid] = val
 
-        duration_in = fields.get("muhh_duration_hours", "").strip()
+        duration_in = fields.get("muhh_duration", "").strip()
         start_in = fields.get("muhh_start_time", "").strip()
         custom_akvk_in = fields.get("muhh_custom_akvk", "").strip()
         note_in = fields.get("muhh_note", "").strip()
 
-        st.duration = f"{duration_in} Stunden" if duration_in else None
+        st.duration = duration_in or None
         st.start_time = start_in or None
         st.note = note_in or None
         st.custom_akvk = custom_akvk_in or None
@@ -659,10 +686,14 @@ class Gruppensuche(commands.Cog):
             detail_lines.append("")
             detail_lines.append("⚠️ **2. Charakter erforderlich**")
 
+        # Schwierigkeit hervorheben + Titel
+        diff_title = "Schwer" if st.difficulty == "Schwer" else "Normal"
+        title = f"{MUHKUH_EMOJI} Gruppensuche – Muhhelfer ({diff_title})"
+
         await self.create_public_group_message(
             interaction,
             category="muhhelfer",
-            title=f"{MUHKUH_EMOJI} Gruppensuche – Muhhelfer",
+            title=title,
             subtitle="Muhhelfer (LoML Bosse)",
             detail_lines=detail_lines,
             duration=st.duration,
@@ -721,10 +752,10 @@ class Gruppensuche(commands.Cog):
             requirement_akvk=requirement_akvk,
             ping_role_id=ping_role_id,
             max_players=max_players,
-            tag_runs=doppel_runs,
+            doppel_runs=doppel_runs,
         )
 
-        # Ersteller immer als Teilnehmer (Join-Reihenfolge)
+        # Ersteller immer als Teilnehmer
         state.participants_order.append(creator_id)
 
         embed = self.build_public_embed(state)
@@ -733,7 +764,7 @@ class Gruppensuche(commands.Cog):
         state.message_id = sent.id
         self.group_searches[sent.id] = state
 
-        await interaction.response.send_message(f"Deine Gruppensuche wurde in <#{TEST_CHANNEL_ID}> erstellt.", ephemeral=True)
+        # keine zusätzliche ephemeral "erstellt" Nachricht (reduziert Noise)
 
     def build_public_view(self, state: GroupSearchState) -> discord.ui.View:
         view = discord.ui.View(timeout=None)
@@ -754,13 +785,18 @@ class Gruppensuche(commands.Cog):
         view.add_item(btn_join)
         view.add_item(btn_leave)
 
-        # Row 1: Ping Rolle + Ping Warteschlange
-        # Ping Rolle
-        ping_label = "🔔 Ping" if not state.ping_role_used else "🔔 Ping gesendet"
+        # Row 1: Ping Rolle + Ping Warteschlange (immer sichtbar)
+        # Label nach Schwierigkeit
+        if state.difficulty == "Schwer":
+            ping_label = "🔔 Ping (Schwer)"
+        elif state.difficulty == "Normal":
+            ping_label = "🔔 Ping (Normal)"
+        else:
+            ping_label = "🔔 Ping"
+
         btn_ping_role = discord.ui.Button(
             label=ping_label,
-            style=discord.ButtonStyle.primary if not state.ping_role_used else discord.ButtonStyle.secondary,
-            disabled=state.ping_role_used,
+            style=discord.ButtonStyle.primary,
             row=1,
         )
 
@@ -770,12 +806,9 @@ class Gruppensuche(commands.Cog):
         btn_ping_role.callback = ping_role_cb  # type: ignore[assignment]
         view.add_item(btn_ping_role)
 
-        # Ping Warteschlange
-        q_label = "🔔 Ping Warteschlange" if not state.ping_waitlist_used else "🔔 Warteschlange gepingt"
         btn_ping_q = discord.ui.Button(
-            label=q_label,
-            style=discord.ButtonStyle.primary if not state.ping_waitlist_used else discord.ButtonStyle.secondary,
-            disabled=state.ping_waitlist_used,
+            label="🔔 Ping Warteschlange",
+            style=discord.ButtonStyle.primary,
             row=1,
         )
 
@@ -793,43 +826,45 @@ class Gruppensuche(commands.Cog):
         desc_lines.append(f"**Suchender:** {creator_mention}")
         desc_lines.append(f"**Kategorie:** {state.subtitle}")
 
-        if state.difficulty:
-            desc_lines.append(f"**Schwierigkeit:** {state.difficulty}")
+        # Schwierigkeit + Farbe
+        colour = discord.Colour.blurple()
+        if state.difficulty == "Schwer":
+            desc_lines.append("**Schwierigkeit:** 🔴 **Schwer**")
+            colour = discord.Colour.red()
+        elif state.difficulty == "Normal":
+            desc_lines.append("**Schwierigkeit:** 🔵 **Normal**")
+            colour = discord.Colour.blurple()
+
         if state.requirement_akvk:
             desc_lines.append(f"**Anforderung AK/VK:** {state.requirement_akvk}")
 
-        if state.max_players >= 0:
-            desc_lines.append(f"**Max. Teilnehmer:** {state.max_players}")
+        desc_lines.append(f"**Max. Teilnehmer:** {state.max_players}")
 
         desc_lines.append("")
         desc_lines.extend(state.detail_lines)
 
         if state.duration:
             desc_lines.append("")
-            desc_lines.append(f"**Dauer:** {state.duration}")
+            desc_lines.append(f"**Geplante Dauer:** {state.duration}")
         if state.start_time:
             desc_lines.append(f"**Start:** {state.start_time}")
         if state.note:
             desc_lines.append(f"**Hinweis:** {state.note}")
 
-        # Teilnehmer / Warteschlange
         participants = state.participants_order
         waitlist = state.waitlist_order
 
-        # Anzeige
         p_text = "\n".join(f"• <@{uid}>" for uid in participants) if participants else "—"
         q_text = "\n".join(f"• <@{uid}>" for uid in waitlist) if waitlist else "—"
 
         embed = discord.Embed(
             title=state.title,
             description="\n".join(desc_lines),
-            colour=discord.Colour.blurple(),
+            colour=colour,
         )
 
-        # Teilnehmer-Ziel: x/y
-        target = state.max_players
         embed.add_field(
-            name=f"Teilnehmer ({len(participants)}/{target})",
+            name=f"Teilnehmer ({len(participants)}/{state.max_players})",
             value=p_text,
             inline=False
         )
@@ -843,29 +878,6 @@ class Gruppensuche(commands.Cog):
         embed.timestamp = discord.utils.utcnow()
         return embed
 
-    def is_admin_or_creator(self, member: discord.Member, creator_id: int) -> bool:
-        if member.id == creator_id:
-            return True
-        if ADMIN_ROLE_ID is not None:
-            return any(r.id == ADMIN_ROLE_ID for r in member.roles)
-        return member.guild_permissions.administrator
-
-    def _remove_from_lists(self, uid: int, state: GroupSearchState) -> None:
-        if uid in state.participants_order:
-            state.participants_order = [x for x in state.participants_order if x != uid]
-        if uid in state.waitlist_order:
-            state.waitlist_order = [x for x in state.waitlist_order if x != uid]
-
-    def _try_fill_from_waitlist(self, state: GroupSearchState) -> None:
-        # Nur nachrücken, wenn max_players > 0 und noch Plätze frei sind
-        if state.max_players <= 0:
-            return
-
-        while len(state.participants_order) < state.max_players and state.waitlist_order:
-            uid = state.waitlist_order.pop(0)
-            if uid not in state.participants_order:
-                state.participants_order.append(uid)
-
     async def handle_join(self, interaction: discord.Interaction, message_id: int) -> None:
         state = self.group_searches.get(message_id)
         if state is None:
@@ -873,13 +885,10 @@ class Gruppensuche(commands.Cog):
 
         uid = interaction.user.id
 
-        # Schon drin?
         if uid in state.participants_order or uid in state.waitlist_order:
             return await interaction.response.send_message("Du bist bereits eingetragen.", ephemeral=True)
 
-        # Eintragen: wenn Plätze frei, sonst Warteschlange
-        # Sonderfall Test: max_players == 0 -> alle außer Ersteller in Warteschlange
-        if state.max_players > 0 and len(state.participants_order) < state.max_players:
+        if len(state.participants_order) < state.max_players:
             state.participants_order.append(uid)
         else:
             state.waitlist_order.append(uid)
@@ -894,12 +903,8 @@ class Gruppensuche(commands.Cog):
             return await interaction.response.send_message("Diese Gruppensuche ist nicht mehr aktiv.", ephemeral=True)
 
         uid = interaction.user.id
-
-        # Entfernen (egal ob Teilnehmer oder Warteschlange)
         was_participant = uid in state.participants_order
         self._remove_from_lists(uid, state)
-
-        # Nachrücken, wenn aus Teilnehmern entfernt wurde
         if was_participant:
             self._try_fill_from_waitlist(state)
 
@@ -911,13 +916,11 @@ class Gruppensuche(commands.Cog):
         state = self.group_searches.get(message_id)
         if state is None:
             return await interaction.response.send_message("Diese Gruppensuche ist nicht mehr aktiv.", ephemeral=True)
-        if state.ping_role_used:
-            return await interaction.response.send_message("Ping wurde bereits gesendet.", ephemeral=True)
 
         if not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Nicht erlaubt.", ephemeral=True)
 
-        if not self.is_admin_or_creator(interaction.user, state.creator_id):
+        if not self.is_admin_offizier_or_creator(interaction.user, state.creator_id):
             return await interaction.response.send_message("Du darfst diesen Ping nicht auslösen.", ephemeral=True)
 
         if not state.ping_role_id:
@@ -927,24 +930,36 @@ class Gruppensuche(commands.Cog):
         if channel is None or not isinstance(channel, discord.TextChannel):
             return await interaction.response.send_message("Channel nicht gefunden.", ephemeral=True)
 
+        now = time.time()
+        is_admin = self.is_admin_or_offizier(interaction.user)
+        is_creator = interaction.user.id == state.creator_id
+
+        if is_creator and not is_admin:
+            last = state.ping_role_last_ts
+            if last is not None and (now - last) < PING_COOLDOWN_SECONDS:
+                remaining = int(PING_COOLDOWN_SECONDS - (now - last))
+                mins = max(1, (remaining + 59) // 60)
+                return await interaction.response.send_message(
+                    f"⏳ Ping noch nicht möglich. Bitte warte noch **{mins} Minute(n)**.",
+                    ephemeral=True
+                )
+
         await channel.send(f"<@&{state.ping_role_id}> – neue Suche von <@{state.creator_id}>")
 
-        state.ping_role_used = True
-        embed = self.build_public_embed(state)
-        view = self.build_public_view(state)
-        await interaction.response.edit_message(embed=embed, view=view)
+        if is_creator and not is_admin:
+            state.ping_role_last_ts = now
+
+        return await interaction.response.send_message("🔔 Ping gesendet!", ephemeral=True)
 
     async def handle_ping_waitlist(self, interaction: discord.Interaction, message_id: int) -> None:
         state = self.group_searches.get(message_id)
         if state is None:
             return await interaction.response.send_message("Diese Gruppensuche ist nicht mehr aktiv.", ephemeral=True)
-        if state.ping_waitlist_used:
-            return await interaction.response.send_message("Warteschlange wurde bereits gepingt.", ephemeral=True)
 
         if not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Nicht erlaubt.", ephemeral=True)
 
-        if not self.is_admin_or_creator(interaction.user, state.creator_id):
+        if not self.is_admin_offizier_or_creator(interaction.user, state.creator_id):
             return await interaction.response.send_message("Du darfst diesen Ping nicht auslösen.", ephemeral=True)
 
         if not state.waitlist_order:
@@ -954,13 +969,27 @@ class Gruppensuche(commands.Cog):
         if channel is None or not isinstance(channel, discord.TextChannel):
             return await interaction.response.send_message("Channel nicht gefunden.", ephemeral=True)
 
+        now = time.time()
+        is_admin = self.is_admin_or_offizier(interaction.user)
+        is_creator = interaction.user.id == state.creator_id
+
+        if is_creator and not is_admin:
+            last = state.ping_waitlist_last_ts
+            if last is not None and (now - last) < PING_COOLDOWN_SECONDS:
+                remaining = int(PING_COOLDOWN_SECONDS - (now - last))
+                mins = max(1, (remaining + 59) // 60)
+                return await interaction.response.send_message(
+                    f"⏳ Warteschlangen-Ping noch nicht möglich. Bitte warte noch **{mins} Minute(n)**.",
+                    ephemeral=True
+                )
+
         mentions = " ".join(f"<@{uid}>" for uid in state.waitlist_order)
         await channel.send(f"{mentions} – Hinweis: Bitte prüft die Gruppensuche, ggf. ist ein Platz frei geworden.")
 
-        state.ping_waitlist_used = True
-        embed = self.build_public_embed(state)
-        view = self.build_public_view(state)
-        await interaction.response.edit_message(embed=embed, view=view)
+        if is_creator and not is_admin:
+            state.ping_waitlist_last_ts = now
+
+        return await interaction.response.send_message("🔔 Warteschlange gepingt!", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:
