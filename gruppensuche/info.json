@@ -1,21 +1,14 @@
 {
-  "author": [
-    "Lucarye"
-  ],
+  "author": ["Lucarye"],
   "name": "gruppensuche",
   "short": "Gruppensuche",
-  "description": "Slash-Command /gruppensuche mit ephemerem Formular (Kategorie, Menge, Dauer, Startzeit) und öffentlicher Gruppensuche mit Anmeldebuttons.",
-  "install_msg": "Gruppensuche-Cog installiert. Nutze /gruppensuche, um eine neue Gruppensuche zu starten.",
+  "description": "Gruppensuche mit Wizard (ephemeral) + öffentlicher Suche, Join/Leave, Muhhelfer mit Schwierigkeit & TAG Run, Ping-Button.",
+  "install_msg": "Gruppensuche installiert. Nutze /gruppensuche.",
   "requirements": [],
-  "tags": [
-    "bdo",
-    "gruppen",
-    "guild",
-    "utility"
-  ],
+  "tags": ["bdo", "gruppen", "utility"],
   "hidden": false,
   "disabled": false,
   "min_bot_version": "3.5.0",
-  "end_user_data_statement": "Dieses Cog speichert nur temporäre Daten im Speicher (Teilnehmerlisten von Gruppensuchen) und schreibt keine personenbezogenen Daten dauerhaft.",
+  "end_user_data_statement": "Speichert nur temporäre Daten im RAM (Teilnehmerlisten) und nichts dauerhaft.",
   "type": "COG"
 }
