@@ -25,7 +25,7 @@ MUHKU_THUMBNAIL = "https://cdn.discordapp.com/attachments/1404063753946796122/14
 
 DEFAULT_GUILD = {
     "triggers": ["hilfe"],
-    "target_channel_id": id=1199322485297000528,
+    "target_channel_id": 1199322485297000528,
     "message_id": None,
     "cooldown_seconds": 30,
     "intro_text": "Oh, es scheint du brauchst einen Muhhelfer bei deinen Bossen? <:muhkuh:1207038544510586890>:",
@@ -757,4 +757,5 @@ class TriggerPost(commands.Cog):
     @_auto_refresher.before_loop
     async def _before_refresher(self):
         await self.bot.wait_until_ready()
+
 
