@@ -861,8 +861,12 @@ class Gruppensuche(commands.Cog):
         return promoted
 
     async def _notify_promoted(self, state: GroupSearchState, promoted: List[int]) -> None:
-        """Informiert nachgerückte User per DM, sonst Fallback Ping im Channel."""
+        """Informiert nachgerückte User per DM, sonst Fallback-Ping im Channel."""
         if not promoted:
+            return
+
+        # ❌ Bei geschlossener Suche keine Benachrichtigungen
+        if state.is_closed:
             return
 
         guild = self.bot.get_guild(state.guild_id)
@@ -873,7 +877,18 @@ class Gruppensuche(commands.Cog):
         if not isinstance(channel, discord.TextChannel):
             return
 
-        title = state.title
+        # Link zum Beitrag
+        post_link = (
+            f"https://discord.com/channels/"
+            f"{state.guild_id}/{state.channel_id}/{state.message_id}"
+        )
+
+        # Suchender
+        creator = guild.get_member(state.creator_id)
+        creator_name = creator.display_name if creator else "Unbekannt"
+
+        # Startzeit
+        start_time = state.start_time or "nicht angegeben"
 
         for uid in promoted:
             member = guild.get_member(uid)
@@ -883,19 +898,27 @@ class Gruppensuche(commands.Cog):
             dm_ok = False
             try:
                 await member.send(
-                    f"✅ Du bist jetzt **Teilnehmer** bei: **{title}**\n"
-                    f"Server: **{guild.name}**"
+                    f"❗ **Ein Teilnehmer hat abgesagt.**\n\n"
+                    f"Du bist aus der Warteschlange nachgerückt und jetzt **Teilnehmer**.\n\n"
+                    f"🔎 **Suche von:** {creator_name}\n"
+                    f"⏰ **Start:** {start_time}\n\n"
+                    f"➡️ **Zum Beitrag:** {post_link}"
                 )
                 dm_ok = True
             except Exception:
                 dm_ok = False
 
             if not dm_ok:
-                # Fallback: kurzer Ping im Channel
+                # Fallback: Ping im Channel mit Link
                 try:
-                    await channel.send(f"<@{uid}> ✅ Du bist jetzt Teilnehmer bei: **{title}**")
+                    await channel.send(
+                        f"<@{uid}> ❗ Ein Teilnehmer hat abgesagt – "
+                        f"du bist aus der Warteschlange nachgerückt.\n"
+                        f"➡️ {post_link}"
+                    )
                 except Exception:
                     pass
+
 
     async def _update_public_post(self, state: GroupSearchState) -> None:
         """Edits the original group search message (not ephemeral confirms)."""
@@ -1629,6 +1652,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
