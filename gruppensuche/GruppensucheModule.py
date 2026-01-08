@@ -27,13 +27,13 @@ AKVK_SCHWER = "330/401"
 
 # Boss-Reihenfolge wie im Game (final)
 BOSSES: List[Tuple[str, str]] = [
-    ("jigwi", "Jigwi"),
-    ("knabe_blau", "Knabe in Blau"),
     ("bulgasal", "Bulgasal"),
+    ("jigwi", "Jigwi"),
     ("uturi", "Uturi"),
     ("dunkler_bonghwang", "Dunkler Bonghwang"),
-    ("entthronter_kronprinz", "Entthronter Kronprinz"),
     ("bihyung", "Bihyung"),
+	("entthronter_kronprinz", "Entthronter Kronprinz"),
+	("knabe_blau", "Knabe in Blau"),
 ]
 
 
@@ -557,6 +557,23 @@ class MuhhDetailsModal(discord.ui.Modal, title="Muhhelfer – Details"):
             return
 
         await cog.finish_muhhelfer(interaction)
+        
+class EditAkvkModal(discord.ui.Modal, title="Bearbeiten – AK/VK"):
+    def __init__(self, cog: "Gruppensuche", message_id: int):
+        super().__init__()
+        self.cog = cog
+        self.message_id = message_id
+
+        self.akvk = discord.ui.TextInput(
+            label="Anforderung AK/VK",
+            required=False,
+            placeholder="z. B. 330/401"
+        )
+        self.add_item(self.akvk)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        await self.cog.apply_edit_akvk(interaction, self.message_id, self.akvk.value)
 
 # === Haupt-Cog ===
 
@@ -884,7 +901,7 @@ class Gruppensuche(commands.Cog):
         btn_edit = discord.ui.Button(
             label="✏️ Bearbeiten",
             style=discord.ButtonStyle.secondary,
-            row=2,
+            row=0,
         )
 
         async def edit_cb(interaction: discord.Interaction):
@@ -1087,9 +1104,36 @@ class Gruppensuche(commands.Cog):
             ephemeral=True,
             view=EditMenuView(self, message_id, interaction.user.id),
         )
-        
+
+    async def apply_edit_akvk(self, interaction: discord.Interaction, message_id: int, akvk: str) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.followup.send(
+                "Diese Suche ist nicht mehr aktiv.",
+                ephemeral=True,
+                delete_after=60
+            )
+
+        val = akvk.strip()
+        if val:
+            state.requirement_akvk = val
+
+        # öffentliche Nachricht aktualisieren
+        guild = self.bot.get_guild(state.guild_id)
+        if guild is not None:
+            channel = guild.get_channel(state.channel_id)
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    msg = await channel.fetch_message(message_id)
+                    await msg.edit(embed=self.build_public_embed(state), view=self.build_public_view(state))
+                except Exception:
+                    pass
+
+        await interaction.followup.send("✅ AK/VK aktualisiert.", ephemeral=True, delete_after=60)
+
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
