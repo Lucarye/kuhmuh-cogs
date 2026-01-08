@@ -279,38 +279,69 @@ class MuhhSizeView(discord.ui.View):
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self.cog.back_to_muhh_difficulty(interaction, self.user_id)
 
-
-class MuhhBossSelect(discord.ui.Select):
-    def __init__(self, user_id: int) -> None:
-        options = [discord.SelectOption(label=label, value=key) for (key, label) in BOSSES]
+class MuhhBossToggleButton(discord.ui.Button):
+    def __init__(self, cog: "Gruppensuche", user_id: int, boss_key: str, label: str, selected: bool):
         super().__init__(
-            placeholder="Bosse auswählen (max. 5) …",
-            min_values=1,
-            max_values=5,
-            options=options,
+            label=label,
+            style=discord.ButtonStyle.success if selected else discord.ButtonStyle.secondary,
         )
+        self.cog = cog
         self.user_id = user_id
+        self.boss_key = boss_key
 
-    async def callback(self, interaction: discord.Interaction) -> None:
-        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
-        if cog is None:
-            return await interaction.response.send_message("Interner Fehler: Cog nicht gefunden.", ephemeral=True)
-        await cog.set_muhh_bosses(interaction, self.user_id, list(self.values))
+    async def callback(self, interaction: discord.Interaction):
+        await self.cog.toggle_muhh_boss(interaction, self.user_id, self.boss_key)
 
 
-class MuhhBossView(discord.ui.View):
-    def __init__(self, cog: "Gruppensuche", user_id: int) -> None:
+class MuhhBossButtonView(discord.ui.View):
+    def __init__(self, cog: "Gruppensuche", user_id: int):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
-        self.add_item(MuhhBossSelect(user_id))
+        self.build()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
-    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.secondary)
-    async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self.cog.back_to_muhh_size(interaction, self.user_id)
+    def build(self):
+        self.clear_items()
+        st = self.cog.muhh_wizard[self.user_id]
+        selected = set(st.selected_boss_keys)
+
+        # Boss Buttons
+        for i, (key, label) in enumerate(BOSSES):
+            btn = MuhhBossToggleButton(
+                self.cog,
+                self.user_id,
+                key,
+                label,
+                key in selected
+            )
+            btn.row = i // 5
+
+            if key not in selected and len(selected) >= 5:
+                btn.disabled = True
+
+            self.add_item(btn)
+
+        # Navigation
+        back = discord.ui.Button(label="Zurück", style=discord.ButtonStyle.secondary, row=3)
+        nextb = discord.ui.Button(label="Weiter", style=discord.ButtonStyle.success, row=3)
+
+        async def back_cb(interaction: discord.Interaction):
+            await self.cog.back_to_muhh_size(interaction, self.user_id)
+
+        async def next_cb(interaction: discord.Interaction):
+            await self.cog.goto_muhh_run_step(interaction, self.user_id)
+
+        back.callback = back_cb
+        nextb.callback = next_cb
+
+        if not st.selected_boss_keys:
+            nextb.disabled = True
+
+        self.add_item(back)
+        self.add_item(nextb)
 
 
 class MuhhRunView(discord.ui.View):
@@ -1005,47 +1036,38 @@ class Gruppensuche(commands.Cog):
         st.max_players = max(1, min(5, int(max_players)))
         await interaction.response.edit_message(embed=build_muhh_embed_step_bosses(st), view=MuhhBossView(self, user_id))
 
+	async def toggle_muhh_boss(self, interaction: discord.Interaction, user_id: int, boss_key: str):
+    st = self.muhh_wizard.get(user_id)
+    if st is None:
+        return
+
+    if boss_key in st.selected_boss_keys:
+        st.selected_boss_keys.remove(boss_key)
+        st.doppel_run_keys.discard(boss_key)
+    else:
+        if len(st.selected_boss_keys) >= 5:
+            return await interaction.response.send_message(
+                "Maximal 5 Bosse auswählbar.",
+                ephemeral=True
+            )
+        st.selected_boss_keys.append(boss_key)
+
+    await interaction.response.edit_message(
+        embed=build_muhh_embed_step_bosses(st),
+        view=MuhhBossButtonView(self, user_id)
+    )
+
+
+	
     async def back_to_muhh_size(self, interaction: discord.Interaction, user_id: int) -> None:
         st = self.muhh_wizard.get(user_id)
         if st is None or st.difficulty is None:
             return await self.back_to_muhh_difficulty(interaction, user_id)
-        await interaction.response.edit_message(embed=build_muhh_embed_step_size(st), view=MuhhSizeView(self, user_id))
-
-    async def set_muhh_bosses(self, interaction: discord.Interaction, user_id: int, boss_keys: List[str]) -> None:
-        st = self.muhh_wizard.get(user_id)
-        if st is None or st.difficulty is None:
-            return await self.back_to_muhh_difficulty(interaction, user_id)
-
-        st.selected_boss_keys = boss_keys[:5]
-        st.doppel_run_keys = {k for k in st.doppel_run_keys if k in st.selected_boss_keys}
-
         await interaction.response.edit_message(
-            embed=build_muhh_embed_step_runs(st),
-            view=MuhhRunView(self, user_id, st.selected_boss_keys),
-        )
+    		embed=build_muhh_embed_step_bosses(st),
+    		view=MuhhBossButtonView(self, user_id)
+		)
 
-    async def back_to_muhh_bosses(self, interaction: discord.Interaction, user_id: int) -> None:
-        st = self.muhh_wizard.get(user_id)
-        if st is None or st.difficulty is None:
-            return await self.back_to_muhh_difficulty(interaction, user_id)
-        await interaction.response.edit_message(embed=build_muhh_embed_step_bosses(st), view=MuhhBossView(self, user_id))
-
-    async def toggle_muhh_doppel_run(self, interaction: discord.Interaction, user_id: int, boss_key: str) -> None:
-        st = self.muhh_wizard.get(user_id)
-        if st is None:
-            return await interaction.response.send_message("Wizard-Status verloren. Bitte /gruppensuche neu starten.", ephemeral=True)
-        if boss_key not in st.selected_boss_keys:
-            return await interaction.response.send_message("Boss ist nicht (mehr) ausgewählt.", ephemeral=True)
-
-        if boss_key in st.doppel_run_keys:
-            st.doppel_run_keys.remove(boss_key)
-        else:
-            st.doppel_run_keys.add(boss_key)
-
-        await interaction.response.edit_message(
-            embed=build_muhh_embed_step_runs(st),
-            view=MuhhRunView(self, user_id, st.selected_boss_keys),
-        )
 
     async def open_muhh_details_modal(self, interaction: discord.Interaction, user_id: int) -> None:
         st = self.muhh_wizard.get(user_id)
@@ -1666,6 +1688,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
