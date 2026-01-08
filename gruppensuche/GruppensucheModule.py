@@ -350,6 +350,50 @@ class MuhhRunToggleButton(discord.ui.Button):
 
 
 # === Modals: PilaFe / Spot / Muhh Details ===
+class EditMenuSelect(discord.ui.Select):
+    def __init__(self, cog, message_id: int, user_id: int):
+        self.cog = cog
+        self.message_id = message_id
+        self.user_id = user_id
+
+        options = [
+            discord.SelectOption(label="🕒 Zeiten & Notiz", value="times"),
+            discord.SelectOption(label="⚔️ Anforderung AK/VK", value="akvk"),
+            discord.SelectOption(label="👥 Max. Teilnehmer", value="max"),
+        ]
+        super().__init__(
+            placeholder="Was möchtest du ändern?",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "Das ist nicht dein Bearbeiten-Menü.", ephemeral=True
+            )
+
+        if self.values[0] == "times":
+            await interaction.response.send_modal(
+                EditTimesModal(self.cog, self.message_id)
+            )
+        elif self.values[0] == "akvk":
+            await interaction.response.send_modal(
+                EditAkvkModal(self.cog, self.message_id)
+            )
+        elif self.values[0] == "max":
+            await interaction.response.send_message(
+                "Neue maximale Teilnehmerzahl auswählen:",
+                ephemeral=True,
+                view=EditMaxPlayersView(self.cog, self.message_id, self.user_id),
+            )
+
+
+class EditMenuView(discord.ui.View):
+    def __init__(self, cog, message_id: int, user_id: int):
+        super().__init__(timeout=300)
+        self.add_item(EditMenuSelect(cog, message_id, user_id))
 
 class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
     pilafe_amount = discord.ui.TextInput(
@@ -500,10 +544,19 @@ class MuhhDetailsModal(discord.ui.Modal, title="Muhhelfer – Details"):
     )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
-        if cog is None:
-            return await interaction.response.send_message("Interner Fehler: Cog nicht gefunden.", ephemeral=True)
-        await cog.finish_muhhelfer(interaction)
+        # SOFORT bestätigen, damit Discord kein "Etwas ist schiefgelaufen" zeigt
+        await interaction.response.defer(ephemeral=True)
+
+    cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+    if cog is None:
+        return await interaction.followup.send(
+            "Interner Fehler: Cog nicht gefunden.",
+            ephemeral=True,
+            delete_after=60
+        )
+
+    await cog.finish_muhhelfer(interaction)
+
 
 
 # === Haupt-Cog ===
@@ -765,6 +818,15 @@ class Gruppensuche(commands.Cog):
         self.group_searches[sent.id] = state
 
         # keine zusätzliche ephemeral "erstellt" Nachricht (reduziert Noise)
+        # Kurze Bestätigung für den Ersteller, verschwindet automatisch
+    try:
+        await interaction.followup.send(
+            "✅ Gruppensuche erstellt.",
+            ephemeral=True,
+            delete_after=60
+        )
+    except Exception:
+        pass
 
     def build_public_view(self, state: GroupSearchState) -> discord.ui.View:
         view = discord.ui.View(timeout=None)
@@ -817,7 +879,20 @@ class Gruppensuche(commands.Cog):
 
         btn_ping_q.callback = ping_q_cb  # type: ignore[assignment]
         view.add_item(btn_ping_q)
+        
+        # Row 2: Bearbeiten (nur Ersteller / Admin / Offizier)
+        btn_edit = discord.ui.Button(
+        label="✏️ Bearbeiten",
+        style=discord.ButtonStyle.secondary,
+        row=2,
+    )
 
+    async def edit_cb(interaction: discord.Interaction):
+        await self.handle_edit_menu(interaction, state.message_id)
+
+        btn_edit.callback = edit_cb  # type: ignore[assignment]
+        view.add_item(btn_edit)
+        
         return view
 
     def build_public_embed(self, state: GroupSearchState) -> discord.Embed:
@@ -991,6 +1066,27 @@ class Gruppensuche(commands.Cog):
 
         return await interaction.response.send_message("🔔 Warteschlange gepingt!", ephemeral=True)
 
+    async def handle_edit_menu(self, interaction: discord.Interaction, message_id: int) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.response.send_message(
+                "Diese Suche ist nicht mehr aktiv.", ephemeral=True
+            )
 
+        if not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nicht erlaubt.", ephemeral=True)
+
+        if not self.is_admin_offizier_or_creator(interaction.user, state.creator_id):
+            return await interaction.response.send_message(
+                "Du darfst diese Suche nicht bearbeiten.", ephemeral=True
+            )
+
+        await interaction.response.send_message(
+            "Was möchtest du ändern?",
+            ephemeral=True,
+            view=EditMenuView(self, message_id, interaction.user.id),
+        )
+        
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
