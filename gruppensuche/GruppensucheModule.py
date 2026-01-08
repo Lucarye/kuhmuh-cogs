@@ -557,7 +557,106 @@ class MuhhDetailsModal(discord.ui.Modal, title="Muhhelfer – Details"):
             return
 
         await cog.finish_muhhelfer(interaction)
-        
+class EditTimesModal(discord.ui.Modal, title="Bearbeiten – Zeiten & Notiz"):
+    def __init__(self, cog: "Gruppensuche", message_id: int):
+        super().__init__()
+        self.cog = cog
+        self.message_id = message_id
+
+        self.duration = discord.ui.TextInput(
+            label="Geplante Dauer",
+            required=False,
+            placeholder="z. B. 30min, 2h, 90min",
+        )
+        self.start = discord.ui.TextInput(
+            label="Startzeit",
+            required=False,
+            placeholder="z. B. jetzt, 20:00 Uhr, später",
+        )
+        self.note = discord.ui.TextInput(
+            label="Hinweis",
+            required=False,
+            style=discord.TextStyle.paragraph,
+            placeholder="Optionaler Hinweis…",
+        )
+
+        self.add_item(self.duration)
+        self.add_item(self.start)
+        self.add_item(self.note)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        await self.cog.apply_edit_times(
+            interaction,
+            self.message_id,
+            self.duration.value,
+            self.start.value,
+            self.note.value,
+        )
+
+class EditTimesModal(discord.ui.Modal, title="Bearbeiten – Zeiten & Notiz"):
+    def __init__(self, cog: "Gruppensuche", message_id: int):
+        super().__init__()
+        self.cog = cog
+        self.message_id = message_id
+
+        self.duration = discord.ui.TextInput(
+            label="Geplante Dauer",
+            required=False,
+            placeholder="z. B. 30min, 2h, 90min",
+        )
+        self.start = discord.ui.TextInput(
+            label="Startzeit",
+            required=False,
+            placeholder="z. B. jetzt, 20:00 Uhr, später",
+        )
+        self.note = discord.ui.TextInput(
+            label="Hinweis",
+            required=False,
+            style=discord.TextStyle.paragraph,
+            placeholder="Optionaler Hinweis…",
+        )
+
+        self.add_item(self.duration)
+        self.add_item(self.start)
+        self.add_item(self.note)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        await self.cog.apply_edit_times(
+            interaction,
+            self.message_id,
+            self.duration.value,
+            self.start.value,
+            self.note.value,
+        )
+class EditMaxPlayersSelect(discord.ui.Select):
+    def __init__(self, cog: "Gruppensuche", message_id: int, user_id: int):
+        self.cog = cog
+        self.message_id = message_id
+        self.user_id = user_id
+
+        options = [discord.SelectOption(label=str(i), value=str(i)) for i in range(1, 6)]
+        super().__init__(
+            placeholder="1–5 auswählen …",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("Das ist nicht dein Menü.", ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True)
+        await self.cog.apply_edit_max_players(interaction, self.message_id, int(self.values[0]))
+
+
+class EditMaxPlayersView(discord.ui.View):
+    def __init__(self, cog: "Gruppensuche", message_id: int, user_id: int):
+        super().__init__(timeout=300)
+        self.add_item(EditMaxPlayersSelect(cog, message_id, user_id))
+
 class EditAkvkModal(discord.ui.Modal, title="Bearbeiten – AK/VK"):
     def __init__(self, cog: "Gruppensuche", message_id: int):
         super().__init__()
@@ -1105,6 +1204,77 @@ class Gruppensuche(commands.Cog):
             view=EditMenuView(self, message_id, interaction.user.id),
         )
 
+	    async def apply_edit_times(
+        self,
+        interaction: discord.Interaction,
+        message_id: int,
+        duration: str,
+        start: str,
+        note: str,
+    ) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.followup.send(
+                "Diese Suche ist nicht mehr aktiv.",
+                ephemeral=True,
+                delete_after=60
+            )
+
+        state.duration = duration.strip() or None
+        state.start_time = start.strip() or None
+        state.note = note.strip() or None
+
+        # öffentliche Nachricht aktualisieren
+        guild = self.bot.get_guild(state.guild_id)
+        if guild is not None:
+            channel = guild.get_channel(state.channel_id)
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    msg = await channel.fetch_message(message_id)
+                    await msg.edit(embed=self.build_public_embed(state), view=self.build_public_view(state))
+                except Exception:
+                    pass
+
+        await interaction.followup.send("✅ Zeiten/Notiz aktualisiert.", ephemeral=True, delete_after=60)
+		
+    async def apply_edit_max_players(
+        self,
+        interaction: discord.Interaction,
+        message_id: int,
+        new_max: int
+    ) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.followup.send(
+                "Diese Suche ist nicht mehr aktiv.",
+                ephemeral=True,
+                delete_after=60
+            )
+
+        state.max_players = max(1, min(5, int(new_max)))
+
+        # wenn zu viele Teilnehmer -> hinten raus in Warteschlange
+        while len(state.participants_order) > state.max_players:
+            moved = state.participants_order.pop()
+            if moved not in state.waitlist_order:
+                state.waitlist_order.insert(0, moved)
+
+        # wenn Plätze frei -> Warteschlange nachrücken
+        self._try_fill_from_waitlist(state)
+
+        # öffentliche Nachricht aktualisieren
+        guild = self.bot.get_guild(state.guild_id)
+        if guild is not None:
+            channel = guild.get_channel(state.channel_id)
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    msg = await channel.fetch_message(message_id)
+                    await msg.edit(embed=self.build_public_embed(state), view=self.build_public_view(state))
+                except Exception:
+                    pass
+
+        await interaction.followup.send("✅ Max. Teilnehmer aktualisiert.", ephemeral=True, delete_after=60)
+
     async def apply_edit_akvk(self, interaction: discord.Interaction, message_id: int, akvk: str) -> None:
         state = self.group_searches.get(message_id)
         if state is None:
@@ -1133,6 +1303,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
