@@ -1142,6 +1142,73 @@ class Gruppensuche(commands.Cog):
                 ephemeral=True
             )
         await interaction.response.send_modal(MuhhDetailsModal())
+    
+        async def finish_muhhelfer(self, interaction: discord.Interaction) -> None:
+            user_id = interaction.user.id
+            st = self.muhh_wizard.get(user_id)
+            if st is None or st.difficulty is None or not st.selected_boss_keys:
+                return await interaction.followup.send(
+                    "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
+                    ephemeral=True,
+                    delete_after=60
+            )
+
+        # Modal-Felder auslesen
+        fields: Dict[str, str] = {}
+        for row in interaction.data.get("components", []):  # type: ignore[union-attr]
+            for comp in row.get("components", []):
+                cid = comp.get("custom_id")
+                val = comp.get("value", "")
+                if cid:
+                    fields[cid] = val
+
+        duration_in = fields.get("muhh_duration", "").strip()
+        start_in = fields.get("muhh_start_time", "").strip()
+        custom_akvk_in = fields.get("muhh_custom_akvk", "").strip()
+        note_in = fields.get("muhh_note", "").strip()
+
+        st.duration = duration_in or None
+        st.start_time = start_in or None
+        st.note = note_in or None
+        st.custom_akvk = custom_akvk_in or None
+
+        requirement = st.custom_akvk if st.custom_akvk else (AKVK_NORMAL if st.difficulty == "Normal" else AKVK_SCHWER)
+        ping_role_id = ROLE_NORMAL_ID if st.difficulty == "Normal" else ROLE_SCHWER_ID
+
+        boss_label_map = dict(BOSSES)
+        boss_lines = []
+        for k in st.selected_boss_keys:
+            name = boss_label_map.get(k, k)
+            if k in st.doppel_run_keys:
+                boss_lines.append(f"• {name} **(Doppel Run)**")
+            else:
+                boss_lines.append(f"• {name}")
+
+        detail_lines = ["**Bosse:**", *boss_lines]
+        if st.doppel_run_keys:
+            detail_lines.append("")
+            detail_lines.append("⚠️ **2. Charakter erforderlich**")
+
+        diff_title = "Schwer" if st.difficulty == "Schwer" else "Normal"
+        title = f"{MUHKUH_EMOJI} Gruppensuche – Muhhelfer ({diff_title})"
+
+        await self.create_public_group_message(
+            interaction,
+            category="muhhelfer",
+            title=title,
+            subtitle="Muhhelfer (LoML Bosse)",
+            detail_lines=detail_lines,
+            duration=st.duration,
+            start_time=st.start_time,
+            note=st.note,
+            difficulty=st.difficulty,
+            requirement_akvk=requirement,
+            ping_role_id=ping_role_id,
+            max_players=st.max_players,
+            doppel_runs=set(st.doppel_run_keys),
+        )
+
+        self.muhh_wizard.pop(user_id, None)
 
 
     # ===== Öffentliche Nachricht + Logik =====
