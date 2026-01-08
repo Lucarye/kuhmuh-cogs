@@ -675,6 +675,23 @@ class EditAkvkModal(discord.ui.Modal, title="Bearbeiten – AK/VK"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         await self.cog.apply_edit_akvk(interaction, self.message_id, self.akvk.value)
+class ConfirmCloseView(discord.ui.View):
+    def __init__(self, cog: "Gruppensuche", message_id: int, user_id: int):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.message_id = message_id
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    @discord.ui.button(label="✅ Ja, schließen", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.handle_close_confirm(interaction, self.message_id)
+
+    @discord.ui.button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="❎ Abgebrochen.", view=None)
 
 # === Haupt-Cog ===
 
@@ -947,9 +964,20 @@ class Gruppensuche(commands.Cog):
 
 
     def build_public_view(self, state: GroupSearchState) -> discord.ui.View:
-        # Wenn geschlossen: keine Buttons anzeigen
+        # Wenn geschlossen: nur "Öffnen" anzeigen (Rechte werden beim Klick geprüft)
         if state.is_closed:
-            return None  # type: ignore[return-value]
+            view = discord.ui.View(timeout=None)
+
+            btn_open = discord.ui.Button(label="🔓 Öffnen", style=discord.ButtonStyle.success, row=0)
+
+            async def open_cb(interaction: discord.Interaction):
+                await self.handle_open(interaction, state.message_id)
+
+            btn_open.callback = open_cb  # type: ignore[assignment]
+            view.add_item(btn_open)
+
+            return view
+
 		
         view = discord.ui.View(timeout=None)
 
@@ -968,6 +996,16 @@ class Gruppensuche(commands.Cog):
 
         view.add_item(btn_join)
         view.add_item(btn_leave)
+		
+        # Row 0: Schließen (nur Ersteller/Admin/Offizier erlaubt – Prüfung im Handler)
+        btn_close = discord.ui.Button(label="🔒 Schließen", style=discord.ButtonStyle.secondary, row=0)
+
+        async def close_cb(interaction: discord.Interaction):
+            await self.handle_close_request(interaction, state.message_id)
+
+        btn_close.callback = close_cb  # type: ignore[assignment]
+        view.add_item(btn_close)
+		
 
         # Row 1: Ping Rolle + Ping Warteschlange (immer sichtbar)
         # Label nach Schwierigkeit
@@ -1211,6 +1249,65 @@ class Gruppensuche(commands.Cog):
 
         return await interaction.response.send_message("🔔 Warteschlange gepingt!", ephemeral=True)
 
+    async def handle_close_request(self, interaction: discord.Interaction, message_id: int) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.response.send_message("Diese Suche ist nicht mehr aktiv.", ephemeral=True)
+
+        if not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nicht erlaubt.", ephemeral=True)
+
+        if not self.is_admin_offizier_or_creator(interaction.user, state.creator_id):
+            return await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+
+        await interaction.response.send_message(
+            "Möchtest du diese Suche wirklich **schließen**?\n"
+            "Danach sind keine Anmeldungen/Pings mehr möglich (du kannst sie später wieder öffnen).",
+            ephemeral=True,
+            view=ConfirmCloseView(self, message_id, interaction.user.id),
+        )
+
+    async def handle_close_confirm(self, interaction: discord.Interaction, message_id: int) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.response.edit_message(content="Diese Suche ist nicht mehr aktiv.", view=None)
+
+        # schließen
+        state.is_closed = True
+
+        # Original-Post aktualisieren (Buttons -> nur Öffnen)
+        try:
+            if interaction.message:
+                await interaction.message.edit(embed=self.build_public_embed(state), view=self.build_public_view(state))
+        except Exception:
+            pass
+
+        await interaction.response.edit_message(content="🔒 Suche wurde geschlossen.", view=None)
+
+    async def handle_open(self, interaction: discord.Interaction, message_id: int) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.response.send_message("Diese Suche ist nicht mehr aktiv.", ephemeral=True)
+
+        if not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nicht erlaubt.", ephemeral=True)
+
+        if not self.is_admin_offizier_or_creator(interaction.user, state.creator_id):
+            return await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+
+        state.is_closed = False
+
+        # Post wieder aktiv schalten (Buttons zurück)
+        try:
+            if interaction.message:
+                await interaction.response.edit_message(embed=self.build_public_embed(state), view=self.build_public_view(state))
+                return
+        except Exception:
+            pass
+
+        # Fallback
+        await interaction.response.send_message("✅ Suche geöffnet.", ephemeral=True, delete_after=10)
+
     async def handle_edit_menu(self, interaction: discord.Interaction, message_id: int) -> None:
         state = self.group_searches.get(message_id)
         if state is None:
@@ -1331,6 +1428,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
