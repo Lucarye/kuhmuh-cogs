@@ -1204,7 +1204,7 @@ class Gruppensuche(commands.Cog):
             view=EditMenuView(self, message_id, interaction.user.id),
         )
 
-	async def apply_edit_times(
+    async def apply_edit_times(
         self,
         interaction: discord.Interaction,
         message_id: int,
@@ -1303,6 +1303,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
