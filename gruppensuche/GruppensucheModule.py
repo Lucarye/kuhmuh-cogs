@@ -947,6 +947,10 @@ class Gruppensuche(commands.Cog):
 
 
     def build_public_view(self, state: GroupSearchState) -> discord.ui.View:
+        # Wenn geschlossen: keine Buttons anzeigen
+        if state.is_closed:
+            return None  # type: ignore[return-value]
+		
         view = discord.ui.View(timeout=None)
 
         # Row 0: Join/Leave
@@ -1327,6 +1331,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
