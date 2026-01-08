@@ -757,6 +757,20 @@ class Gruppensuche(commands.Cog):
             if uid not in state.participants_order:
                 state.participants_order.append(uid)
 
+    async def _update_public_post(self, state: GroupSearchState) -> None:
+        """Edits the original group search message (not ephemeral confirms)."""
+        guild = self.bot.get_guild(state.guild_id)
+        if guild is None:
+            return
+        channel = guild.get_channel(state.channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+        try:
+            msg = await channel.fetch_message(state.message_id)
+            await msg.edit(embed=self.build_public_embed(state), view=self.build_public_view(state))
+        except Exception:
+            pass
+
     # ===== Muhhelfer Wizard =====
 
     async def start_muhhelfer_wizard(self, interaction: discord.Interaction) -> None:
@@ -1275,14 +1289,10 @@ class Gruppensuche(commands.Cog):
         # schließen
         state.is_closed = True
 
-        # Original-Post aktualisieren (Buttons -> nur Öffnen)
-        try:
-            if interaction.message:
-                await interaction.message.edit(embed=self.build_public_embed(state), view=self.build_public_view(state))
-        except Exception:
-            pass
+        # Original-Post aktualisieren (nicht die ephemere Confirm-Message!)
+        await self._update_public_post(state)
 
-        await interaction.response.edit_message(content="🔒 Suche wurde geschlossen.", view=None)
+		await interaction.response.edit_message(content="🔒 Suche wurde geschlossen.", view=None)
 
     async def handle_open(self, interaction: discord.Interaction, message_id: int) -> None:
         state = self.group_searches.get(message_id)
@@ -1297,16 +1307,11 @@ class Gruppensuche(commands.Cog):
 
         state.is_closed = False
 
-        # Post wieder aktiv schalten (Buttons zurück)
-        try:
-            if interaction.message:
-                await interaction.response.edit_message(embed=self.build_public_embed(state), view=self.build_public_view(state))
-                return
-        except Exception:
-            pass
+        # Original-Post aktualisieren
+        await self._update_public_post(state)
 
-        # Fallback
-        await interaction.response.send_message("✅ Suche geöffnet.", ephemeral=True, delete_after=10)
+        # kurze Bestätigung
+        return await interaction.response.send_message("✅ Suche geöffnet.", ephemeral=True, delete_after=10)
 
     async def handle_edit_menu(self, interaction: discord.Interaction, message_id: int) -> None:
         state = self.group_searches.get(message_id)
@@ -1428,6 +1433,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
