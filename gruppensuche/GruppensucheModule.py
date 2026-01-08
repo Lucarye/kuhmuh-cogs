@@ -578,7 +578,7 @@ class Gruppensuche(commands.Cog):
         guild_obj = discord.Object(id=GUILD_ID)
         self.bot.tree.remove_command(
             self.gruppensuche_command.name,
-            type=self.gruppensuche_command.type,
+            self.gruppensuche_command.type,
             guild=guild_obj,
         )
 
@@ -1089,4 +1089,5 @@ class Gruppensuche(commands.Cog):
         
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
