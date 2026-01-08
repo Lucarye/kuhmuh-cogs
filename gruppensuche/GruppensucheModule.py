@@ -1144,6 +1144,7 @@ class Gruppensuche(commands.Cog):
         await interaction.response.send_modal(MuhhDetailsModal())
     
     async def finish_muhhelfer(self, interaction: discord.Interaction) -> None:
+        print("DEBUG: finish_muhhelfer called")
         user_id = interaction.user.id
         st = self.muhh_wizard.get(user_id)
         if st is None or st.difficulty is None or not st.selected_boss_keys:
