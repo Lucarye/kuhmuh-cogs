@@ -902,7 +902,7 @@ class Gruppensuche(commands.Cog):
                     f"Du bist aus der Warteschlange nachgerückt und jetzt **Teilnehmer**.\n\n"
                     f"🔎 **Suche von:** {creator_name}\n"
                     f"⏰ **Start:** {start_time}\n\n"
-                    f"➡️ **Zum Beitrag:** {post_link}"
+                    f"➡️ **Zur Gruppensuche:** {post_link}"
                 )
                 dm_ok = True
             except Exception:
@@ -1652,6 +1652,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
