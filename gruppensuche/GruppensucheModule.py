@@ -495,7 +495,7 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
         style=discord.TextStyle.short,
     )
     spot_duration_hours = discord.ui.TextInput(
-        label="Geplante Dauer",
+        label="geplante Dauer",
         placeholder="z. B. 30min, 2h, 90min",
         required=False,
         style=discord.TextStyle.short,
@@ -577,19 +577,19 @@ class MuhhDetailsModal(discord.ui.Modal, title="Muhhelfer – Details"):
     )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        # SOFORT bestätigen, damit Discord kein "Etwas ist schiefgelaufen" zeigt
         await interaction.response.defer(ephemeral=True)
 
         cog = interaction.client.get_cog("Gruppensuche")
         if cog is None:
-            await interaction.followup.send(
+            return await interaction.followup.send(
                 "Interner Fehler: Cog nicht gefunden.",
                 ephemeral=True,
                 delete_after=60
             )
-            return
 
+        # ruft MUSS in der Cog-Klasse existieren
         await cog.finish_muhhelfer(interaction)
+
 class EditTimesModal(discord.ui.Modal, title="Bearbeiten – Zeiten & Notiz"):
     def __init__(self, cog: "Gruppensuche", message_id: int):
         super().__init__()
@@ -1143,15 +1143,15 @@ class Gruppensuche(commands.Cog):
             )
         await interaction.response.send_modal(MuhhDetailsModal())
     
-        async def finish_muhhelfer(self, interaction: discord.Interaction) -> None:
-            user_id = interaction.user.id
-            st = self.muhh_wizard.get(user_id)
-            if st is None or st.difficulty is None or not st.selected_boss_keys:
-                return await interaction.followup.send(
-                    "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
-                    ephemeral=True,
-                    delete_after=60
-            )
+    async def finish_muhhelfer(self, interaction: discord.Interaction) -> None:
+        user_id = interaction.user.id
+        st = self.muhh_wizard.get(user_id)
+        if st is None or st.difficulty is None or not st.selected_boss_keys:
+            return await interaction.followup.send(
+                "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
+                ephemeral=True,
+                delete_after=60
+        )
 
         # Modal-Felder auslesen
         fields: Dict[str, str] = {}
