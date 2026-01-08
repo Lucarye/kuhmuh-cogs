@@ -897,7 +897,7 @@ class Gruppensuche(commands.Cog):
             if member is None:
                 continue
 
-            promoted_names.append(f"{member.display_name} (<@{member.id}>)")
+            promoted_names.append(f"<@{member.id}>")
 
             dm_ok = False
             try:
@@ -1666,6 +1666,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
