@@ -1189,12 +1189,12 @@ class Gruppensuche(commands.Cog):
             await self.handle_edit_menu(interaction, state.message_id)
 
         btn_edit.callback = edit_cb  # type: ignore[assignment]
-		view.add_item(btn_edit)
-		view.add_item(btn_close)
-		view.add_item(btn_delete)
-
+        view.add_item(btn_edit)
+        view.add_item(btn_close)
+        view.add_item(btn_delete)
 
         return view
+
 
 
     def build_public_embed(self, state: GroupSearchState) -> discord.Embed:
@@ -1558,6 +1558,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
