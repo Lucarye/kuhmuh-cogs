@@ -832,6 +832,70 @@ class Gruppensuche(commands.Cog):
             uid = state.waitlist_order.pop(0)
             if uid not in state.participants_order:
                 state.participants_order.append(uid)
+    async def _promote_from_waitlist(self, state: GroupSearchState) -> List[int]:
+        """Füllt freie Teilnehmerplätze aus der Warteschlange auf und gibt die nachgerückten User-IDs zurück."""
+        promoted: List[int] = []
+
+        if state.is_closed or state.max_players <= 0:
+            return promoted
+
+        guild = self.bot.get_guild(state.guild_id)
+        if guild is None:
+            return promoted
+
+        # solange Platz frei und Warteschlange vorhanden
+        while len(state.participants_order) < state.max_players and state.waitlist_order:
+            uid = state.waitlist_order.pop(0)
+
+            # doppelte Einträge überspringen
+            if uid in state.participants_order or uid in state.waitlist_order:
+                continue
+
+            # User ggf. schon vom Server weg -> überspringen
+            if guild.get_member(uid) is None:
+                continue
+
+            state.participants_order.append(uid)
+            promoted.append(uid)
+
+        return promoted
+
+    async def _notify_promoted(self, state: GroupSearchState, promoted: List[int]) -> None:
+        """Informiert nachgerückte User per DM, sonst Fallback Ping im Channel."""
+        if not promoted:
+            return
+
+        guild = self.bot.get_guild(state.guild_id)
+        if guild is None:
+            return
+
+        channel = guild.get_channel(state.channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+
+        title = state.title
+
+        for uid in promoted:
+            member = guild.get_member(uid)
+            if member is None:
+                continue
+
+            dm_ok = False
+            try:
+                await member.send(
+                    f"✅ Du bist jetzt **Teilnehmer** bei: **{title}**\n"
+                    f"Server: **{guild.name}**"
+                )
+                dm_ok = True
+            except Exception:
+                dm_ok = False
+
+            if not dm_ok:
+                # Fallback: kurzer Ping im Channel
+                try:
+                    await channel.send(f"<@{uid}> ✅ Du bist jetzt Teilnehmer bei: **{title}**")
+                except Exception:
+                    pass
 
     async def _update_public_post(self, state: GroupSearchState) -> None:
         """Edits the original group search message (not ephemeral confirms)."""
@@ -1279,6 +1343,9 @@ class Gruppensuche(commands.Cog):
 
     async def handle_join(self, interaction: discord.Interaction, message_id: int) -> None:
         state = self.group_searches.get(message_id)
+        if state.is_closed:
+            return await interaction.response.send_message("Diese Suche ist geschlossen.", ephemeral=True)
+		
         if state is None:
             return await interaction.response.send_message("Diese Gruppensuche ist nicht mehr aktiv.", ephemeral=True)
 
@@ -1304,8 +1371,12 @@ class Gruppensuche(commands.Cog):
         uid = interaction.user.id
         was_participant = uid in state.participants_order
         self._remove_from_lists(uid, state)
-        if was_participant:
-            self._try_fill_from_waitlist(state)
+
+        promoted: List[int] = []
+        if was_participant and not state.is_closed:
+            promoted = await self._promote_from_waitlist(state)
+            await self._notify_promoted(state, promoted)
+
 
         embed = self.build_public_embed(state)
         view = self.build_public_view(state)
@@ -1558,6 +1629,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
