@@ -1070,9 +1070,9 @@ class Gruppensuche(commands.Cog):
 		)
 
 	async def goto_muhh_run_step(self, interaction: discord.Interaction, user_id: int) -> None:
-    st = self.muhh_wizard.get(user_id)
-    if st is None or st.difficulty is None:
-        return await self.back_to_muhh_difficulty(interaction, user_id)
+  	  st = self.muhh_wizard.get(user_id)
+    	if st is None or st.difficulty is None:
+        	return await self.back_to_muhh_difficulty(interaction, user_id)
 
     if not st.selected_boss_keys:
         return await interaction.response.send_message(
@@ -1088,8 +1088,8 @@ class Gruppensuche(commands.Cog):
 
 async def back_to_muhh_bosses(self, interaction: discord.Interaction, user_id: int) -> None:
     st = self.muhh_wizard.get(user_id)
-    if st is None or st.difficulty is None:
-        return await self.back_to_muhh_difficulty(interaction, user_id)
+		if st is None or st.difficulty is None:
+			return await self.back_to_muhh_difficulty(interaction, user_id)
 
     await interaction.response.edit_message(
         embed=build_muhh_embed_step_bosses(st),
@@ -1748,6 +1748,7 @@ async def toggle_muhh_doppel_run(self, interaction: discord.Interaction, user_id
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
