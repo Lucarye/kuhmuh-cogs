@@ -893,15 +893,15 @@ class Gruppensuche(commands.Cog):
         promoted_mentions: List[str] = []
 
         for uid in promoted:
-            promoted_mentions.append(f"<@{uid}>")
+			member = guild.get_member(uid)
+			if member is None:
+				continue
 
-            member = guild.get_member(uid)
-            if member is None:
-                continue
+		promoted_mentions.append(member.display_name)
 
-            dm_ok = False
-            try:
-                await member.send(
+			dm_ok = False
+			try:
+				await member.send(
                     f"❗ **Ein Teilnehmer hat abgesagt.**\n\n"
                     f"Du bist aus der Warteschlange nachgerückt und jetzt **Teilnehmer**.\n\n"
                     f"🔎 **Suche von:** {creator_name}\n"
@@ -1666,6 +1666,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
