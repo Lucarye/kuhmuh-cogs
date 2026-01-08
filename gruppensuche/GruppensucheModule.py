@@ -1286,13 +1286,11 @@ class Gruppensuche(commands.Cog):
         if state is None:
             return await interaction.response.edit_message(content="Diese Suche ist nicht mehr aktiv.", view=None)
 
-        # schließen
         state.is_closed = True
 
-        # Original-Post aktualisieren (nicht die ephemere Confirm-Message!)
         await self._update_public_post(state)
 
-		await interaction.response.edit_message(content="🔒 Suche wurde geschlossen.", view=None)
+        await interaction.response.edit_message(content="🔒 Suche wurde geschlossen.", view=None)
 
     async def handle_open(self, interaction: discord.Interaction, message_id: int) -> None:
         state = self.group_searches.get(message_id)
@@ -1433,6 +1431,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
