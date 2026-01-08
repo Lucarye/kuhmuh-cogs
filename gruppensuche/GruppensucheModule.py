@@ -1138,7 +1138,7 @@ class Gruppensuche(commands.Cog):
         btn_close.callback = close_cb  # type: ignore[assignment]
 
         # Row 0: Löschen (endgültig)
-        btn_delete = discord.ui.Button(label="🗑️ Löschen", style=discord.ButtonStyle.danger, row=2)
+        btn_delete = discord.ui.Button(label="🗑️ Löschen", style=discord.ButtonStyle.secondary, row=2)
 
         async def delete_cb(interaction: discord.Interaction):
             await self.handle_delete_request(interaction, state.message_id)
@@ -1156,7 +1156,7 @@ class Gruppensuche(commands.Cog):
 
         btn_ping_role = discord.ui.Button(
             label=ping_label,
-            style=discord.ButtonStyle.primary,
+            style=discord.ButtonStyle.secondary,
             row=1,
         )
 
@@ -1168,7 +1168,7 @@ class Gruppensuche(commands.Cog):
 
         btn_ping_q = discord.ui.Button(
             label="🔔 Ping Warteschlange",
-            style=discord.ButtonStyle.primary,
+            style=discord.ButtonStyle.secondary,
             row=1,
         )
 
@@ -1558,6 +1558,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
