@@ -1117,6 +1117,7 @@ class Gruppensuche(commands.Cog):
 
         view.add_item(btn_join)
         view.add_item(btn_leave)
+
 		
         # Row 0: Run gestartet (Auto-Close)
         btn_started = discord.ui.Button(label="▶️ Run gestartet", style=discord.ButtonStyle.primary, row=0)
@@ -1129,7 +1130,7 @@ class Gruppensuche(commands.Cog):
 		
 		
         # Row 0: Schließen (nur Ersteller/Admin/Offizier erlaubt – Prüfung im Handler)
-        btn_close = discord.ui.Button(label="🔒 Schließen", style=discord.ButtonStyle.secondary, row=0)
+        btn_close = discord.ui.Button(label="🔒 Schließen", style=discord.ButtonStyle.secondary, row=2)
 
         async def close_cb(interaction: discord.Interaction):
             await self.handle_close_request(interaction, state.message_id)
@@ -1138,7 +1139,7 @@ class Gruppensuche(commands.Cog):
         view.add_item(btn_close)
 
         # Row 0: Löschen (endgültig)
-        btn_delete = discord.ui.Button(label="🗑️ Löschen", style=discord.ButtonStyle.danger, row=0)
+        btn_delete = discord.ui.Button(label="🗑️ Löschen", style=discord.ButtonStyle.danger, row=2)
 
         async def delete_cb(interaction: discord.Interaction):
             await self.handle_delete_request(interaction, state.message_id)
@@ -1183,7 +1184,7 @@ class Gruppensuche(commands.Cog):
         btn_edit = discord.ui.Button(
             label="✏️ Bearbeiten",
             style=discord.ButtonStyle.secondary,
-            row=0,
+            row=2,
         )
 
         async def edit_cb(interaction: discord.Interaction):
@@ -1556,6 +1557,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
