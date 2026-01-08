@@ -890,7 +890,11 @@ class Gruppensuche(commands.Cog):
         # Startzeit
         start_time = state.start_time or "nicht angegeben"
 
+        promoted_mentions: List[str] = []
+
         for uid in promoted:
+            promoted_mentions.append(f"<@{uid}>")
+
             member = guild.get_member(uid)
             if member is None:
                 continue
@@ -919,6 +923,16 @@ class Gruppensuche(commands.Cog):
                 except Exception:
                     pass
 
+        # Ersteller benachrichtigen (einmal pro Nachrück-Ereignis)
+        if creator is not None:
+            try:
+                await creator.send(
+                    f"🔔 **Warteschlange aufgerückt**\n\n"
+                    f"Nachgerückt: {', '.join(promoted_mentions)}\n"
+                    f"➡️ Zur Gruppensuche: {post_link}"
+                )
+            except Exception:
+                pass
 
     async def _update_public_post(self, state: GroupSearchState) -> None:
         """Edits the original group search message (not ephemeral confirms)."""
@@ -1652,6 +1666,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
