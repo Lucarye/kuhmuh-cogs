@@ -890,18 +890,18 @@ class Gruppensuche(commands.Cog):
         # Startzeit
         start_time = state.start_time or "nicht angegeben"
 
-        promoted_mentions: List[str] = []
+        promoted_names: List[str] = []
 
         for uid in promoted:
-			member = guild.get_member(uid)
-			if member is None:
-				continue
+            member = guild.get_member(uid)
+            if member is None:
+                continue
 
-		promoted_mentions.append(member.display_name)
+            promoted_names.append(member.display_name)
 
-			dm_ok = False
-			try:
-				await member.send(
+            dm_ok = False
+            try:
+                await member.send(
                     f"❗ **Ein Teilnehmer hat abgesagt.**\n\n"
                     f"Du bist aus der Warteschlange nachgerückt und jetzt **Teilnehmer**.\n\n"
                     f"🔎 **Suche von:** {creator_name}\n"
@@ -928,7 +928,7 @@ class Gruppensuche(commands.Cog):
             try:
                 await creator.send(
                     f"🔔 **Warteschlange aufgerückt**\n\n"
-                    f"Nachgerückt: {', '.join(promoted_mentions)}\n"
+                    f"Nachgerückt: {', '.join(promoted_names)}\n"
                     f"➡️ Zur Gruppensuche: {post_link}"
                 )
             except Exception:
@@ -1666,6 +1666,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
