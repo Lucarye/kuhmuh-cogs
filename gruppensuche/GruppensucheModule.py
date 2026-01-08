@@ -1104,7 +1104,7 @@ class Gruppensuche(commands.Cog):
 
         # Row 0: Join/Leave
         btn_join = discord.ui.Button(label="Ich bin dabei", style=discord.ButtonStyle.success, row=0)
-        btn_leave = discord.ui.Button(label="Abmelden", style=discord.ButtonStyle.secondary, row=0)
+        btn_leave = discord.ui.Button(label="Abmelden", style=discord.ButtonStyle.danger, row=0)
 
         async def join_cb(interaction: discord.Interaction):
             await self.handle_join(interaction, state.message_id)
@@ -1557,6 +1557,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
