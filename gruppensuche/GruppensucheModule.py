@@ -547,17 +547,16 @@ class MuhhDetailsModal(discord.ui.Modal, title="Muhhelfer – Details"):
         # SOFORT bestätigen, damit Discord kein "Etwas ist schiefgelaufen" zeigt
         await interaction.response.defer(ephemeral=True)
 
-        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+        cog = interaction.client.get_cog("Gruppensuche")
         if cog is None:
-            return await interaction.followup.send(
+            await interaction.followup.send(
                 "Interner Fehler: Cog nicht gefunden.",
                 ephemeral=True,
                 delete_after=60
             )
+            return
 
-    await cog.finish_muhhelfer(interaction)
-
-
+        await cog.finish_muhhelfer(interaction)
 
 # === Haupt-Cog ===
 
@@ -1088,6 +1087,7 @@ class Gruppensuche(commands.Cog):
         
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
