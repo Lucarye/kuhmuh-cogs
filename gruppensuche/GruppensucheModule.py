@@ -879,21 +879,22 @@ class Gruppensuche(commands.Cog):
 
         btn_ping_q.callback = ping_q_cb  # type: ignore[assignment]
         view.add_item(btn_ping_q)
-        
+
         # Row 2: Bearbeiten (nur Ersteller / Admin / Offizier)
         btn_edit = discord.ui.Button(
-        label="✏️ Bearbeiten",
-        style=discord.ButtonStyle.secondary,
-        row=2,
-    )
+            label="✏️ Bearbeiten",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+        )
 
-    async def edit_cb(interaction: discord.Interaction):
-        await self.handle_edit_menu(interaction, state.message_id)
+        async def edit_cb(interaction: discord.Interaction):
+            await self.handle_edit_menu(interaction, state.message_id)
 
         btn_edit.callback = edit_cb  # type: ignore[assignment]
         view.add_item(btn_edit)
-        
+
         return view
+
 
     def build_public_embed(self, state: GroupSearchState) -> discord.Embed:
         creator_mention = f"<@{state.creator_id}>"
@@ -1089,6 +1090,7 @@ class Gruppensuche(commands.Cog):
         
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
