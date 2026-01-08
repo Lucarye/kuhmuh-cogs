@@ -817,14 +817,16 @@ class Gruppensuche(commands.Cog):
 
         # keine zusätzliche ephemeral "erstellt" Nachricht (reduziert Noise)
         # Kurze Bestätigung für den Ersteller, verschwindet automatisch
-    try:
-        await interaction.followup.send(
-            "✅ Gruppensuche erstellt.",
-            ephemeral=True,
-            delete_after=60
-        )
-    except Exception:
-        pass
+        # Kurze Bestätigung für den Ersteller, verschwindet automatisch
+        try:
+            await interaction.followup.send(
+                "✅ Gruppensuche erstellt.",
+                ephemeral=True,
+                delete_after=60
+            )
+        except Exception:
+            pass
+
 
     def build_public_view(self, state: GroupSearchState) -> discord.ui.View:
         view = discord.ui.View(timeout=None)
@@ -1087,6 +1089,7 @@ class Gruppensuche(commands.Cog):
         
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
