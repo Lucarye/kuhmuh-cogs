@@ -1036,17 +1036,17 @@ class Gruppensuche(commands.Cog):
         st.max_players = max(1, min(5, int(max_players)))
         await interaction.response.edit_message(embed=build_muhh_embed_step_bosses(st), view=MuhhBossView(self, user_id))
 
-	async def toggle_muhh_boss(self, interaction: discord.Interaction, user_id: int, boss_key: str) -> None:
-    st = self.muhh_wizard.get(user_id)
-    if st is None:
-        return
+    async def toggle_muhh_boss(self, interaction: discord.Interaction, user_id: int, boss_key: str) -> None:
+        st = self.muhh_wizard.get(user_id)
+        if st is None:
+            return
 
-    if boss_key in st.selected_boss_keys:
-        st.selected_boss_keys.remove(boss_key)
-        st.doppel_run_keys.discard(boss_key)
-    else:
-        if len(st.selected_boss_keys) >= 5:
-            return await interaction.response.send_message(
+        if boss_key in st.selected_boss_keys:
+            st.selected_boss_keys.remove(boss_key)
+            st.doppel_run_keys.discard(boss_key)
+        else:
+            if len(st.selected_boss_keys) >= 5:
+                return await interaction.response.send_message(
                 "Maximal 5 Bosse auswählbar.",
                 ephemeral=True,
             )
@@ -1748,6 +1748,7 @@ async def toggle_muhh_doppel_run(self, interaction: discord.Interaction, user_id
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
