@@ -83,6 +83,8 @@ class GroupSearchState:
         # Cooldown timestamps (Creator)
         self.ping_role_last_ts: Optional[float] = None
         self.ping_waitlist_last_ts: Optional[float] = None
+        # Status der Suche
+        self.is_closed: bool = False  # True = geschlossen (keine Interaktionen)
 
 
 class MuhhWizardState:
@@ -1049,11 +1051,33 @@ class Gruppensuche(commands.Cog):
         p_text = "\n".join(f"• <@{uid}>" for uid in participants) if participants else "—"
         q_text = "\n".join(f"• <@{uid}>" for uid in waitlist) if waitlist else "—"
 
+        # ===== Status (Offen / Voll / Geschlossen) + Badge =====
+        is_full = (state.max_players > 0 and len(state.participants_order) >= state.max_players)
+
+        if state.is_closed:
+            status_text = "🔒 Geschlossen"
+            badge_title = f"🔒 GESCHLOSSEN – {state.title}"
+            colour = discord.Colour.dark_grey()
+        elif is_full:
+            status_text = "🔴 Voll (Warteschlange aktiv)"
+            badge_title = f"✅ VOLL – {state.title}"
+            colour = discord.Colour.green()
+        else:
+            status_text = "🟢 Offen"
+            badge_title = state.title
+
         embed = discord.Embed(
-            title=state.title,
+            title=badge_title,
             description="\n".join(desc_lines),
             colour=colour,
         )
+
+        embed.add_field(
+            name="Status",
+            value=status_text,
+            inline=False
+        )
+
 
         embed.add_field(
             name=f"Teilnehmer ({len(participants)}/{state.max_players})",
@@ -1303,6 +1327,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
