@@ -675,7 +675,25 @@ class EditAkvkModal(discord.ui.Modal, title="Bearbeiten – AK/VK"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         await self.cog.apply_edit_akvk(interaction, self.message_id, self.akvk.value)
-		
+
+class ConfirmDeleteView(discord.ui.View):
+    def __init__(self, cog: "Gruppensuche", message_id: int, user_id: int):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.message_id = message_id
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    @discord.ui.button(label="🗑️ Ja, endgültig löschen", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.handle_delete_confirm(interaction, self.message_id)
+
+    @discord.ui.button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="❎ Abgebrochen.", view=None)
+
 class ConfirmCloseView(discord.ui.View):
     def __init__(self, cog: "Gruppensuche", message_id: int, user_id: int):
         super().__init__(timeout=60)
@@ -750,6 +768,45 @@ class Gruppensuche(commands.Cog):
         )
         await interaction.response.send_message(embed=embed, view=CategorySelectView(), ephemeral=True)
 
+    async def handle_delete_request(self, interaction: discord.Interaction, message_id: int) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.response.send_message("Diese Suche ist nicht mehr aktiv.", ephemeral=True)
+
+        if not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nicht erlaubt.", ephemeral=True)
+
+        if not self.is_admin_offizier_or_creator(interaction.user, state.creator_id):
+            return await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+
+        await interaction.response.send_message(
+            "Möchtest du diese Suche wirklich **endgültig löschen**?\n"
+            "⚠️ Dieser Vorgang kann **nicht** rückgängig gemacht werden.",
+            ephemeral=True,
+            view=ConfirmDeleteView(self, message_id, interaction.user.id),
+        )
+
+    async def handle_delete_confirm(self, interaction: discord.Interaction, message_id: int) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.response.edit_message(content="Diese Suche ist nicht mehr aktiv.", view=None)
+
+        # Original-Post löschen
+        guild = self.bot.get_guild(state.guild_id)
+        if guild is not None:
+            channel = guild.get_channel(state.channel_id)
+            if isinstance(channel, discord.TextChannel):
+                try:
+                    msg = await channel.fetch_message(state.message_id)
+                    await msg.delete()
+                except Exception:
+                    pass
+
+        # State entfernen
+        self.group_searches.pop(message_id, None)
+
+        await interaction.response.edit_message(content="🗑️ Suche wurde gelöscht.", view=None)
+	
     # ===== Rechte / Helper =====
 
     def is_admin_or_offizier(self, member: discord.Member) -> bool:
@@ -1079,7 +1136,15 @@ class Gruppensuche(commands.Cog):
 
         btn_close.callback = close_cb  # type: ignore[assignment]
         view.add_item(btn_close)
-		
+
+        # Row 0: Löschen (endgültig)
+        btn_delete = discord.ui.Button(label="🗑️ Löschen", style=discord.ButtonStyle.danger, row=0)
+
+        async def delete_cb(interaction: discord.Interaction):
+            await self.handle_delete_request(interaction, state.message_id)
+
+        btn_delete.callback = delete_cb  # type: ignore[assignment]
+        view.add_item(btn_delete)
 
         # Row 1: Ping Rolle + Ping Warteschlange (immer sichtbar)
         # Label nach Schwierigkeit
@@ -1491,6 +1556,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
