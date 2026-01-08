@@ -675,6 +675,7 @@ class EditAkvkModal(discord.ui.Modal, title="Bearbeiten – AK/VK"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         await self.cog.apply_edit_akvk(interaction, self.message_id, self.akvk.value)
+		
 class ConfirmCloseView(discord.ui.View):
     def __init__(self, cog: "Gruppensuche", message_id: int, user_id: int):
         super().__init__(timeout=60)
@@ -688,6 +689,24 @@ class ConfirmCloseView(discord.ui.View):
     @discord.ui.button(label="✅ Ja, schließen", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.handle_close_confirm(interaction, self.message_id)
+
+    @discord.ui.button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="❎ Abgebrochen.", view=None)
+		
+class ConfirmStartedView(discord.ui.View):
+    def __init__(self, cog: "Gruppensuche", message_id: int, user_id: int):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.message_id = message_id
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    @discord.ui.button(label="✅ Ja, Run gestartet", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.handle_started_confirm(interaction, self.message_id)
 
     @discord.ui.button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -770,6 +789,37 @@ class Gruppensuche(commands.Cog):
             await msg.edit(embed=self.build_public_embed(state), view=self.build_public_view(state))
         except Exception:
             pass
+    async def handle_started_request(self, interaction: discord.Interaction, message_id: int) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.response.send_message("Diese Suche ist nicht mehr aktiv.", ephemeral=True)
+
+        if not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nicht erlaubt.", ephemeral=True)
+
+        if not self.is_admin_offizier_or_creator(interaction.user, state.creator_id):
+            return await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+
+        await interaction.response.send_message(
+            "Soll diese Suche als **Run gestartet** markiert und geschlossen werden?\n"
+            "Danach sind keine Anmeldungen/Pings mehr möglich (du kannst sie später wieder öffnen).",
+            ephemeral=True,
+            view=ConfirmStartedView(self, message_id, interaction.user.id),
+        )
+
+    async def handle_started_confirm(self, interaction: discord.Interaction, message_id: int) -> None:
+        state = self.group_searches.get(message_id)
+        if state is None:
+            return await interaction.response.edit_message(content="Diese Suche ist nicht mehr aktiv.", view=None)
+
+        state.is_closed = True
+
+        # optional: du kannst dir hier ein Flag merken, dass es "Run gestartet" war
+        # z.B. state.close_reason = "started" (falls du später unterscheiden willst)
+
+        await self._update_public_post(state)
+
+        await interaction.response.edit_message(content="▶️ Run gestartet – Suche wurde geschlossen.", view=None)
 
     # ===== Muhhelfer Wizard =====
 
@@ -1010,6 +1060,16 @@ class Gruppensuche(commands.Cog):
 
         view.add_item(btn_join)
         view.add_item(btn_leave)
+		
+        # Row 0: Run gestartet (Auto-Close)
+        btn_started = discord.ui.Button(label="▶️ Run gestartet", style=discord.ButtonStyle.primary, row=0)
+
+        async def started_cb(interaction: discord.Interaction):
+            await self.handle_started_request(interaction, state.message_id)
+
+        btn_started.callback = started_cb  # type: ignore[assignment]
+        view.add_item(btn_started)
+		
 		
         # Row 0: Schließen (nur Ersteller/Admin/Offizier erlaubt – Prüfung im Handler)
         btn_close = discord.ui.Button(label="🔒 Schließen", style=discord.ButtonStyle.secondary, row=0)
@@ -1431,6 +1491,7 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
+
 
 
 
