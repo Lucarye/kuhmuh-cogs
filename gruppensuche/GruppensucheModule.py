@@ -32,8 +32,8 @@ BOSSES: List[Tuple[str, str]] = [
     ("uturi", "Uturi"),
     ("dunkler_bonghwang", "Dunkler Bonghwang"),
     ("bihyung", "Bihyung"),
-	("entthronter_kronprinz", "Entthronter Kronprinz"),
-	("knabe_blau", "Knabe in Blau"),
+    ("entthronter_kronprinz", "Entthronter Kronprinz"),
+    ("knabe_blau", "Knabe in Blau"),
 ]
 
 
@@ -767,7 +767,7 @@ class ConfirmCloseView(discord.ui.View):
     @discord.ui.button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="❎ Abgebrochen.", view=None)
-		
+        
 class ConfirmStartedView(discord.ui.View):
     def __init__(self, cog: "Gruppensuche", message_id: int, user_id: int):
         super().__init__(timeout=60)
@@ -862,7 +862,7 @@ class Gruppensuche(commands.Cog):
         self.group_searches.pop(message_id, None)
 
         await interaction.response.edit_message(content="🗑️ Suche wurde gelöscht.", view=None)
-	
+    
     # ===== Rechte / Helper =====
 
     def is_admin_or_offizier(self, member: discord.Member) -> bool:
@@ -1259,9 +1259,13 @@ class Gruppensuche(commands.Cog):
         if interaction.guild is None:
             return await interaction.response.send_message("Dieser Befehl kann nur auf einem Server verwendet werden.", ephemeral=True)
 
-        channel = interaction.guild.get_channel(TEST_CHANNEL_ID)
+        channel = interaction.channel
         if channel is None or not isinstance(channel, discord.TextChannel):
-            return await interaction.response.send_message("Test-Channel nicht gefunden.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Bitte nutze den Befehl in einem Text-Channel.",
+                 ephemeral=True
+            )
+
 
         creator_id = interaction.user.id
 
@@ -1321,7 +1325,7 @@ class Gruppensuche(commands.Cog):
 
             return view
 
-		
+        
         view = discord.ui.View(timeout=None)
 
         # Row 0: Join/Leave
@@ -1340,7 +1344,7 @@ class Gruppensuche(commands.Cog):
         view.add_item(btn_join)
         view.add_item(btn_leave)
 
-		
+        
         # Row 0: Run gestartet (Auto-Close)
         btn_started = discord.ui.Button(label="▶️ Run gestartet", style=discord.ButtonStyle.primary, row=0)
 
@@ -1349,8 +1353,8 @@ class Gruppensuche(commands.Cog):
 
         btn_started.callback = started_cb  # type: ignore[assignment]
         view.add_item(btn_started)
-		
-		
+        
+        
         # Row 0: Schließen (nur Ersteller/Admin/Offizier erlaubt – Prüfung im Handler)
         btn_close = discord.ui.Button(label="🔒 Schließen", style=discord.ButtonStyle.secondary, row=2)
 
@@ -1503,7 +1507,7 @@ class Gruppensuche(commands.Cog):
         state = self.group_searches.get(message_id)
         if state.is_closed:
             return await interaction.response.send_message("Diese Suche ist geschlossen.", ephemeral=True)
-		
+        
         if state is None:
             return await interaction.response.send_message("Diese Gruppensuche ist nicht mehr aktiv.", ephemeral=True)
 
@@ -1720,7 +1724,7 @@ class Gruppensuche(commands.Cog):
                     pass
 
         await interaction.followup.send("✅ Zeiten/Notiz aktualisiert.", ephemeral=True, delete_after=60)
-		
+        
     async def apply_edit_max_players(
         self,
         interaction: discord.Interaction,
