@@ -453,6 +453,12 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
         required=False,
         style=discord.TextStyle.paragraph,
     )
+    pilafe_max_players = discord.ui.TextInput(
+        label="Max. Teilnehmer (1–5)",
+        placeholder="z. B. 5",
+        required=True,
+        style=discord.TextStyle.short,
+    )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         # SOFORT bestätigen, damit Discord das Modal sauber schließt
@@ -462,6 +468,21 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
         duration_raw = str(self.pilafe_duration_hours.value).strip()
         start_time_raw = str(self.common_start_time.value).strip()
         note_raw = str(self.common_note.value).strip()
+        max_players_raw = str(self.pilafe_max_players.value).strip()
+
+        try:
+            max_players = int(max_players_raw)
+        except ValueError:
+            return await interaction.response.send_message(
+                "Bitte bei **Max. Teilnehmer** eine Zahl von **1 bis 5** eingeben.",
+                ephemeral=True
+            )
+
+        if max_players < 1 or max_players > 5:
+            return await interaction.response.send_message(
+                "Bitte bei **Max. Teilnehmer** eine Zahl von **1 bis 5** eingeben.",
+                ephemeral=True
+            )
 
         duration = duration_raw or None
         start_time = start_time_raw or None
@@ -489,7 +510,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
             difficulty=None,
             requirement_akvk=None,
             ping_role_id=None,
-            max_players=0,
+            mmax_players=max_players,
             doppel_runs=set(),
         )
 
@@ -525,6 +546,12 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
         required=False,
         style=discord.TextStyle.paragraph,
     )
+    spot_max_players = discord.ui.TextInput(
+        label="Max. Teilnehmer (1–5)",
+        placeholder="z. B. 3",
+        required=True,
+        style=discord.TextStyle.short,
+    )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
@@ -533,6 +560,22 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
         duration_raw = str(self.spot_duration_hours.value).strip()
         start_time_raw = str(self.common_start_time.value).strip()
         note_raw = str(self.common_note.value).strip()
+        max_players_raw = str(self.spot_max_players.value).strip()
+
+        try:
+            max_players = int(max_players_raw)
+        except ValueError:
+            return await interaction.response.send_message(
+                "Bitte bei **Max. Teilnehmer** eine Zahl von **1 bis 5** eingeben.",
+                ephemeral=True
+            )
+
+        if max_players < 1 or max_players > 5:
+            return await interaction.response.send_message(
+                "Bitte bei **Max. Teilnehmer** eine Zahl von **1 bis 5** eingeben.",
+                ephemeral=True
+            )
+
 
         duration = duration_raw or None
         start_time = start_time_raw or None
