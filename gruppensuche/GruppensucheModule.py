@@ -511,8 +511,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
             max_players=self.max_players,
             doppel_runs=set(),
         )
-        # Wizard-State aufräumen (damit nichts "hängen bleibt")
-        cog.muhh_wizard.pop(interaction.user.id, None)
+
         # kurze Bestätigung, die automatisch verschwindet
         try:
             await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True, delete_after=10)
@@ -610,8 +609,6 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
             doppel_runs=set(),
         )
 
-        # Wizard-State aufräumen (damit nichts "hängen bleibt")
-        cog.muhh_wizard.pop(interaction.user.id, None)
         # kurze Bestätigung, die automatisch verschwindet
         try:
             await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True, delete_after=10)
