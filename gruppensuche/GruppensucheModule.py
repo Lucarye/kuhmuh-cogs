@@ -98,7 +98,7 @@ class MuhhWizardState:
         self.duration: Optional[str] = None
         self.start_time: Optional[str] = None
         self.note: Optional[str] = None
-
+        self.category: Optional[str] = None   # "muhhelfer" / "pilafe" / "spot"
 
 # === UI: Kategorieauswahl ===
 
@@ -140,12 +140,11 @@ class CategorySelect(discord.ui.Select):
         value = self.values[0]
         if value == "muhhelfer":
             await cog.start_muhhelfer_wizard(interaction)
-        elif value == "pilafe":
-            await interaction.response.send_modal(PilaFeModal())
-        elif value == "spot":
-            await interaction.response.send_modal(SpotModal())
+        elif value in ("pilafe", "spot"):
+            await cog.start_simple_wizard(interaction, value)
         else:
             await interaction.response.send_message("Unbekannte Kategorie.", ephemeral=True)
+
 
 
 class CategorySelectView(discord.ui.View):
@@ -429,6 +428,10 @@ class EditMenuView(discord.ui.View):
         self.add_item(EditMenuSelect(cog, message_id, user_id))
 
 class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
+    def __init__(self, max_players: int):
+        super().__init__()
+        self.max_players = max_players
+
     pilafe_amount = discord.ui.TextInput(
         label="Menge an Schriftrollen",
         placeholder="z. B. 1000",
@@ -453,12 +456,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
         required=False,
         style=discord.TextStyle.paragraph,
     )
-    pilafe_max_players = discord.ui.TextInput(
-        label="Max. Teilnehmer (1–5)",
-        placeholder="z. B. 5",
-        required=True,
-        style=discord.TextStyle.short,
-    )
+
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         # SOFORT bestätigen, damit Discord das Modal sauber schließt
@@ -510,10 +508,11 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
             difficulty=None,
             requirement_akvk=None,
             ping_role_id=None,
-            max_players=max_players,
+            max_players=self.max_players,
             doppel_runs=set(),
         )
-
+        # Wizard-State aufräumen (damit nichts "hängen bleibt")
+        cog.muhh_wizard.pop(interaction.user.id, None)
         # kurze Bestätigung, die automatisch verschwindet
         try:
             await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True, delete_after=10)
@@ -522,6 +521,10 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
 
 
 class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
+    def __init__(self, max_players: int):
+        super().__init__()
+        self.max_players = max_players
+
     spot_name = discord.ui.TextInput(
         label="Spot",
         placeholder="z. B. Orzekia, Dornenwald, …",
@@ -603,10 +606,13 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
             difficulty=None,
             requirement_akvk=None,
             ping_role_id=None,
-            max_players=0,
+            max_players=self.max_players,
             doppel_runs=set(),
         )
 
+        # Wizard-State aufräumen (damit nichts "hängen bleibt")
+        cog.muhh_wizard.pop(interaction.user.id, None)
+        # kurze Bestätigung, die automatisch verschwindet
         try:
             await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True, delete_after=10)
         except Exception:
@@ -1080,6 +1086,33 @@ class Gruppensuche(commands.Cog):
 
     # ===== Muhhelfer Wizard =====
 
+    async def start_simple_wizard(self, interaction: discord.Interaction, category: str) -> None:
+        """
+        Startet den gleichen Wizard-Flow wie bei Muhhelfer,
+        aber für pilafe/spot: erst Teilnehmerzahl, dann Modal.
+        """
+        user_id = interaction.user.id
+        st = self.muhh_wizard.get(user_id) or MuhhWizardState()
+        self.muhh_wizard[user_id] = st
+
+        st.category = category
+        st.difficulty = None
+        st.selected_boss_keys = []
+        st.doppel_run_keys = set()
+        st.max_players = 5
+        st.custom_akvk = None
+        st.duration = None
+        st.start_time = None
+        st.note = None
+
+        # Wir verwenden denselben Teilnehmeranzahl-Step wie Muhhelfer
+        embed = discord.Embed(
+            title="👥 Gruppengröße",
+            description="Wähle die **maximale Teilnehmerzahl**.",
+            colour=discord.Colour.blurple(),
+        )
+        await interaction.response.edit_message(embed=embed, view=MuhhSizeView(self, user_id))
+
     async def start_muhhelfer_wizard(self, interaction: discord.Interaction) -> None:
         user_id = interaction.user.id
         self.muhh_wizard[user_id] = MuhhWizardState()
@@ -1092,10 +1125,17 @@ class Gruppensuche(commands.Cog):
 
         st.max_players = max(1, min(5, int(max_players)))
 
+        # Wenn Kategorie pilafe/spot: direkt Modal öffnen
+        if st.category == "pilafe":
+            return await interaction.response.send_modal(PilaFeModal(max_players=st.max_players))
+        if st.category == "spot":
+            return await interaction.response.send_modal(SpotModal(max_players=st.max_players))
+
+        # Default: Muhhelfer geht weiter zur Bossauswahl
         await interaction.response.edit_message(
             embed=build_muhh_embed_step_bosses(st),
             view=MuhhBossButtonView(self, user_id),
-    )
+        )
 
 
 
