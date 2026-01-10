@@ -454,7 +454,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
         style=discord.TextStyle.paragraph,
     )
 
-        async def on_submit(self, interaction: discord.Interaction) -> None:
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         # SOFORT bestätigen, damit Discord das Modal sauber schließt
         await interaction.response.defer(ephemeral=True)
 
@@ -526,7 +526,7 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
         style=discord.TextStyle.paragraph,
     )
 
-        async def on_submit(self, interaction: discord.Interaction) -> None:
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
         spot_name = str(self.spot_name.value).strip()
