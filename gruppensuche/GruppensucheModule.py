@@ -454,7 +454,10 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
         style=discord.TextStyle.paragraph,
     )
 
-    async def on_submit(self, interaction: discord.Interaction) -> None:
+        async def on_submit(self, interaction: discord.Interaction) -> None:
+        # SOFORT bestätigen, damit Discord das Modal sauber schließt
+        await interaction.response.defer(ephemeral=True)
+
         amount = str(self.pilafe_amount.value).strip()
         duration_raw = str(self.pilafe_duration_hours.value).strip()
         start_time_raw = str(self.common_start_time.value).strip()
@@ -466,9 +469,13 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
 
         detail_lines = [f"Anzahl Rollen: **{amount}**"]
 
-        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+        cog = interaction.client.get_cog("Gruppensuche")
         if cog is None:
-            return await interaction.response.send_message("Interner Fehler: Cog nicht gefunden.", ephemeral=True)
+            return await interaction.followup.send(
+                "Interner Fehler: Cog nicht gefunden.",
+                ephemeral=True,
+                delete_after=60,
+            )
 
         await cog.create_public_group_message(
             interaction,
@@ -482,9 +489,15 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
             difficulty=None,
             requirement_akvk=None,
             ping_role_id=None,
-            max_players=0,  # irrelevant
+            max_players=0,
             doppel_runs=set(),
         )
+
+        # kurze Bestätigung, die automatisch verschwindet
+        try:
+            await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True, delete_after=10)
+        except Exception:
+            pass
 
 
 class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
@@ -513,7 +526,9 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
         style=discord.TextStyle.paragraph,
     )
 
-    async def on_submit(self, interaction: discord.Interaction) -> None:
+        async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+
         spot_name = str(self.spot_name.value).strip()
         duration_raw = str(self.spot_duration_hours.value).strip()
         start_time_raw = str(self.common_start_time.value).strip()
@@ -525,9 +540,13 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
 
         detail_lines = [f"Spot: **{spot_name}**"]
 
-        cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
+        cog = interaction.client.get_cog("Gruppensuche")
         if cog is None:
-            return await interaction.response.send_message("Interner Fehler: Cog nicht gefunden.", ephemeral=True)
+            return await interaction.followup.send(
+                "Interner Fehler: Cog nicht gefunden.",
+                ephemeral=True,
+                delete_after=60,
+            )
 
         await cog.create_public_group_message(
             interaction,
@@ -544,6 +563,12 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
             max_players=0,
             doppel_runs=set(),
         )
+
+        try:
+            await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True, delete_after=10)
+        except Exception:
+            pass
+
 
 
 class MuhhDetailsModal(discord.ui.Modal, title="Muhhelfer – Details"):
