@@ -510,7 +510,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
             difficulty=None,
             requirement_akvk=None,
             ping_role_id=None,
-            mmax_players=max_players,
+            max_players=max_players,
             doppel_runs=set(),
         )
 
