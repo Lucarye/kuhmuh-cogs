@@ -11,11 +11,11 @@ TEST_ROLE_ID = 1445018518562017373     # Test-Rolle fürs "Neue Suche" Ping
 ROLE_NORMAL_ID = 1424768638157852682   # Muhhelfer – Normal
 ROLE_SCHWER_ID = 1424769286790054050   # Muhhelfer – Schwer
 
-Role_Mirumok_ID = 1459832247405248707           # Dehkia Mirumok
-Role_Gyfin_ID = 1459832490603708590  # Dehkia Gyfin 
+Role_Mirumok_ID = 1459832247405248707  # Dehkia Mirumok
+Role_Gyfin_ID = 1459832490603708590    # Dehkia Gyfin 
 
-Role_PilaFe_ID = 1458832343149318269            # Pila Fe
-Role_Altar_ID =  1459833455369130140            # Altar des Blutes
+Role_PilaFe_ID = 1458832343149318269   # Pila Fe
+Role_Altar_ID = 1459833455369130140    # Altar des Blutes
 
 ADMIN_ROLE_ID: Optional[int] = 1198650646786736240     # Admin-Rolle
 OFFIZIER_ROLE_ID: Optional[int] = 1198652039312453723  # Offizier-Rolle (gleich wie Admin)
@@ -527,7 +527,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
             note=note,
             difficulty=None,
             requirement_akvk=None,
-            ping_role_id=None,
+            ping_role_id=ROLE_PILAFE_ID,
             max_players=self.max_players,
             doppel_runs=set(),
         )
@@ -1376,7 +1376,24 @@ class Gruppensuche(commands.Cog):
         state.participants_order.append(creator_id)
 
         embed = self.build_public_embed(state)
-        sent = await channel.send(content=f"<@&{TEST_ROLE_ID}>", embed=embed, view=self.build_public_view(state))
+        # Auto-Ping je nach Kategorie / Schwierigkeit
+        ping_content = None
+
+        if category == "muhhelfer":
+            if difficulty == "Schwer":
+                ping_content = f"<@&{ROLE_SCHWER_ID}>"
+            elif difficulty == "Normal":
+                ping_content = f"<@&{ROLE_NORMAL_ID}>"
+
+        elif category == "pilafe":
+            ping_content = f"<@&{ROLE_PILAFE_ID}>"
+
+         # Gruppenspots: aktuell kein Auto-Ping
+        sent = await channel.send(
+             content=ping_content,
+            embed=embed,
+            view=self.build_public_view(state),
+        )
 
         state.message_id = sent.id
         self.group_searches[sent.id] = state
@@ -1457,6 +1474,8 @@ class Gruppensuche(commands.Cog):
 
         # Row 1: Ping Rolle + Ping Warteschlange (immer sichtbar)
         # Label nach Schwierigkeit
+        if state.category == "pilafe":
+            ping_label = "🔔 Ping Pila Fe"
         if state.difficulty == "Schwer":
             ping_label = "🔔 Ping (Schwer)"
         elif state.difficulty == "Normal":
