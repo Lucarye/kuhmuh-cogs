@@ -98,7 +98,7 @@ class MuhhWizardState:
         self.duration: Optional[str] = None
         self.start_time: Optional[str] = None
         self.note: Optional[str] = None
-        self.category: Optional[str] = None   # "muhhelfer" / "pilafe" / "spot"
+        self.category: str = "muhhelfer"   # "muhhelfer" / "pilafe" / "spot"
 
 # === UI: Kategorieauswahl ===
 
@@ -136,15 +136,25 @@ class CategorySelect(discord.ui.Select):
         cog: Optional[Gruppensuche] = interaction.client.get_cog("Gruppensuche")  # type: ignore[attr-defined]
         if cog is None:
             return await interaction.response.send_message("Interner Fehler: Cog nicht gefunden.", ephemeral=True)
-
+ 
         value = self.values[0]
+
+    # Debug (kannst du später wieder rausnehmen)
+    # print(f"[CategorySelect] value={value}")
+
         if value == "muhhelfer":
             await cog.start_muhhelfer_wizard(interaction)
-        elif value in ("pilafe", "spot"):
-            await cog.start_simple_wizard(interaction, value)
-        else:
-            await interaction.response.send_message("Unbekannte Kategorie.", ephemeral=True)
+            return
 
+        if value == "pilafe":
+            await interaction.response.send_modal(PilaFeModal())
+            return
+
+        if value == "spot":
+            await interaction.response.send_modal(SpotModal())
+            return
+
+        await interaction.response.send_message("Unbekannte Kategorie.", ephemeral=True)
 
 
 class CategorySelectView(discord.ui.View):
@@ -276,7 +286,25 @@ class MuhhSizeView(discord.ui.View):
 
     @discord.ui.button(label="Zurück", style=discord.ButtonStyle.secondary)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self.cog.back_to_muhh_difficulty(interaction, self.user_id)
+        st = self.cog.muhh_wizard.get(self.user_id)
+
+        # Simple Wizard → zurück zur Kategorieauswahl
+        if st is not None and st.category in ("pilafe", "spot"):
+            embed = discord.Embed(
+                title=f"{MUHKUH_EMOJI} Gruppensuche erstellen",
+                description=(
+                    "Wähle, wofür du eine Gruppe suchst.\n\n"
+                    "• **Muhhelfer (LoML Bosse)**\n"
+                    "• **Pila Fe Schriftrollen**\n"
+                    "• **Gruppenspots**"
+                ),
+                colour=discord.Colour.blurple(),
+            )
+            return await interaction.response.edit_message(embed=embed, view=CategorySelectView())
+
+    # Muhhelfer → zurück zur Schwierigkeit
+    await self.cog.back_to_muhh_difficulty(interaction, self.user_id)
+
 
 class MuhhBossToggleButton(discord.ui.Button):
     def __init__(self, cog: "Gruppensuche", user_id: int, boss_key: str, label: str, selected: bool):
@@ -466,21 +494,6 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
         duration_raw = str(self.pilafe_duration_hours.value).strip()
         start_time_raw = str(self.common_start_time.value).strip()
         note_raw = str(self.common_note.value).strip()
-        max_players_raw = str(self.pilafe_max_players.value).strip()
-
-        try:
-            max_players = int(max_players_raw)
-        except ValueError:
-            return await interaction.response.send_message(
-                "Bitte bei **Max. Teilnehmer** eine Zahl von **1 bis 5** eingeben.",
-                ephemeral=True
-            )
-
-        if max_players < 1 or max_players > 5:
-            return await interaction.response.send_message(
-                "Bitte bei **Max. Teilnehmer** eine Zahl von **1 bis 5** eingeben.",
-                ephemeral=True
-            )
 
         duration = duration_raw or None
         start_time = start_time_raw or None
@@ -1116,23 +1129,31 @@ class Gruppensuche(commands.Cog):
         await interaction.response.edit_message(embed=build_muhh_embed_step_diff(), view=MuhhDifficultyView(self, user_id))
 
     async def set_muhh_max_players(self, interaction: discord.Interaction, user_id: int, max_players: int) -> None:
-        st = self.muhh_wizard.get(user_id)
-        if st is None or st.difficulty is None:
-            return await self.back_to_muhh_difficulty(interaction, user_id)
-
-        st.max_players = max(1, min(5, int(max_players)))
-
-        # Wenn Kategorie pilafe/spot: direkt Modal öffnen
-        if st.category == "pilafe":
-            return await interaction.response.send_modal(PilaFeModal(max_players=st.max_players))
-        if st.category == "spot":
-            return await interaction.response.send_modal(SpotModal(max_players=st.max_players))
-
-        # Default: Muhhelfer geht weiter zur Bossauswahl
-        await interaction.response.edit_message(
-            embed=build_muhh_embed_step_bosses(st),
-            view=MuhhBossButtonView(self, user_id),
+    st = self.muhh_wizard.get(user_id)
+    if st is None:
+        return await interaction.response.send_message(
+            "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
+            ephemeral=True,
         )
+
+    st.max_players = max(1, min(5, int(max_players)))
+
+    # ✅ Simple-Wizard: direkt Modal öffnen (ohne Difficulty)
+    if st.category == "pilafe":
+        return await interaction.response.send_modal(PilaFeModal(max_players=st.max_players))
+
+    if st.category == "spot":
+        return await interaction.response.send_modal(SpotModal(max_players=st.max_players))
+
+    # ✅ Muhhelfer: Difficulty muss gesetzt sein
+    if st.difficulty is None:
+        return await self.back_to_muhh_difficulty(interaction, user_id)
+
+    await interaction.response.edit_message(
+        embed=build_muhh_embed_step_bosses(st),
+        view=MuhhBossButtonView(self, user_id),
+    )
+
 
 
 
