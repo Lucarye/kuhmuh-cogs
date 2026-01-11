@@ -147,12 +147,13 @@ class CategorySelect(discord.ui.Select):
             return
 
         if value == "pilafe":
-            await interaction.response.send_modal(PilaFeModal())
+            await cog.start_simple_wizard(interaction, "pilafe")
             return
 
         if value == "spot":
-            await interaction.response.send_modal(SpotModal())
+            await cog.start_simple_wizard(interaction, "spot")
             return
+
 
         await interaction.response.send_message("Unbekannte Kategorie.", ephemeral=True)
 
@@ -1859,7 +1860,7 @@ class Gruppensuche(commands.Cog):
                 except Exception:
                     pass
 
-        await interaction.followup.send("✅ Max. Teilnehmer aktualisiert.", ephemeral=True, delete_after=60)
+        await interaction.followup.send("✅ Max. Teilnehmer aktualisiert.", ephemeral=True)
 
     async def apply_edit_akvk(self, interaction: discord.Interaction, message_id: int, akvk: str) -> None:
         state = self.group_searches.get(message_id)
