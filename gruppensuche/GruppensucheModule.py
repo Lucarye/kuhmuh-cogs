@@ -680,6 +680,7 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
             ping_role_id=None,
             max_players=self.max_players,
             doppel_runs=set(),
+            day_label=self.day_label,
         )
 
         # kurze Bestätigung, die automatisch verschwindet
@@ -1261,39 +1262,65 @@ class Gruppensuche(commands.Cog):
         category = st.category or "muhhelfer"
         await interaction.response.edit_message(embed=build_day_embed(category), view=DayPickView(self, user_id))
 
-    async def _continue_after_day_pick_followup(self, interaction: discord.Interaction, user_id: int) -> None:
+    async def _send_modal_safe(self, interaction: discord.Interaction, modal: discord.ui.Modal) -> None:
+        # Modal kann nur als "erste Antwort" gesendet werden.
+        if interaction.response.is_done():
+            # Wenn schon geantwortet wurde: sag dem User kurz Bescheid
+            # und lass ihn den Schritt nochmal klicken (oder starte neu).
+            return await interaction.followup.send(
+                "✅ Tag gespeichert. Bitte klicke den Button nochmal, damit ich das Modal öffnen kann.",
+                ephemeral=True,
+            )
+
+        return await interaction.response.send_modal(modal)
+
+    async def _continue_after_day_pick(self, interaction: discord.Interaction, user_id: int) -> None:
         st = self.muhh_wizard.get(user_id)
         if st is None:
-            return await interaction.followup.send(
+            if interaction.response.is_done():
+                return await interaction.followup.send(
+                    "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
+                    ephemeral=True,
+                )
+            return await interaction.response.send_message(
                 "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
                 ephemeral=True,
             )
 
-        # Tag MUSS gesetzt sein
         if not st.day_label:
-            return await interaction.followup.send(
-                "Bitte wähle zuerst einen Tag aus.",
-                ephemeral=True,
-            )
+            if interaction.response.is_done():
+                return await interaction.followup.send("Bitte wähle zuerst einen Tag aus.", ephemeral=True)
+            return await interaction.response.send_message("Bitte wähle zuerst einen Tag aus.", ephemeral=True)
 
+        # pilafe/spot -> Modal
         if st.category == "pilafe":
-            return await interaction.followup.send(
-                PilaFeModal(max_players=st.max_players, day_label=st.day_label)
+            return await self._send_modal_safe(
+                interaction,
+                PilaFeModal(max_players=st.max_players, day_label=st.day_label),
             )
 
         if st.category == "spot":
-            return await interaction.followup.send(
-                SpotModal(max_players=st.max_players, day_label=st.day_label)
+            return await self._send_modal_safe(
+                interaction,
+                SpotModal(max_players=st.max_players, day_label=st.day_label),
             )
 
-        # Muhhelfer: Boss-Step
+        # muhh -> embed edit
         if st.difficulty is None:
             return await self.back_to_muhh_difficulty(interaction, user_id)
 
-        return await interaction.followup.send(
-        "✅ Tag gespeichert. Bitte gehe im Wizard einen Schritt weiter.",
-        ephemeral=True,
+        # edit_message geht nur wenn es aus einem Button/View kommt (response noch frei)
+        if interaction.response.is_done():
+            return await interaction.followup.send(
+                "✅ Tag gespeichert. Bitte klicke im Wizard auf **Weiter**.",
+                ephemeral=True,
+            )
+
+        return await interaction.response.edit_message(
+            embed=build_muhh_embed_step_bosses(st),
+            view=MuhhBossButtonView(self, user_id),
         )
+
 
     async def set_day_label(self, interaction: discord.Interaction, user_id: int, label: str) -> None:
         st = self.muhh_wizard.get(user_id)
@@ -2092,4 +2119,3 @@ class Gruppensuche(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Gruppensuche(bot))
-
