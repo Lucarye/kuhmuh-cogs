@@ -302,8 +302,8 @@ class MuhhSizeView(discord.ui.View):
             )
             return await interaction.response.edit_message(embed=embed, view=CategorySelectView())
 
-    # Muhhelfer → zurück zur Schwierigkeit
-    await self.cog.back_to_muhh_difficulty(interaction, self.user_id)
+        # Muhhelfer → zurück zur Schwierigkeit
+        await self.cog.back_to_muhh_difficulty(interaction, self.user_id)
 
 
 class MuhhBossToggleButton(discord.ui.Button):
