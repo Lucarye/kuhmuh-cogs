@@ -1129,33 +1129,30 @@ class Gruppensuche(commands.Cog):
         await interaction.response.edit_message(embed=build_muhh_embed_step_diff(), view=MuhhDifficultyView(self, user_id))
 
     async def set_muhh_max_players(self, interaction: discord.Interaction, user_id: int, max_players: int) -> None:
-    st = self.muhh_wizard.get(user_id)
-    if st is None:
-        return await interaction.response.send_message(
-            "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
-            ephemeral=True,
+        st = self.muhh_wizard.get(user_id)
+        if st is None:
+            return await interaction.response.send_message(
+                "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
+                ephemeral=True,
+            )
+
+        st.max_players = max(1, min(5, int(max_players)))
+
+        # ✅ Simple-Wizard: direkt Modal öffnen (ohne Difficulty)
+        if st.category == "pilafe":
+            return await interaction.response.send_modal(PilaFeModal(max_players=st.max_players))
+
+        if st.category == "spot":
+            return await interaction.response.send_modal(SpotModal(max_players=st.max_players))
+
+        # ✅ Muhhelfer: Difficulty muss gesetzt sein
+        if st.difficulty is None:
+            return await self.back_to_muhh_difficulty(interaction, user_id)
+
+        await interaction.response.edit_message(
+            embed=build_muhh_embed_step_bosses(st),
+            view=MuhhBossButtonView(self, user_id),
         )
-
-    st.max_players = max(1, min(5, int(max_players)))
-
-    # ✅ Simple-Wizard: direkt Modal öffnen (ohne Difficulty)
-    if st.category == "pilafe":
-        return await interaction.response.send_modal(PilaFeModal(max_players=st.max_players))
-
-    if st.category == "spot":
-        return await interaction.response.send_modal(SpotModal(max_players=st.max_players))
-
-    # ✅ Muhhelfer: Difficulty muss gesetzt sein
-    if st.difficulty is None:
-        return await self.back_to_muhh_difficulty(interaction, user_id)
-
-    await interaction.response.edit_message(
-        embed=build_muhh_embed_step_bosses(st),
-        view=MuhhBossButtonView(self, user_id),
-    )
-
-
-
 
     async def set_muhh_difficulty(self, interaction: discord.Interaction, user_id: int, difficulty: str) -> None:
         st = self.muhh_wizard.get(user_id) or MuhhWizardState()
