@@ -348,8 +348,10 @@ class DayPickView(discord.ui.View):
 
         # 5 Tage Buttons: heute + 4
         for i in range(5):
-            label_prefix = "Heute" if i == 0 else f"Tag {i+1}"
-            label = f"📅 {label_prefix} ({_format_day_label(i)})"
+            if i == 0:
+                label = f"📅 Heute ({_format_day_label(0)})"
+            else:
+                label = f"📅 {_format_day_label(i)}"
 
             btn = discord.ui.Button(
                 label=label,
@@ -682,7 +684,7 @@ class SpotModal(discord.ui.Modal, title="Gruppenspot-Suche"):
 
         # kurze Bestätigung, die automatisch verschwindet
         try:
-            await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True, delete_after=10)
+            await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True,)
         except Exception:
             pass
 
@@ -746,7 +748,6 @@ class CustomDayModal(discord.ui.Modal, title="🗓️ Individueller Tag"):
         self.user_id = user_id
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
         await self.cog.set_custom_day(interaction, self.user_id, str(self.day_text.value).strip())
 
 
@@ -1189,10 +1190,20 @@ class Gruppensuche(commands.Cog):
     async def set_custom_day(self, interaction: discord.Interaction, user_id: int, day_text: str) -> None:
         st = self.muhh_wizard.get(user_id)
         if st is None:
-            return await interaction.followup.send("Wizard-Status verloren. Bitte /gruppensuche neu starten.", ephemeral=True)
+            # Modal-Submit -> response ist evtl. schon belegt, also followup
+            return await interaction.followup.send(
+                "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
+                ephemeral=True,
+            )
 
         st.day_label = day_text
-        await self._continue_after_day_pick(interaction, user_id)
+
+        # ✅ Modal-Submit hat noch NICHT automatisch geantwortet, aber sicher ist sicher:
+        # Wenn response schon benutzt wurde -> followup-Route
+        if interaction.response.is_done():
+            return await self._continue_after_day_pick_followup(interaction, user_id)
+
+        return await self._continue_after_day_pick(interaction, user_id)
 
     async def start_simple_wizard(self, interaction: discord.Interaction, category: str) -> None:
         """
@@ -1250,28 +1261,28 @@ class Gruppensuche(commands.Cog):
         category = st.category or "muhhelfer"
         await interaction.response.edit_message(embed=build_day_embed(category), view=DayPickView(self, user_id))
 
-    async def _continue_after_day_pick(self, interaction: discord.Interaction, user_id: int) -> None:
+    async def _continue_after_day_pick_followup(self, interaction: discord.Interaction, user_id: int) -> None:
         st = self.muhh_wizard.get(user_id)
         if st is None:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
                 ephemeral=True,
             )
 
         # Tag MUSS gesetzt sein
         if not st.day_label:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "Bitte wähle zuerst einen Tag aus.",
                 ephemeral=True,
             )
 
         if st.category == "pilafe":
-            return await interaction.response.send_modal(
+            return await interaction.followup.send(
                 PilaFeModal(max_players=st.max_players, day_label=st.day_label)
             )
 
         if st.category == "spot":
-            return await interaction.response.send_modal(
+            return await interaction.followup.send(
                 SpotModal(max_players=st.max_players, day_label=st.day_label)
             )
 
@@ -1279,9 +1290,9 @@ class Gruppensuche(commands.Cog):
         if st.difficulty is None:
             return await self.back_to_muhh_difficulty(interaction, user_id)
 
-        return await interaction.response.edit_message(
-            embed=build_muhh_embed_step_bosses(st),
-            view=MuhhBossButtonView(self, user_id),
+        return await interaction.followup.send(
+        "✅ Tag gespeichert. Bitte gehe im Wizard einen Schritt weiter.",
+        ephemeral=True,
         )
 
     async def set_day_label(self, interaction: discord.Interaction, user_id: int, label: str) -> None:
@@ -1329,7 +1340,7 @@ class Gruppensuche(commands.Cog):
         st.selected_boss_keys = []
         st.doppel_run_keys = set()
         st.max_players = 5
-        st.day_text = None
+        st.day_label = None
         await interaction.response.edit_message(embed=build_muhh_embed_step_size(st), view=MuhhSizeView(self, user_id))
 
     async def back_to_muhh_difficulty(self, interaction: discord.Interaction, user_id: int) -> None:
@@ -1590,8 +1601,7 @@ class Gruppensuche(commands.Cog):
         try:
             await interaction.followup.send(
                 "✅ Gruppensuche erstellt.",
-                ephemeral=True,
-                delete_after=60
+                ephemeral=True,               
             )
         except Exception:
             pass
