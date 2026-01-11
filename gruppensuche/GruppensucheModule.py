@@ -350,28 +350,38 @@ class DayPickView(discord.ui.View):
 
         # 5 Tage Buttons: heute + 4
         for i in range(5):
-            label = f"📅 {('Heute' if i == 0 else 'Tag ' + str(i+1))} ({_format_day_label(i)})"
-            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.secondary, row=0 if i < 3 else 1)
+            label_prefix = "Heute" if i == 0 else f"Tag {i+1}"
+            label = f"📅 {label_prefix} ({_format_day_label(i)})"
 
-            async def make_cb(offset: int):
-                async def _cb(interaction: discord.Interaction):
-                    await self.cog.set_day_from_offset(interaction, self.user_id, offset)
-                return _cb
+            btn = discord.ui.Button(
+                label=label,
+                style=discord.ButtonStyle.secondary,
+                row=0 if i < 3 else 1,
+            )
 
-            btn.callback = await make_cb(i)  # type: ignore
+            # IMPORTANT: offset per Default-Arg binden (Closure fix)
+            async def day_cb(interaction: discord.Interaction, offset: int = i) -> None:
+                await self.cog.set_day_from_offset(interaction, self.user_id, offset)
+
+            btn.callback = day_cb  # type: ignore[assignment]
             self.add_item(btn)
 
         # individueller Tag Button (row 1)
-        btn_custom = discord.ui.Button(label="🗓️ Individueller Tag…", style=discord.ButtonStyle.primary, row=1)
+        btn_custom = discord.ui.Button(
+            label="🗓️ Individueller Tag…",
+            style=discord.ButtonStyle.primary,
+            row=1,
+        )
 
-        async def custom_cb(interaction: discord.Interaction):
+        async def custom_cb(interaction: discord.Interaction) -> None:
             await self.cog.open_custom_day_modal(interaction, self.user_id)
 
-        btn_custom.callback = custom_cb  # type: ignore
+        btn_custom.callback = custom_cb  # type: ignore[assignment]
         self.add_item(btn_custom)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
+
 
 class MuhhBossToggleButton(discord.ui.Button):
     def __init__(self, cog: "Gruppensuche", user_id: int, boss_key: str, label: str, selected: bool):
