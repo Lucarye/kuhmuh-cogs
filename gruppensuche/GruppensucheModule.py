@@ -161,12 +161,10 @@ class CategorySelect(discord.ui.Select):
             return
 
         if value == "pilafe":
-            await cog.start_simple_wizard(interaction, "pilafe")
-            return
+            return await cog.start_simple_wizard(interaction, "pilafe")
 
         if value == "spot":
-            await cog.start_simple_wizard(interaction, "spot")
-            return
+            return await cog.start_simple_wizard(interaction, "spot")
 
 
         await interaction.response.send_message("Unbekannte Kategorie.", ephemeral=True)
@@ -1180,9 +1178,8 @@ class Gruppensuche(commands.Cog):
         if st is None:
             return await interaction.response.send_message("Wizard-Status verloren. Bitte /gruppensuche neu starten.", ephemeral=True)
 
-        st.day_label = _format_day_label(offset_days)
-
-        await self._continue_after_day_pick(interaction, user_id)
+        st.day_label = _format_day_label(offset)
+        return await self._continue_after_day_pick(interaction, user_id)
 
     async def set_custom_day(self, interaction: discord.Interaction, user_id: int, day_text: str) -> None:
         st = self.muhh_wizard.get(user_id)
@@ -1255,25 +1252,9 @@ class Gruppensuche(commands.Cog):
 
         st.max_players = max(1, min(5, int(max_players)))
 
-        # Nach der Teilnehmerzahl IMMER Tag-Step
-        await self.goto_day_step(interaction, user_id)
+        # Nach der Teilnehmerzahl IMMER Tag-Step (Tag ist Pflicht)
+        return await self.goto_day_step(interaction, user_id)
 
-
-        # ✅ Simple-Wizard: direkt Modal öffnen (ohne Difficulty)
-        if st.category == "pilafe":
-            return await interaction.response.send_modal(PilaFeModal(max_players=st.max_players))
-
-        if st.category == "spot":
-            return await interaction.response.send_modal(SpotModal(max_players=st.max_players))
-
-        # ✅ Muhhelfer: Difficulty muss gesetzt sein
-        if st.difficulty is None:
-            return await self.back_to_muhh_difficulty(interaction, user_id)
-
-        await interaction.response.edit_message(
-            embed=build_muhh_embed_step_bosses(st),
-            view=MuhhBossButtonView(self, user_id),
-        )
 
     async def goto_day_step(self, interaction: discord.Interaction, user_id: int) -> None:
         st = self.muhh_wizard.get(user_id)
@@ -1291,26 +1272,28 @@ class Gruppensuche(commands.Cog):
                 ephemeral=True,
             )
 
-        # ✅ Tag ist Pflicht
-        if not st.day_text:
+        # Tag MUSS gesetzt sein
+        if not st.day_label:
             return await interaction.response.send_message(
-                "Bitte wähle zuerst einen **Tag**.",
+                "Bitte wähle zuerst einen Tag aus.",
                 ephemeral=True,
-            )   
+            )
 
-        # ✅ Simple-Wizard: nach Tag direkt Modal
         if st.category == "pilafe":
-            return await interaction.response.send_modal(PilaFeModal(max_players=st.max_players))
+            return await interaction.response.send_modal(
+                PilaFeModal(max_players=st.max_players, day_label=st.day_label)
+            )
 
         if st.category == "spot":
-            return await interaction.response.send_modal(SpotModal(max_players=st.max_players))
+            return await interaction.response.send_modal(
+                SpotModal(max_players=st.max_players, day_label=st.day_label)
+            )
 
-        # ✅ Muhhelfer: nach Tag weiter zu Bossauswahl
-        # Difficulty muss gesetzt sein
+        # Muhhelfer: Boss-Step
         if st.difficulty is None:
             return await self.back_to_muhh_difficulty(interaction, user_id)
 
-        await interaction.response.edit_message(
+        return await interaction.response.edit_message(
             embed=build_muhh_embed_step_bosses(st),
             view=MuhhBossButtonView(self, user_id),
         )
@@ -1531,6 +1514,7 @@ class Gruppensuche(commands.Cog):
             max_players=st.max_players,
             doppel_runs=set(st.doppel_run_keys),
             day=st.day_text,
+            day_label: Optional[str],
         )
 
         self.muhh_wizard.pop(user_id, None)
@@ -1587,6 +1571,7 @@ class Gruppensuche(commands.Cog):
             max_players=max_players,
             doppel_runs=doppel_runs,
             day=day,
+            day_label=day_label,
         )
 
         # Ersteller immer als Teilnehmer
