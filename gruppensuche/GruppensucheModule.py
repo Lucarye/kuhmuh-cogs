@@ -1514,7 +1514,6 @@ class Gruppensuche(commands.Cog):
             max_players=st.max_players,
             doppel_runs=set(st.doppel_run_keys),
             day=st.day_text,
-            day_label: Optional[str],
         )
 
         self.muhh_wizard.pop(user_id, None)
