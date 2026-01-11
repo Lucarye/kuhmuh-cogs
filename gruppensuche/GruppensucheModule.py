@@ -600,6 +600,7 @@ class PilaFeModal(discord.ui.Modal, title="Pila Fe Gruppensuche"):
             ping_role_id=ROLE_PILAFE_ID,
             max_players=self.max_players,
             doppel_runs=set(),
+            day_label=self.day_label,
         )
 
         # kurze Bestätigung, die automatisch verschwindet
@@ -1176,10 +1177,14 @@ class Gruppensuche(commands.Cog):
     async def set_day_from_offset(self, interaction: discord.Interaction, user_id: int, offset_days: int) -> None:
         st = self.muhh_wizard.get(user_id)
         if st is None:
-            return await interaction.response.send_message("Wizard-Status verloren. Bitte /gruppensuche neu starten.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Wizard-Status verloren. Bitte /gruppensuche neu starten.",
+                ephemeral=True
+            )
 
-        st.day_label = _format_day_label(offset)
-        return await self._continue_after_day_pick(interaction, user_id)
+    st.day_label = _format_day_label(offset_days)  # <-- HIER: offset_days statt offset
+    return await self._continue_after_day_pick(interaction, user_id)
+
 
     async def set_custom_day(self, interaction: discord.Interaction, user_id: int, day_text: str) -> None:
         st = self.muhh_wizard.get(user_id)
@@ -1188,24 +1193,6 @@ class Gruppensuche(commands.Cog):
 
         st.day_label = day_text
         await self._continue_after_day_pick(interaction, user_id)
-
-    async def _continue_after_day_pick(self, interaction: discord.Interaction, user_id: int) -> None:
-        st = self.muhh_wizard.get(user_id)
-        if st is None:
-            return await interaction.response.send_message("Wizard-Status verloren.", ephemeral=True)
-
-        # pilafe/spot -> Modal
-        if st.category == "pilafe":
-            return await interaction.response.send_modal(PilaFeModal(max_players=st.max_players))
-        if st.category == "spot":
-            return await interaction.response.send_modal(SpotModal(max_players=st.max_players))
-
-        # muhhelfer -> Bossauswahl
-        await interaction.response.edit_message(
-            embed=build_muhh_embed_step_bosses(st),
-            view=MuhhBossButtonView(self, user_id),
-        )
-
 
     async def start_simple_wizard(self, interaction: discord.Interaction, category: str) -> None:
         """
@@ -1218,7 +1205,6 @@ class Gruppensuche(commands.Cog):
 
         # WICHTIG: damit set_muhh_max_players weiß, welche Kategorie es ist
         st.category = category
-        st.category = category
         st.difficulty = None
         st.selected_boss_keys = []
         st.doppel_run_keys = set()
@@ -1227,7 +1213,7 @@ class Gruppensuche(commands.Cog):
         st.duration = None
         st.start_time = None
         st.note = None
-        st.day_text = None
+        st.day_label = None
 
         # Wir verwenden denselben Teilnehmeranzahl-Step wie Muhhelfer
         embed = discord.Embed(
@@ -1513,7 +1499,7 @@ class Gruppensuche(commands.Cog):
             ping_role_id=ping_role_id,
             max_players=st.max_players,
             doppel_runs=set(st.doppel_run_keys),
-            day=st.day_text,
+            day_label=st.day_label,
         )
 
         self.muhh_wizard.pop(user_id, None)
@@ -1537,7 +1523,7 @@ class Gruppensuche(commands.Cog):
         ping_role_id: Optional[int],
         max_players: int,
         doppel_runs: Set[str],
-        day: Optional[str],
+        day_label: Optional[str],
     ) -> None:
         if interaction.guild is None:
             return await interaction.response.send_message("Dieser Befehl kann nur auf einem Server verwendet werden.", ephemeral=True)
@@ -1569,7 +1555,6 @@ class Gruppensuche(commands.Cog):
             ping_role_id=ping_role_id,
             max_players=max_players,
             doppel_runs=doppel_runs,
-            day=day,
             day_label=day_label,
         )
 
@@ -1753,8 +1738,8 @@ class Gruppensuche(commands.Cog):
         if state.duration:
             desc_lines.append("")
             desc_lines.append(f"**Geplante Dauer:** {state.duration}")
-        if state.day:
-            desc_lines.append(f"**Tag:** {state.day}")
+        if state.day_label:
+            desc_lines.append(f"**Tag:** {state.day_label}")
         if state.start_time:
             desc_lines.append(f"**Start:** {state.start_time}")
         if state.note:
