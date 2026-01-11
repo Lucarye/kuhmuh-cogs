@@ -2014,7 +2014,7 @@ class Gruppensuche(commands.Cog):
                 except Exception:
                     pass
 
-        await interaction.followup.send("✅ Zeiten/Notiz aktualisiert.", ephemeral=True, delete_after=60)
+        await interaction.followup.send("✅ Zeiten/Notiz aktualisiert.", ephemeral=True,)
         
     async def apply_edit_max_players(
         self,
