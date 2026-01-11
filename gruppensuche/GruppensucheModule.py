@@ -1182,8 +1182,8 @@ class Gruppensuche(commands.Cog):
                 ephemeral=True
             )
 
-    st.day_label = _format_day_label(offset_days)  # <-- HIER: offset_days statt offset
-    return await self._continue_after_day_pick(interaction, user_id)
+        st.day_label = _format_day_label(offset_days)  # <-- HIER: offset_days statt offset
+        return await self._continue_after_day_pick(interaction, user_id)
 
 
     async def set_custom_day(self, interaction: discord.Interaction, user_id: int, day_text: str) -> None:
