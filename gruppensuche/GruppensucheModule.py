@@ -11,6 +11,12 @@ TEST_ROLE_ID = 1445018518562017373     # Test-Rolle fürs "Neue Suche" Ping
 ROLE_NORMAL_ID = 1424768638157852682   # Muhhelfer – Normal
 ROLE_SCHWER_ID = 1424769286790054050   # Muhhelfer – Schwer
 
+Role_Mirumok_ID = 1459832247405248707           # Dehkia Mirumok
+Role_Dehkia1 -  Gyfin_ID = 1459832490603708590  # Dehkia Gyfin 
+
+Role_PilaFe_ID = 1458832343149318269            # Pila Fe
+Role_Altar_ID =  1459833455369130140            # Altar des Blutes
+
 ADMIN_ROLE_ID: Optional[int] = 1198650646786736240     # Admin-Rolle
 OFFIZIER_ROLE_ID: Optional[int] = 1198652039312453723  # Offizier-Rolle (gleich wie Admin)
 
