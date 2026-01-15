@@ -1155,11 +1155,11 @@ class GruppensucheTest(commands.Cog):
     # Command (Test)
     # =========================
 
-    @commands.hybrid_command(name="gruppensuche_test", with_app_command=True)
+    @commands.hybrid_command(name="gs_test", with_app_command=True)
     @commands.guild_only()
-    async def gruppensuche_test(self, ctx: commands.Context):
+    async def gs_test(self, ctx: commands.Context):
         if ctx.interaction is None:
-            await ctx.send("Bitte nutze den Slash-Command /gruppensuche_test.", delete_after=10)
+            await ctx.send("Bitte nutze den Slash-Command /gs_test.", delete_after=10)
             return
 
         interaction = ctx.interaction
