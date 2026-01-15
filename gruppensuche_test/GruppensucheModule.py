@@ -1155,20 +1155,21 @@ class GruppensucheTest(commands.Cog):
     # Command (Test)
     # =========================
 
-    @commands.hybrid_command(name="gs_test", with_app_command=True)
     @commands.guild_only()
+    @commands.hybrid_command(name="gs_test", with_app_command=True)
     async def gs_test(self, ctx: commands.Context):
         if ctx.interaction is None:
-            print("gs_test wurde als PREFIX aufgerufen")
             return
 
-        print("gs_test wurde als SLASH aufgerufen")
-
         interaction = ctx.interaction
-        session = WizardSession(user_id=interaction.user.id, guild_id=interaction.guild_id or 0, mode="create")
+        session = WizardSession(
+            user_id=interaction.user.id,
+            guild_id=interaction.guild_id or 0,
+            mode="create",
+        )
         self._sessions[interaction.user.id] = session
-
         await self._send_start(interaction, session)
+
 
     # =========================
     # Wizard Senders
