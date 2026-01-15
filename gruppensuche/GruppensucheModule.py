@@ -1303,17 +1303,30 @@ class GruppensucheTest(commands.Cog):
         except discord.InteractionResponded:
             await interaction.followup.send_modal(DetailsModal(self, session, defaults=defaults))
 
-    async def _edit_or_send_ephemeral(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
+    async def _edit_or_send_ephemeral(
+        self,
+        interaction: discord.Interaction,
+        embed: discord.Embed,
+        view: discord.ui.View,
+    ):
         try:
             if interaction.response.is_done():
                 await interaction.edit_original_response(embed=embed, view=view)
-            else:
-                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+                return
+
+            if interaction.message is not None:
+                await interaction.response.edit_message(embed=embed, view=view)
+                return
+
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            eturn
+
         except Exception:
             try:
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             except Exception:
                 return
+
 
     # =========================
     # Storage
