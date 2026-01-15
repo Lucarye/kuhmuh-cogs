@@ -351,8 +351,8 @@ class StartSelect(discord.ui.Select):
         self.host_view = host_view
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.host_view.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
             return
 
         self.host_view.session.category = self.values[0]
@@ -407,7 +407,7 @@ class DaySelectView(WizardBaseView):
     def _make_day_cb(self, d: dt.date):
         async def _cb(interaction: discord.Interaction):
             if interaction.user.id != self.session.user_id:
-                await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+                await interaction.response.defer()
                 return
             self.session.day_date_iso = d.isoformat()
 
@@ -420,9 +420,9 @@ class DaySelectView(WizardBaseView):
         return _cb
 
     async def _custom_day(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
-            return
+            if interaction.user.id != self.session.user_id:
+                await interaction.response.defer()
+                return
 
         async def _done(i: discord.Interaction, d: dt.date):
             self.session.day_date_iso = d.isoformat()
@@ -435,7 +435,7 @@ class DaySelectView(WizardBaseView):
 
     async def _back(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
 
         if self.session.mode == "edit":
@@ -472,21 +472,21 @@ class DifficultyView(WizardBaseView):
 
     async def _pick_normal(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         self.session.difficulty = "normal"
         await self.cog._send_boss_select(interaction, self.session)
 
     async def _pick_schwer(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         self.session.difficulty = "schwer"
         await self.cog._send_boss_select(interaction, self.session)
 
     async def _back(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         await self.cog._send_day_selection(interaction, self.session, back_to="start")
 
@@ -538,7 +538,7 @@ class BossSelectView(WizardBaseView):
     def _make_toggle_boss(self, key: str):
         async def _cb(interaction: discord.Interaction):
             if interaction.user.id != self.session.user_id:
-                await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+                await interaction.response.defer()
                 return
 
             if key in self.session.boss_runs:
@@ -556,7 +556,7 @@ class BossSelectView(WizardBaseView):
 
     async def _back(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
 
         if self.session.mode == "edit":
@@ -567,9 +567,9 @@ class BossSelectView(WizardBaseView):
 
     async def _next(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
-
+        
         if not self.session.boss_runs:
             await interaction.response.send_message("Bitte wähle mindestens 1 Boss.", ephemeral=True)
             return
@@ -643,7 +643,7 @@ class DoubleRunView(WizardBaseView):
     def _make_toggle_double(self, key: str):
         async def _cb(interaction: discord.Interaction):
             if interaction.user.id != self.session.user_id:
-                await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+                await interaction.response.defer()
                 return
 
             current = int(self.session.boss_runs.get(key, 1))
@@ -662,13 +662,13 @@ class DoubleRunView(WizardBaseView):
 
     async def _back(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         await self.cog._send_boss_select(interaction, self.session)
 
     async def _next(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
 
         if self.session.mode == "edit":
@@ -725,21 +725,21 @@ class SpotSelectView(WizardBaseView):
 
     async def _pick_miru(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         self.session.spot_key = "mirumok"
         await self.cog._send_party_size(interaction, self.session)
 
     async def _pick_gyfin(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         self.session.spot_key = "gyfin"
         await self.cog._send_party_size(interaction, self.session)
 
     async def _back(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         await self.cog._send_day_selection(interaction, self.session, back_to="start")
 
@@ -770,8 +770,8 @@ class PartySizeSelect(discord.ui.Select):
         self.host_view = host_view
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.host_view.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
             return
 
         self.host_view.session.max_players = int(self.values[0])
@@ -797,7 +797,7 @@ class PartySizeView(WizardBaseView):
 
     async def _back(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
 
         if self.session.mode == "edit":
@@ -883,13 +883,13 @@ class EditMenuView(WizardBaseView):
 
     async def _tag(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         await self.cog._send_day_selection(interaction, self.session, back_to="edit_menu")
 
     async def _size(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         current = int(self.post_data.get("max_players", 2))
         view = PartySizeView(self.cog, self.session, current=current)
@@ -897,7 +897,7 @@ class EditMenuView(WizardBaseView):
 
     async def _details(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
 
         defaults = dict(self.post_data)
@@ -910,7 +910,7 @@ class EditMenuView(WizardBaseView):
 
     async def _bosses(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await interaction.response.defer()
             return
         await self.cog._send_boss_select(interaction, self.session)
 
@@ -952,9 +952,9 @@ class ConfirmView(discord.ui.View):
             )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
-            return False
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
         return True
 
     @discord.ui.button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
@@ -1260,7 +1260,11 @@ class GruppensucheTest(commands.Cog):
         if session.category == "pilafe":
             await self._send_party_size(interaction, session)
             return
-        await interaction.response.send_message("Ungültige Auswahl. Bitte neu starten.", ephemeral=True)
+        await interaction.response.edit_message(
+            content="Ungültige Auswahl. Bitte neu starten.",
+            embed=None,
+            view=None,
+        )
 
     async def _send_difficulty(self, interaction: discord.Interaction, session: WizardSession):
         view = DifficultyView(self, session)
@@ -1303,17 +1307,30 @@ class GruppensucheTest(commands.Cog):
         except discord.InteractionResponded:
             await interaction.followup.send_modal(DetailsModal(self, session, defaults=defaults))
 
-    async def _edit_or_send_ephemeral(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
+    async def _edit_or_send_ephemeral(
+        self,
+        interaction: discord.Interaction,
+        embed: discord.Embed,
+        view: discord.ui.View,
+    ):
         try:
             if interaction.response.is_done():
                 await interaction.edit_original_response(embed=embed, view=view)
-            else:
-                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+                return
+
+            if interaction.message is not None:
+                await interaction.response.edit_message(embed=embed, view=view)
+                return
+
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            return
+
         except Exception:
             try:
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             except Exception:
                 return
+
 
     # =========================
     # Storage
@@ -1550,6 +1567,7 @@ class GruppensucheTest(commands.Cog):
             e.description = header + times_block + status_block + participants_block + wait_block
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
+        e.timestamp = discord.utils.utcnow()
         return e
 
     async def _refresh_public_message(self, data: dict):
@@ -1991,7 +2009,11 @@ class GruppensucheTest(commands.Cog):
 
     async def _send_edit_menu(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
-            await interaction.response.send_message("Edit-Session ungültig.", ephemeral=True)
+            await interaction.response.edit_message(
+                content="Edit-Session ungültig.",
+                embed=None,
+                view=None,
+            )
             return
 
         data = await self._get_search(session.edit_message_id)
