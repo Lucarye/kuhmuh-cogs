@@ -191,7 +191,8 @@ class WizardSession:
     guild_id: int
     mode: str = "create"  # "create" | "edit"
     edit_message_id: Optional[int] = None
-
+    wizard_interaction: Optional[discord.Interaction] = None
+    
     category: Optional[str] = None  # "muhhelfer" | "spots" | "pilafe"
     day_date_iso: Optional[str] = None
 
@@ -914,7 +915,7 @@ class EditMenuView(WizardBaseView):
         await self.cog._send_boss_select(interaction, self.session)
 
     async def _back(self, interaction: discord.Interaction):
-        await interaction.response.send_message("Bearbeitung beendet.", ephemeral=True)
+        await interaction.response.edit_message(content="Bearbeitung beendet.", embed=None, view=None)
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
@@ -956,20 +957,26 @@ class ConfirmView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Abbrechen", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="Abgebrochen.", view=None)
 
-    @discord.ui.button(label="Bestätigen", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.action == "close":
-            await self.cog._close_search(interaction, self.message_id)
-            await interaction.response.edit_message(content="Suche wurde geschlossen.", view=None)
+    @discord.ui.button(label="🗑 Ja, endgültig löschen", style=discord.ButtonStyle.danger)
+    async def confirm_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.action != "delete":
+            await interaction.response.send_message("Ungültige Aktion.", ephemeral=True)
             return
-
         await self.cog._delete_search(interaction, self.message_id)
         await interaction.response.edit_message(content="Suche wurde gelöscht.", view=None)
 
+    @discord.ui.button(label="🔒 Ja, schließen", style=discord.ButtonStyle.danger)
+    async def confirm_close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.action != "close":
+            await interaction.response.send_message("Ungültige Aktion.", ephemeral=True)
+            return
+        await self.cog._close_search(interaction, self.message_id)
+        await interaction.response.edit_message(content="Suche wurde geschlossen.", view=None)
+    
 
 class PublicPostView(discord.ui.View):
     def __init__(self, cog: "GruppensucheTest", message_id: int):
@@ -979,57 +986,81 @@ class PublicPostView(discord.ui.View):
 
         join_btn = discord.ui.Button(
             label="Ich bin dabei",
+            emoji="✅",
             style=discord.ButtonStyle.success,
             row=0,
             custom_id=f"gst:join:{message_id}",
         )
+
         leave_btn = discord.ui.Button(
             label="Abmelden",
+            emoji="⛔",
             style=discord.ButtonStyle.danger,
             row=0,
             custom_id=f"gst:leave:{message_id}",
         )
+
+        started_btn = discord.ui.Button(
+            label="Run gestartet",
+            emoji="▶️",
+            style=discord.ButtonStyle.primary,
+            row=0,
+            custom_id=f"gst:started:{message_id}",
+        )
+
         ping_type_btn = discord.ui.Button(
-            label="Ping Art",
+            label="Ping",
+            emoji="🔔",
             style=discord.ButtonStyle.secondary,
             row=1,
             custom_id=f"gst:pingtype:{message_id}",
         )
+
         ping_wait_btn = discord.ui.Button(
             label="Ping Warteschlange",
+            emoji="🔔",
             style=discord.ButtonStyle.secondary,
             row=1,
             custom_id=f"gst:pingwait:{message_id}",
         )
+
         edit_btn = discord.ui.Button(
             label="Bearbeiten",
+            emoji="✏️",
             style=discord.ButtonStyle.secondary,
             row=2,
             custom_id=f"gst:edit:{message_id}",
         )
+
         close_btn = discord.ui.Button(
             label="Schließen",
+            emoji="🔒",
             style=discord.ButtonStyle.secondary,
             row=2,
             custom_id=f"gst:close:{message_id}",
         )
+
         delete_btn = discord.ui.Button(
             label="Löschen",
+            emoji="🗑️",
             style=discord.ButtonStyle.secondary,
             row=2,
             custom_id=f"gst:delete:{message_id}",
         )
 
+
         join_btn.callback = self._on_join
         leave_btn.callback = self._on_leave
         ping_type_btn.callback = self._on_ping_type
         ping_wait_btn.callback = self._on_ping_wait
+        started_btn.callback = self._on_started
         edit_btn.callback = self._on_edit
         close_btn.callback = self._on_close
         delete_btn.callback = self._on_delete
 
         self.add_item(join_btn)
         self.add_item(leave_btn)
+        self.add_item(started_btn)
         self.add_item(ping_type_btn)
         self.add_item(ping_wait_btn)
         self.add_item(edit_btn)
@@ -1055,6 +1086,13 @@ class PublicPostView(discord.ui.View):
 
     async def _on_leave(self, interaction: discord.Interaction):
         await self.cog._leave(interaction, self.message_id)
+
+    async def _on_started(self, interaction: discord.Interaction):
+        data = await self._ensure_owner_or_mod(interaction)
+        if not data:
+            return
+        await self.cog._mark_run_started(interaction, self.message_id, data)
+    
 
     async def _on_ping_type(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
@@ -1181,9 +1219,23 @@ class GruppensucheTest(commands.Cog):
             guild_id=interaction.guild_id or 0,
             mode="create",
         )
+        session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
         await self._send_start(interaction, session)
 
+     # =========================
+
+    async def _mark_run_started(self, interaction: discord.Interaction, message_id: int, data: dict):
+        if bool(data.get("is_closed", False)):
+            await interaction.response.send_message("Diese Suche ist geschlossen.", ephemeral=True)
+            return
+
+        data["run_started"] = True
+        data["updated_at"] = int(_now_local().timestamp())
+        await self._set_search(message_id, data)
+        await self._refresh_public_message(data)
+
+        await interaction.response.send_message("✅ Run als gestartet markiert.", ephemeral=True)
 
 
     # =========================
@@ -1294,23 +1346,9 @@ class GruppensucheTest(commands.Cog):
     # =========================
 
     async def _build_public_embed(self, guild: discord.Guild, data: dict) -> discord.Embed:
-        cat = data.get("category")
+        cat = str(data.get("category", ""))
         owner_id = int(data.get("owner_id", 0))
         owner = guild.get_member(owner_id)
-
-        if cat == "muhhelfer":
-            diff = data.get("difficulty", "normal")
-            title = f"{MUHKUH_EMOJI} Gruppensuche – Muhhelfer ({'Schwer' if diff == 'schwer' else 'Normal'})"
-        elif cat == "spots":
-            spot = data.get("spot_key", "")
-            emoji = MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
-            title = f"{emoji} Gruppensuche – {_spot_name(spot)}"
-        else:
-            title = f"{PILAFE_EMOJI} Gruppensuche – Pila Fe"
-
-        e = discord.Embed(title=title)
-
-        e.add_field(name="Suchender", value=(owner.mention if owner else f"<@{owner_id}>"), inline=False)
 
         day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
         try:
@@ -1322,78 +1360,194 @@ class GruppensucheTest(commands.Cog):
         max_players = int(data.get("max_players", 2))
         participants: List[int] = list(data.get("participants") or [])
         waitlist: List[int] = list(data.get("waitlist") or [])
+
         is_closed = bool(data.get("is_closed", False))
+        is_full = len(participants) >= max_players
 
         if is_closed:
-            status_text = "🔴 Geschlossen"
+            status_line = "🔴 Geschlossen"
         else:
-            status_text = "🔴 Voll" if len(participants) >= max_players else "🟢 Offen"
+            status_line = "🔴 Voll" if is_full else "🟢 Offen"
 
-        e.add_field(name="Kategorie", value={"muhhelfer": "Muhhelfer (LoML Bosse)", "spots": "Gruppenspots", "pilafe": "Pila Fe Schriftrollen"}.get(cat, "—"), inline=False)
+        duration_text = data.get("duration_text") or "—"
+        start_text = data.get("start_text") or "—"
+        notes = data.get("notes") or "—"
+
+        req_text = data.get("req_text") or ""
+
+        # Titel
+        if cat == "muhhelfer":
+            diff = str(data.get("difficulty", "normal"))
+            diff_label = "Schwer" if diff == "schwer" else "Normal"
+            title = f"{MUHKUH_EMOJI} Gruppensuche – Muhhelfer ({diff_label})"
+        elif cat == "spots":
+            spot = str(data.get("spot_key", ""))
+            emoji = MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
+            title = f"{emoji} Gruppensuche – {_spot_name(spot)}"
+        else:
+            title = f"{PILAFE_EMOJI} Gruppensuche – Pila Fe"
+
+        e = discord.Embed(title=title)
+
+        # Kopfblock (wie rechts)
+        owner_txt = owner.mention if owner else f"<@{owner_id}>"
 
         if cat == "muhhelfer":
-            diff = data.get("difficulty", "normal")
+            diff = str(data.get("difficulty", "normal"))
+            diff_label = "Schwer" if diff == "schwer" else "Normal"
+            diff_icon = "🔴" if diff == "schwer" else "🟢"
             req_default = AKVK_SCHWER if diff == "schwer" else AKVK_NORMAL
-            req = data.get("req_text") or req_default
-            e.add_field(name="Schwierigkeit", value=("Schwer" if diff == "schwer" else "Normal"), inline=True)
-            e.add_field(name="Anforderung AK/VK", value=req, inline=True)
+            req = req_text or req_default
+
+            header = (
+                f"**Suchender:** {owner_txt}\n"
+                f"**Kategorie:** Muhhelfer (LoML Bosse)\n"
+                f"**Schwierigkeit:** {diff_icon} {diff_label}\n"
+                f"**Anforderung AK/VK:** {req}\n"
+                f"**Max. Teilnehmer:** {max_players}\n\n"
+            )
 
             boss_runs = data.get("boss_runs") or {}
-            lines = []
+            boss_lines = []
             has_double = False
             for key, runs in boss_runs.items():
-                name = _boss_name(key)
+                name = _boss_name(str(key))
                 if int(runs) >= 2:
                     has_double = True
-                    lines.append(f"• {name} (Doppel Run)")
+                    boss_lines.append(f"• {name} **(Doppel Run)**")
                 else:
-                    lines.append(f"• {name}")
-            e.add_field(name="Bosse", value=("\n".join(lines) if lines else "—"), inline=False)
-            if has_double:
-                e.add_field(name="⚠️ Hinweis", value="2. Charakter erforderlich (Doppelrun)", inline=False)
+                    boss_lines.append(f"• {name}")
 
-        if cat == "spots":
-            spot = data.get("spot_key", "")
+            bosses_block = "**Bosse:**\n" + ("\n".join(boss_lines) if boss_lines else "—") + "\n\n"
+            if has_double:
+                bosses_block += "⚠️ **2. Charakter erforderlich**\n\n"
+
+            times_block = (
+                f"**Geplante Dauer:** {duration_text}\n"
+                f"**Tag:** {day_str}\n"
+                f"**Start:** {start_text}\n\n"
+            )
+
+            run_started = bool(data.get("run_started", False))
+            if run_started:
+                times_block += "▶️ **Run gestartet**\n\n"
+
+            status_block = f"**Status**\n{status_line}\n\n"
+
+            part_lines = []
+            for uid in participants:
+                m = guild.get_member(int(uid))
+                part_lines.append(m.mention if m else f"<@{uid}>")
+            participants_block = (
+                f"**Teilnehmer ({len(participants)}/{max_players})**\n"
+                + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
+                + "\n\n"
+            )
+
+            wait_lines = []
+            for uid in waitlist:
+                m = guild.get_member(int(uid))
+                wait_lines.append(m.mention if m else f"<@{uid}>")
+            wait_block = (
+                f"**Warteschlange ({len(waitlist)})**\n"
+                + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
+            )
+
+            e.description = header + bosses_block + times_block + status_block + participants_block + wait_block
+
+        elif cat == "spots":
+            spot = str(data.get("spot_key", ""))
             req_default = SPOT_REQ.get(spot, "")
-            req = data.get("req_text") or req_default
-            e.add_field(name="Spot", value=_spot_name(spot), inline=True)
-            if req:
-                e.add_field(name="Anforderung AK/VK", value=req, inline=True)
+            req = req_text or req_default
+
+            header = (
+                f"**Suchender:** {owner_txt}\n"
+                f"**Kategorie:** Gruppenspots\n"
+                f"**Anforderung AK/VK:** {req if req else '—'}\n"
+                f"**Max. Teilnehmer:** {max_players}\n\n"
+            )
+
+            spot_block = ""
             total_ap = SPOT_TOTAL_AP.get(spot, "")
             if total_ap:
-                e.add_field(name="Info", value=total_ap, inline=False)
+                spot_block += f"**Spot:** {_spot_name(spot)}\n{total_ap}\n\n"
+            else:
+                spot_block += f"**Spot:** {_spot_name(spot)}\n\n"
 
-        if cat == "pilafe":
-            e.add_field(name="Menge", value=(data.get("scroll_amount") or "—"), inline=True)
+            times_block = (
+                f"**Geplante Dauer:** {duration_text}\n"
+                f"**Tag:** {day_str}\n"
+                f"**Start:** {start_text}\n\n"
+            )
 
-        e.add_field(name="Max. Teilnehmer", value=str(max_players), inline=True)
+            run_started = bool(data.get("run_started", False))
+            if run_started:
+                times_block += "▶️ **Run gestartet**\n\n"
 
-        e.add_field(name="Geplante Dauer", value=(data.get("duration_text") or "—"), inline=True)
-        e.add_field(name="Tag", value=day_str, inline=True)
-        e.add_field(name="Start", value=(data.get("start_text") or "—"), inline=True)
-        e.add_field(name="Hinweis", value=(data.get("notes") or "—"), inline=False)
+            status_block = f"**Status**\n{status_line}\n\n"
 
-        e.add_field(name="Status", value=status_text, inline=False)
+            part_lines = []
+            for uid in participants:
+                m = guild.get_member(int(uid))
+                part_lines.append(m.mention if m else f"<@{uid}>")
+            participants_block = (
+                f"**Teilnehmer ({len(participants)}/{max_players})**\n"
+                + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
+                + "\n\n"
+            )
 
-        part_lines = []
-        for uid in participants:
-            m = guild.get_member(int(uid))
-            part_lines.append(m.mention if m else f"<@{uid}>")
-        e.add_field(
-            name=f"Teilnehmer ({len(participants)}/{max_players})",
-            value=("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—"),
-            inline=False,
-        )
+            wait_lines = []
+            for uid in waitlist:
+                m = guild.get_member(int(uid))
+                wait_lines.append(m.mention if m else f"<@{uid}>")
+            wait_block = (
+                f"**Warteschlange ({len(waitlist)})**\n"
+                + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
+            )
 
-        wait_lines = []
-        for uid in waitlist:
-            m = guild.get_member(int(uid))
-            wait_lines.append(m.mention if m else f"<@{uid}>")
-        e.add_field(
-            name=f"Warteschlange ({len(waitlist)})",
-            value=("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—"),
-            inline=False,
-        )
+            e.description = header + spot_block + times_block + status_block + participants_block + wait_block
+
+        else:
+            amount = data.get("scroll_amount") or "—"
+            header = (
+                f"**Suchender:** {owner_txt}\n"
+                f"**Kategorie:** Pila Fe Schriftrollen\n"
+                f"**Menge:** {amount}\n"
+                f"**Max. Teilnehmer:** {max_players}\n\n"
+            )
+
+            times_block = (
+                f"**Geplante Dauer:** {duration_text}\n"
+                f"**Tag:** {day_str}\n"
+                f"**Start:** {start_text}\n\n"
+            )
+
+            run_started = bool(data.get("run_started", False))
+            if run_started:
+                times_block += "▶️ **Run gestartet**\n\n"
+
+            status_block = f"**Status**\n{status_line}\n\n"
+
+            part_lines = []
+            for uid in participants:
+                m = guild.get_member(int(uid))
+                part_lines.append(m.mention if m else f"<@{uid}>")
+            participants_block = (
+                f"**Teilnehmer ({len(participants)}/{max_players})**\n"
+                + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
+                + "\n\n"
+            )
+
+            wait_lines = []
+            for uid in waitlist:
+                m = guild.get_member(int(uid))
+                wait_lines.append(m.mention if m else f"<@{uid}>")
+            wait_block = (
+                f"**Warteschlange ({len(waitlist)})**\n"
+                + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
+            )
+
+            e.description = header + times_block + status_block + participants_block + wait_block
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         return e
@@ -1425,7 +1579,28 @@ class GruppensucheTest(commands.Cog):
 
         view = PublicPostView(self, mid)
         self.bot.add_view(view)
+        await self._apply_dynamic_button_labels(view, data)
         await msg.edit(embed=embed, view=view)
+
+
+    async def _apply_dynamic_button_labels(self, view: discord.ui.View, data: dict):
+        label = "Ping"
+        cat = str(data.get("category", ""))
+
+        if cat == "muhhelfer":
+            diff = str(data.get("difficulty", "normal"))
+            label = f"Ping ({'Schwer' if diff == 'schwer' else 'Normal'})"
+        elif cat == "spots":
+            spot = str(data.get("spot_key", ""))
+            label = f"Ping ({_spot_name(spot)})" if spot else "Ping (Spot)"
+        elif cat == "pilafe":
+            label = "Ping (Pila Fe)"
+
+        for item in view.children:
+            if isinstance(item, discord.ui.Button) and str(item.custom_id or "").startswith("gst:pingtype:"):
+                item.label = label
+                break
+    
 
     # =========================
     # Create Public Post
@@ -1499,10 +1674,25 @@ class GruppensucheTest(commands.Cog):
 
         self._expire_session(session.user_id)
 
-        if interaction.response.is_done():
-            await interaction.edit_original_response(content="✅ Gruppensuche erstellt.", embed=None, view=None)
-        else:
-            await interaction.response.send_message("✅ Gruppensuche erstellt.", ephemeral=True)
+        try:
+            if session.wizard_interaction:
+                await session.wizard_interaction.edit_original_response(
+                    content="✅ Gruppensuche erstellt.",
+                    embed=None,
+                    view=None,
+                )
+                return
+        except Exception:
+            pass
+
+        try:
+            if interaction.response.is_done():
+                await interaction.edit_original_response(content="✅ Gruppensuche erstellt.", embed=None, view=None)
+            else:
+                await interaction.response.send_message("✅ Gruppensuche erstellt.", ephemeral=True)
+        except discord.InteractionResponded:
+            await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True)
+
 
     # =========================
     # Public Actions
