@@ -768,7 +768,7 @@ class PartySizeSelect(discord.ui.Select):
         self.host_view = host_view
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
+        if interaction.user.id != self.host_view.session.user_id:
             await interaction.response.defer()
             return
 
@@ -779,6 +779,7 @@ class PartySizeSelect(discord.ui.Select):
             return
 
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
+
 
 
 
