@@ -1,4 +1,5 @@
 from __future__ import annotations
+from discord import app_commands
 
 import asyncio
 import datetime as dt
@@ -1130,7 +1131,15 @@ class GruppensucheTest(commands.Cog):
     async def _startup_register_views(self):
         await self.bot.wait_until_red_ready()
         await self.bot.wait_until_ready()
+
         await self._register_all_persistent_views()
+
+        try:
+            guild_obj = discord.Object(id=GUILD_ID)
+            await self.bot.tree.sync(guild=guild_obj)
+        except Exception:
+            pass
+
 
     async def _register_all_persistent_views(self):
         guild = self.bot.get_guild(GUILD_ID)
@@ -1155,13 +1164,9 @@ class GruppensucheTest(commands.Cog):
     # Command (Test)
     # =========================
 
-    @commands.guild_only()
-    @commands.hybrid_command(name="gs_test", with_app_command=True)
-    async def gs_test(self, ctx: commands.Context):
-        if ctx.interaction is None:
-            return
-
-        interaction = ctx.interaction
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.command(name="gs_test", description="TEST: Starte eine neue Gruppensuche (Wizard).")
+    async def gs_test_command(self, interaction: discord.Interaction) -> None:
         session = WizardSession(
             user_id=interaction.user.id,
             guild_id=interaction.guild_id or 0,
@@ -1169,6 +1174,7 @@ class GruppensucheTest(commands.Cog):
         )
         self._sessions[interaction.user.id] = session
         await self._send_start(interaction, session)
+
 
 
     # =========================
