@@ -754,26 +754,33 @@ class SpotSelectView(WizardBaseView):
 
 
 class PartySizeSelect(discord.ui.Select):
-    def __init__(self, parent: "PartySizeView", min_n: int, max_n: int, current: Optional[int] = None):
+    def __init__(self, host_view: "PartySizeView", min_n: int, max_n: int, current: Optional[int] = None):
         options = []
         for n in range(min_n, max_n + 1):
             opt = discord.SelectOption(label=str(n), value=str(n), default=(current == n))
             options.append(opt)
-        super().__init__(placeholder="Wähle die maximale Teilnehmerzahl...", min_values=1, max_values=1, options=options)
-        self.parent = parent
+
+        super().__init__(
+            placeholder="Wähle die maximale Teilnehmerzahl...",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+        self.host_view = host_view
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.parent.session.user_id:
+        if interaction.user.id != self.host_view.session.user_id:
             await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
             return
 
-        self.parent.session.max_players = int(self.values[0])
+        self.host_view.session.max_players = int(self.values[0])
 
-        if self.parent.session.mode == "create":
-            await self.parent.cog._send_final_form(interaction, self.parent.session)
+        if self.host_view.session.mode == "create":
+            await self.host_view.cog._send_final_form(interaction, self.host_view.session)
             return
 
-        await self.parent.cog._apply_edit_max_players(interaction, self.parent.session)
+        await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
+
 
 
 class PartySizeView(WizardBaseView):
