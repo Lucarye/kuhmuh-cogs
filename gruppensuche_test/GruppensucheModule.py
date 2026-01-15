@@ -340,7 +340,7 @@ class WizardBaseView(discord.ui.View):
 # =========================
 
 class StartSelect(discord.ui.Select):
-    def __init__(self, parent: "StartView"):
+    def __init__(self, host_view: "StartView"):
         options = [
             discord.SelectOption(label="Muhhelfer (LoML Bosse)", value="muhhelfer", emoji=MUHKUH_EMOJI),
             discord.SelectOption(label="Gruppenspots", value="spots", emoji=CHEER_EMOJI),
@@ -350,11 +350,13 @@ class StartSelect(discord.ui.Select):
         self.host_view = host_view
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.parent.session.user_id:
+        if interaction.user.id != self.host_view.session.user_id:
             await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
             return
+
         self.host_view.session.category = self.values[0]
         await self.host_view.cog._send_day_selection(interaction, self.host_view.session, back_to="start")
+
 
 
 class StartView(WizardBaseView):
