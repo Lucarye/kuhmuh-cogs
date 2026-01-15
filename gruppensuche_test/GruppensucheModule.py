@@ -424,12 +424,12 @@ class DaySelectView(WizardBaseView):
                 await interaction.response.defer()
                 return
 
-        async def _done(i: discord.Interaction, d: dt.date):
-            self.session.day_date_iso = d.isoformat()
-            if self.session.mode == "create":
-                await self.cog._send_category_specific(i, self.session)
-                return
-            await self.cog._apply_edit_day(i, self.session)
+    async def _done(i: discord.Interaction, d: dt.date):
+        self.session.day_date_iso = d.isoformat()
+        if self.session.mode == "create":
+            await self.cog._send_category_specific(i, self.session)
+            return
+        await self.cog._apply_edit_day(i, self.session)
 
         await interaction.response.send_modal(CustomDateModal("Anderen Tag wählen", _done))
 
