@@ -347,14 +347,14 @@ class StartSelect(discord.ui.Select):
             discord.SelectOption(label="Pila Fe Schriftrollen", value="pilafe", emoji=PILAFE_EMOJI),
         ]
         super().__init__(placeholder="Wähle eine Kategorie...", min_values=1, max_values=1, options=options)
-        self.parent = parent
+        self.host_view = host_view
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.parent.session.user_id:
             await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
             return
-        self.parent.session.category = self.values[0]
-        await self.parent.cog._send_day_selection(interaction, self.parent.session, back_to="start")
+        self.host_view.session.category = self.values[0]
+        await self.host_view.cog._send_day_selection(interaction, self.host_view.session, back_to="start")
 
 
 class StartView(WizardBaseView):
