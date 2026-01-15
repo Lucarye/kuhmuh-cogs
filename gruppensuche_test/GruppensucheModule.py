@@ -1159,8 +1159,10 @@ class GruppensucheTest(commands.Cog):
     @commands.guild_only()
     async def gs_test(self, ctx: commands.Context):
         if ctx.interaction is None:
-            await ctx.send("Bitte nutze den Slash-Command /gs_test.", delete_after=10)
+            print("gs_test wurde als PREFIX aufgerufen")
             return
+
+        print("gs_test wurde als SLASH aufgerufen")
 
         interaction = ctx.interaction
         session = WizardSession(user_id=interaction.user.id, guild_id=interaction.guild_id or 0, mode="create")
