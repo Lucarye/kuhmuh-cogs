@@ -351,14 +351,12 @@ class StartSelect(discord.ui.Select):
         self.host_view = host_view
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
+        if interaction.user.id != self.host_view.session.user_id:
             await interaction.response.defer()
             return
 
         self.host_view.session.category = self.values[0]
         await self.host_view.cog._send_day_selection(interaction, self.host_view.session, back_to="start")
-
-
 
 class StartView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
