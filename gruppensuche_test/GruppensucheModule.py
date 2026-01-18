@@ -208,6 +208,8 @@ class WizardSession:
     start_text: Optional[str] = None
     req_text: Optional[str] = None
     notes: Optional[str] = None
+    own_ap: Optional[str] = None
+
 
 
 # =========================
@@ -247,6 +249,16 @@ class DetailsModal(discord.ui.Modal):
         self.cog = cog
         self.session = session
         self.defaults = defaults or {}
+        current_own_ap = self.defaults.get("own_ap") or ""
+        self.own_ap = discord.ui.TextInput(
+            label="Deine AP (Pflicht)",
+            placeholder="z.B. 305",
+            required=True if session.mode == "create" else False,
+            max_length=10,
+            default=str(current_own_ap) if current_own_ap else None,
+        )
+        self.add_item(self.own_ap)
+
 
         is_pilafe = session.category == "pilafe"
 
@@ -255,6 +267,8 @@ class DetailsModal(discord.ui.Modal):
         current_start = self.defaults.get("start_text") or ""
         current_req = self.defaults.get("req_text") or self.defaults.get("req_default") or ""
         current_notes = self.defaults.get("notes") or ""
+        
+
 
         self.scroll_amount = discord.ui.TextInput(
             label="Menge an Schriftrollen (nur Pila Fe)",
@@ -279,10 +293,10 @@ class DetailsModal(discord.ui.Modal):
         )
         self.req_text = discord.ui.TextInput(
             label="Gewünschte AK/VK (optional)",
-            placeholder="z.B. 370+ AP / 440+ VK",
+            placeholder=f"Empfohlen: {current_req}" if current_req else "z.B. 370+ AP / 440+ VK",
             required=False,
             max_length=60,
-            default=str(current_req) if current_req else None,
+            default=None,   # wichtig!
         )
         self.notes = discord.ui.TextInput(
             label="Optionale Notizen",
@@ -306,6 +320,18 @@ class DetailsModal(discord.ui.Modal):
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
+
+        own_ap_val = str(self.own_ap.value).strip() if hasattr(self, "own_ap") else ""
+        if self.session.mode == "create":
+            if not own_ap_val:
+                await interaction.followup.send("AP ist Pflicht.", ephemeral=True)
+                return
+            self.session.own_ap = own_ap_val
+        else:
+            # im Edit-Mode optional übernehmen, wenn gesetzt
+            if own_ap_val:
+                self.session.own_ap = own_ap_val
+
 
         # Session-Felder setzen
         if self.session.category == "pilafe" and self.session.mode == "create":
@@ -331,6 +357,26 @@ class DetailsModal(discord.ui.Modal):
             return
 
         await self.cog._apply_edit_details(base_interaction, self.session)
+
+class JoinApModal(discord.ui.Modal):
+    def __init__(self, on_done):
+        super().__init__(title="AP bei Anmeldung")
+        self.on_done = on_done
+
+        self.ap = discord.ui.TextInput(
+            label="Deine AP (Pflicht)",
+            placeholder="z.B. 305",
+            required=True,
+            max_length=10,
+        )
+        self.add_item(self.ap)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        val = str(self.ap.value).strip()
+        if not val:
+            await interaction.response.send_message("AP ist Pflicht.", ephemeral=True)
+            return
+        await self.on_done(interaction, val)
 
 
 
@@ -368,7 +414,8 @@ class StartSelect(discord.ui.Select):
             return
 
         self.host_view.session.category = self.values[0]
-        await self.host_view.cog._send_day_selection(interaction, self.host_view.session, back_to="start")
+        await self.host_view.cog._send_category_specific(interaction, self.host_view.session)
+
 
 
 class StartView(WizardBaseView):
@@ -423,9 +470,11 @@ class DaySelectView(WizardBaseView):
             self.session.day_date_iso = d.isoformat()
 
             if self.session.mode == "create":
-                await self.cog._send_category_specific(interaction, self.session)
+                # Nach Datum geht es jetzt weiter zu PartySize (für Muhhelfer/Spots)
+                # bzw. für PilaFe bleibt es auch PartySize (passt)
+                await self.cog._send_party_size(interaction, self.session)
                 return
-
+            
             await self.cog._apply_edit_day(interaction, self.session)
 
         return _cb
@@ -437,9 +486,12 @@ class DaySelectView(WizardBaseView):
 
         async def _done(i: discord.Interaction, d: dt.date):
             self.session.day_date_iso = d.isoformat()
+
             if self.session.mode == "create":
-                await self.cog._send_category_specific(i, self.session)
+                await self.cog._send_party_size(i, self.session)
                 return
+
+            # EDIT: Tag speichern + zurück ins Edit-Menü
             await self.cog._apply_edit_day(i, self.session)
 
         await interaction.response.send_modal(CustomDateModal("Anderen Tag wählen", _done))
@@ -454,11 +506,20 @@ class DaySelectView(WizardBaseView):
             await self.cog._send_edit_menu(interaction, self.session)
             return
 
-        if self.back_to == "start":
-            await self.cog._send_start(interaction, self.session)
-            return
+        if self.back_to == "bosses":
+            if self.session.category == "muhhelfer":
+                await self.cog._send_boss_select(interaction, self.session)
+                return
 
+        if self.back_to == "spot":
+            if self.session.category == "spots":
+                await self.cog._send_spot_select(interaction, self.session)
+                return
+
+        # default
         await self.cog._send_start(interaction, self.session)
+
+
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
@@ -609,10 +670,11 @@ class BossSelectView(WizardBaseView):
 
         # CREATE-MODE (wie gehabt)
         if total >= 5:
-            await self.cog._send_party_size(interaction, self.session)
+            await self.cog._send_day_selection(interaction, self.session, back_to="bosses")
             return
 
         await self.cog._send_double_run(interaction, self.session)
+
 
 
     def embed(self) -> discord.Embed:
@@ -707,7 +769,8 @@ class DoubleRunView(WizardBaseView):
             await self.cog._apply_edit_bosses(interaction, self.session)
             return
 
-        await self.cog._send_party_size(interaction, self.session)
+        await self.cog._send_day_selection(interaction, self.session, back_to="bosses")
+
 
     def embed(self) -> discord.Embed:
         diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
@@ -760,14 +823,16 @@ class SpotSelectView(WizardBaseView):
             await interaction.response.defer()
             return
         self.session.spot_key = "mirumok"
-        await self.cog._send_party_size(interaction, self.session)
+        await self.cog._send_day_selection(interaction, self.session, back_to="spot")
+
 
     async def _pick_gyfin(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
         self.session.spot_key = "gyfin"
-        await self.cog._send_party_size(interaction, self.session)
+        await self.cog._send_day_selection(interaction, self.session, back_to="spot")
+
 
     async def _back(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -1034,6 +1099,15 @@ class PublicPostView(discord.ui.View):
             row=0,
             custom_id=f"gst:leave:{message_id}",
         )
+        ping_part_btn = discord.ui.Button(
+            label="Ping Teilnehmer",
+            emoji="📣",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            custom_id=f"gst:pingparts:{message_id}",
+        )
+        ping_part_btn.callback = self._on_ping_participants
+        self.add_item(ping_part_btn)
 
         ping_type_btn = discord.ui.Button(
             label="Ping",
@@ -1107,10 +1181,21 @@ class PublicPostView(discord.ui.View):
         return data
 
     async def _on_join(self, interaction: discord.Interaction):
-        await self.cog._join(interaction, self.message_id)
+        async def _done(i: discord.Interaction, ap_val: str):
+            await self.cog._join(i, self.message_id, ap_val)
+
+        await interaction.response.send_modal(JoinApModal(_done))
+
 
     async def _on_leave(self, interaction: discord.Interaction):
-        await self.cog._leave(interaction, self.message_id)    
+        await self.cog._leave(interaction, self.message_id)  
+
+    async def _on_ping_participants(self, interaction: discord.Interaction):
+        data = await self._ensure_owner_or_mod(interaction)
+        if not data:
+            return
+        await self.cog._ping_participants(interaction, self.message_id, data)
+      
 
     async def _on_ping_type(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
@@ -1374,7 +1459,42 @@ class GruppensucheTest(commands.Cog):
                 await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         except Exception:
             pass
+    async def _ping_participants(self, interaction: discord.Interaction, message_id: int, data: dict):
+        try:
+            await interaction.response.defer()
+        except discord.InteractionResponded:
+            pass
 
+        if bool(data.get("is_closed", False)):
+            return
+
+        guild = interaction.guild
+        if guild is None:
+            return
+        channel = guild.get_channel(int(data.get("channel_id", 0)))
+        if not isinstance(channel, discord.TextChannel):
+            return
+
+        participants = list(data.get("participants") or [])
+        if not participants:
+            return
+
+        mentions = " ".join(f"<@{uid}>" for uid in participants)
+        jump = f"https://discord.com/channels/{guild.id}/{channel.id}/{message_id}"
+
+        day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
+        try:
+            day_d = dt.date.fromisoformat(day_iso)
+            day_str = _format_day(day_d)
+        except Exception:
+            day_str = str(day_iso)
+
+        start_text = data.get("start_text") or "—"
+
+        await channel.send(
+            f"{mentions}\n📣 Teilnehmer-Ping | Start: {start_text} | {day_str}\n{jump}",
+            allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+        )
 
     # =========================
     # Storage
@@ -1410,6 +1530,12 @@ class GruppensucheTest(commands.Cog):
         cat = str(data.get("category", ""))
         owner_id = int(data.get("owner_id", 0))
         owner = guild.get_member(owner_id)
+
+        times_block = (
+            f"**Geplante Dauer:** {duration_text}\n"
+                    f"**Start:** {start_text}\n\n"
+        )
+
 
         day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
         try:
@@ -1452,6 +1578,9 @@ class GruppensucheTest(commands.Cog):
 
         # Kopfblock (wie rechts)
         owner_txt = owner.mention if owner else f"<@{owner_id}>"
+        owner_ap = data.get("owner_ap")
+        owner_display = owner_txt if not owner_ap else f"{owner_txt} ({owner_ap} AP)"
+
 
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal"))
@@ -1461,12 +1590,14 @@ class GruppensucheTest(commands.Cog):
             req = req_text or req_default
 
             header = (
-                f"**Suchender:** {owner_txt}\n"
+                f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Muhhelfer (LoML Bosse)\n"
+                f"**Tag:** {day_str}\n"
                 f"**Schwierigkeit:** {diff_icon} {diff_label}\n"
                 f"**Anforderung AK/VK:** {req}\n"
                 f"**Max. Teilnehmer:** {max_players}\n\n"
             )
+
 
             boss_runs = data.get("boss_runs") or {}
             boss_lines = []
@@ -1483,18 +1614,18 @@ class GruppensucheTest(commands.Cog):
             if has_double:
                 bosses_block += "⚠️ **2. Charakter erforderlich**\n\n"
 
-            times_block = (
-                f"**Geplante Dauer:** {duration_text}\n"
-                f"**Tag:** {day_str}\n"
-                f"**Start:** {start_text}\n\n"
-            )
         
             status_block = f"**Status**\n{status_line}\n\n"
 
             part_lines = []
             for uid in participants:
                 m = guild.get_member(int(uid))
-                part_lines.append(m.mention if m else f"<@{uid}>")
+                ap_map = data.get("participant_ap") or {}
+
+                mention = (m.mention if m else f"<@{uid}>")
+                ap = ap_map.get(str(uid))
+                part_lines.append(f"{mention} ({ap} AP)" if ap else mention)
+
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
                 + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
@@ -1502,9 +1633,13 @@ class GruppensucheTest(commands.Cog):
             )
 
             wait_lines = []
+            wl_map = data.get("waitlist_ap") or {}
             for uid in waitlist:
                 m = guild.get_member(int(uid))
-                wait_lines.append(m.mention if m else f"<@{uid}>")
+                mention = (m.mention if m else f"<@{uid}>")
+                ap = wl_map.get(str(uid))
+                wait_lines.append(f"{mention} ({ap} AP)" if ap else mention)
+
             wait_block = (
                 f"**Warteschlange ({len(waitlist)})**\n"
                 + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
@@ -1518,11 +1653,13 @@ class GruppensucheTest(commands.Cog):
             req = req_text or req_default
 
             header = (
-                f"**Suchender:** {owner_txt}\n"
+                f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Gruppenspots\n"
+                f"**Tag:** {day_str}\n"
                 f"**Anforderung AK/VK:** {req if req else '—'}\n"
                 f"**Max. Teilnehmer:** {max_players}\n\n"
             )
+
 
             spot_block = ""
             total_ap = SPOT_TOTAL_AP.get(spot, "")
@@ -1531,18 +1668,17 @@ class GruppensucheTest(commands.Cog):
             else:
                 spot_block += f"**Spot:** {_spot_name(spot)}\n\n"
 
-            times_block = (
-                f"**Geplante Dauer:** {duration_text}\n"
-                f"**Tag:** {day_str}\n"
-                f"**Start:** {start_text}\n\n"
-            )
 
             status_block = f"**Status**\n{status_line}\n\n"
 
             part_lines = []
             for uid in participants:
                 m = guild.get_member(int(uid))
-                part_lines.append(m.mention if m else f"<@{uid}>")
+                ap_map = data.get("participant_ap") or {}
+
+                mention = (m.mention if m else f"<@{uid}>")
+                ap = ap_map.get(str(uid))
+                part_lines.append(f"{mention} ({ap} AP)" if ap else mention)
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
                 + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
@@ -1550,9 +1686,12 @@ class GruppensucheTest(commands.Cog):
             )
 
             wait_lines = []
+            wl_map = data.get("waitlist_ap") or {}
             for uid in waitlist:
                 m = guild.get_member(int(uid))
-                wait_lines.append(m.mention if m else f"<@{uid}>")
+                mention = (m.mention if m else f"<@{uid}>")
+                ap = wl_map.get(str(uid))
+                wait_lines.append(f"{mention} ({ap} AP)" if ap else mention)
             wait_block = (
                 f"**Warteschlange ({len(waitlist)})**\n"
                 + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
@@ -1563,16 +1702,10 @@ class GruppensucheTest(commands.Cog):
         else:
             amount = data.get("scroll_amount") or "—"
             header = (
-                f"**Suchender:** {owner_txt}\n"
+                f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Pila Fe Schriftrollen\n"
                 f"**Menge:** {amount}\n"
                 f"**Max. Teilnehmer:** {max_players}\n\n"
-            )
-
-            times_block = (
-                f"**Geplante Dauer:** {duration_text}\n"
-                f"**Tag:** {day_str}\n"
-                f"**Start:** {start_text}\n\n"
             )
 
             status_block = f"**Status**\n{status_line}\n\n"
@@ -1580,7 +1713,11 @@ class GruppensucheTest(commands.Cog):
             part_lines = []
             for uid in participants:
                 m = guild.get_member(int(uid))
-                part_lines.append(m.mention if m else f"<@{uid}>")
+                ap_map = data.get("participant_ap") or {}
+
+                mention = (m.mention if m else f"<@{uid}>")
+                ap = ap_map.get(str(uid))
+                part_lines.append(f"{mention} ({ap} AP)" if ap else mention)
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
                 + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
@@ -1588,9 +1725,12 @@ class GruppensucheTest(commands.Cog):
             )
 
             wait_lines = []
+            wl_map = data.get("waitlist_ap") or {}
             for uid in waitlist:
                 m = guild.get_member(int(uid))
-                wait_lines.append(m.mention if m else f"<@{uid}>")
+                mention = (m.mention if m else f"<@{uid}>")
+                ap = wl_map.get(str(uid))
+                wait_lines.append(f"{mention} ({ap} AP)" if ap else mention)
             wait_block = (
                 f"**Warteschlange ({len(waitlist)})**\n"
                 + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
@@ -1634,23 +1774,23 @@ class GruppensucheTest(commands.Cog):
 
 
     async def _apply_dynamic_button_labels(self, view: discord.ui.View, data: dict):
-        label = "Ping"
+        label = "🔔 Rollen-Ping"
         cat = str(data.get("category", ""))
 
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal"))
-            label = f"Ping ({'Schwer' if diff == 'schwer' else 'Normal'})"
+            label = f"🔔 Rollen-Ping ({'Schwer' if diff == 'schwer' else 'Normal'})"
         elif cat == "spots":
             spot = str(data.get("spot_key", ""))
-            label = f"Ping ({_spot_name(spot)})" if spot else "Ping (Spot)"
+            label = f"🔔 Rollen-Ping ({_spot_name(spot)})" if spot else "🔔 Rollen-Ping (Spot)"
         elif cat == "pilafe":
-            label = "Ping (Pila Fe)"
+            label = "🔔 Rollen-Ping (Pila Fe)"
 
         for item in view.children:
             if isinstance(item, discord.ui.Button) and str(item.custom_id or "").startswith("gst:pingtype:"):
                 item.label = label
                 break
-    
+
 
     # =========================
     # Create Public Post
@@ -1697,6 +1837,9 @@ class GruppensucheTest(commands.Cog):
             "start_text": session.start_text,
             "req_text": session.req_text,
             "notes": session.notes,
+            "owner_ap": session.own_ap,
+            "participant_ap": {str(owner_id): session.own_ap or ""},
+            "waitlist_ap": {},
         }
 
         if session.category == "muhhelfer":
@@ -1741,7 +1884,8 @@ class GruppensucheTest(commands.Cog):
     # Public Actions
     # =========================
 
-    async def _join(self, interaction: discord.Interaction, message_id: int):
+    async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
+
         data = await self._get_search(message_id)
         if data is None:
             await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
@@ -1766,6 +1910,9 @@ class GruppensucheTest(commands.Cog):
             participants.append(uid)
             data["participants"] = participants
             data["updated_at"] = int(_now_local().timestamp())
+            ap_map = data.get("participant_ap") or {}
+            ap_map[str(uid)] = ap_val
+            data["participant_ap"] = ap_map
             await self._set_search(message_id, data)
             await self._refresh_public_message(data)
             await interaction.response.send_message("✅ Du bist jetzt Teilnehmer.", ephemeral=True)
@@ -1774,6 +1921,9 @@ class GruppensucheTest(commands.Cog):
         waitlist.append(uid)
         data["waitlist"] = waitlist
         data["updated_at"] = int(_now_local().timestamp())
+        wl_map = data.get("waitlist_ap") or {}
+        wl_map[str(uid)] = ap_val
+        data["waitlist_ap"] = wl_map
         await self._set_search(message_id, data)
         await self._refresh_public_message(data)
         await interaction.response.send_message("ℹ️ Gruppe ist voll. Du bist in der Warteschlange.", ephemeral=True)
@@ -1801,10 +1951,33 @@ class GruppensucheTest(commands.Cog):
         if was_wait:
             waitlist.remove(uid)
 
+        # AP Maps aufräumen
+        ap_map = data.get("participant_ap") or {}
+        wl_map = data.get("waitlist_ap") or {}
+
+        if was_participant:
+            ap_map.pop(str(uid), None)
+        if was_wait:
+            wl_map.pop(str(uid), None)
+
+        data["participant_ap"] = ap_map
+        data["waitlist_ap"] = wl_map
+    
+
         promoted_id: Optional[int] = None
         if was_participant and len(participants) < max_players and waitlist:
             promoted_id = int(waitlist.pop(0))
             participants.append(promoted_id)
+            wl_map = data.get("waitlist_ap") or {}
+            ap_map = data.get("participant_ap") or {}
+
+            promoted_ap = wl_map.pop(str(promoted_id), None)
+            if promoted_ap:
+                ap_map[str(promoted_id)] = promoted_ap
+
+            data["waitlist_ap"] = wl_map
+            data["participant_ap"] = ap_map
+
 
         data["participants"] = participants
         data["waitlist"] = waitlist
@@ -1885,12 +2058,18 @@ class GruppensucheTest(commands.Cog):
             await interaction.response.send_message("Diese Suche ist geschlossen.", ephemeral=True)
             return
 
+        try:
+            await interaction.response.defer()
+        except discord.InteractionResponded:
+            pass
+
         cd = data.get("ping_cd") or {}
         now_ts = int(_now_local().timestamp())
         last = int(cd.get("type", 0))
         if now_ts - last < PING_COOLDOWN_SECONDS:
-            await interaction.response.send_message("Ping-Cooldown aktiv.", ephemeral=True)
+            await interaction.followup.send("Ping-Cooldown aktiv.", ephemeral=True)
             return
+
 
         cd["type"] = now_ts
         data["ping_cd"] = cd
@@ -1924,19 +2103,24 @@ class GruppensucheTest(commands.Cog):
 
         txt = f"<@&{ping_role_id}> | {day_str} | Start: {start_text} | Frei: {free}\n{jump}"
         await channel.send(txt, allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False))
-        await interaction.response.send_message("✅", ephemeral=True)
 
     async def _ping_wait(self, interaction: discord.Interaction, message_id: int, data: dict):
         if bool(data.get("is_closed", False)):
             await interaction.response.send_message("Diese Suche ist geschlossen.", ephemeral=True)
             return
 
+        try:
+            await interaction.response.defer()
+        except discord.InteractionResponded:
+            pass
+
         cd = data.get("ping_cd") or {}
         now_ts = int(_now_local().timestamp())
         last = int(cd.get("wait", 0))
         if now_ts - last < PING_COOLDOWN_SECONDS:
-            await interaction.response.send_message("Ping-Cooldown aktiv.", ephemeral=True)
+            await interaction.followup.send("Ping-Cooldown aktiv.", ephemeral=True)
             return
+
 
         cd["wait"] = now_ts
         data["ping_cd"] = cd
@@ -1965,7 +2149,6 @@ class GruppensucheTest(commands.Cog):
 
         txt = f"🔔 Ping Warteschlange | {day_str} | Start: {start_text}\n{jump}"
         await channel.send(txt, allowed_mentions=discord.AllowedMentions.none())
-        await interaction.response.send_message("✅", ephemeral=True)
 
     async def _close_search(self, interaction: discord.Interaction, message_id: int):
         data = await self._get_search(message_id)
@@ -2088,8 +2271,20 @@ class GruppensucheTest(commands.Cog):
         participants = list(data.get("participants") or [])
         waitlist = list(data.get("waitlist") or [])
 
+        ap_map = data.get("participant_ap") or {}
+        wl_map = data.get("waitlist_ap") or {}
+
         while len(participants) < new_max and waitlist:
-            participants.append(int(waitlist.pop(0)))
+            pid = int(waitlist.pop(0))
+            participants.append(pid)
+
+            promoted_ap = wl_map.pop(str(pid), None)
+            if promoted_ap:
+                ap_map[str(pid)] = promoted_ap
+
+        data["participant_ap"] = ap_map
+        data["waitlist_ap"] = wl_map
+
 
         data["participants"] = participants
         data["waitlist"] = waitlist
