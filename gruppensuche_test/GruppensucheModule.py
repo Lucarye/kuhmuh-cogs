@@ -1212,6 +1212,8 @@ class GruppensucheTest(commands.Cog):
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="gs_test", description="TEST: Starte eine neue Gruppensuche (Wizard).")
     async def gs_test_command(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+
         session = WizardSession(
             user_id=interaction.user.id,
             guild_id=interaction.guild_id or 0,
@@ -1219,7 +1221,11 @@ class GruppensucheTest(commands.Cog):
         )
         session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
-        await self._send_start(interaction, session)
+
+        # nach defer musst du über followup oder edit_original_response arbeiten:
+        view = StartView(self, session)
+        await interaction.edit_original_response(embed=view.embed(), view=view)
+
 
 
     # =========================
@@ -1298,20 +1304,21 @@ class GruppensucheTest(commands.Cog):
         view: discord.ui.View,
     ):
         try:
+            # 1) Wenn wir schon geantwortet haben (z.B. Modal submit), können wir nicht mehr response.send/edit nutzen.
             if interaction.response.is_done():
-                # Wenn wir aus einem Modal-Submit kommen, gibt es oft kein "original response" zum Editieren.
-                # Dann lieber followup ephemeral, statt crasht / falsche Message zu editieren.
+                # Modal-Submit hat oft kein "original response" zum Editieren -> fallback auf followup ephemeral
                 try:
                     await interaction.edit_original_response(embed=embed, view=view)
                 except Exception:
                     await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-            return
+                return
 
-
+            # 2) Wenn es eine Message gibt (typisch bei Button/Select auf einer Ephemeral-Message)
             if interaction.message is not None:
                 await interaction.response.edit_message(embed=embed, view=view)
                 return
 
+            # 3) Erstes Slash-Command: neue Ephemeral senden
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             return
 
@@ -1320,6 +1327,7 @@ class GruppensucheTest(commands.Cog):
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             except Exception:
                 return
+
             
     async def _send_ephemeral_new(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
         """Sendet IMMER eine neue ephemeral Nachricht (niemals edit_message auf einem öffentlichen Post)."""
