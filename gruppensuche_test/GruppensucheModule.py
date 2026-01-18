@@ -951,7 +951,7 @@ class ConfirmView(discord.ui.View):
             )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.session.user_id:
+        if interaction.user.id != self.user_id:
             await interaction.response.defer()
             return
         return True
@@ -999,14 +999,6 @@ class PublicPostView(discord.ui.View):
             custom_id=f"gst:leave:{message_id}",
         )
 
-        started_btn = discord.ui.Button(
-            label="Run gestartet",
-            emoji="▶️",
-            style=discord.ButtonStyle.primary,
-            row=0,
-            custom_id=f"gst:started:{message_id}",
-        )
-
         ping_type_btn = discord.ui.Button(
             label="Ping",
             emoji="🔔",
@@ -1052,14 +1044,12 @@ class PublicPostView(discord.ui.View):
         leave_btn.callback = self._on_leave
         ping_type_btn.callback = self._on_ping_type
         ping_wait_btn.callback = self._on_ping_wait
-        started_btn.callback = self._on_started
         edit_btn.callback = self._on_edit
         close_btn.callback = self._on_close
         delete_btn.callback = self._on_delete
 
         self.add_item(join_btn)
         self.add_item(leave_btn)
-        self.add_item(started_btn)
         self.add_item(ping_type_btn)
         self.add_item(ping_wait_btn)
         self.add_item(edit_btn)
@@ -1084,14 +1074,7 @@ class PublicPostView(discord.ui.View):
         await self.cog._join(interaction, self.message_id)
 
     async def _on_leave(self, interaction: discord.Interaction):
-        await self.cog._leave(interaction, self.message_id)
-
-    async def _on_started(self, interaction: discord.Interaction):
-        data = await self._ensure_owner_or_mod(interaction)
-        if not data:
-            return
-        await self.cog._mark_run_started(interaction, self.message_id, data)
-    
+        await self.cog._leave(interaction, self.message_id)    
 
     async def _on_ping_type(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
@@ -1221,20 +1204,6 @@ class GruppensucheTest(commands.Cog):
         session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
         await self._send_start(interaction, session)
-
-     # =========================
-
-    async def _mark_run_started(self, interaction: discord.Interaction, message_id: int, data: dict):
-        if bool(data.get("is_closed", False)):
-            await interaction.response.send_message("Diese Suche ist geschlossen.", ephemeral=True)
-            return
-
-        data["run_started"] = True
-        data["updated_at"] = int(_now_local().timestamp())
-        await self._set_search(message_id, data)
-        await self._refresh_public_message(data)
-
-        await interaction.response.send_message("✅ Run als gestartet markiert.", ephemeral=True)
 
 
     # =========================
@@ -1443,11 +1412,7 @@ class GruppensucheTest(commands.Cog):
                 f"**Tag:** {day_str}\n"
                 f"**Start:** {start_text}\n\n"
             )
-
-            run_started = bool(data.get("run_started", False))
-            if run_started:
-                times_block += "▶️ **Run gestartet**\n\n"
-
+        
             status_block = f"**Status**\n{status_line}\n\n"
 
             part_lines = []
@@ -1496,10 +1461,6 @@ class GruppensucheTest(commands.Cog):
                 f"**Start:** {start_text}\n\n"
             )
 
-            run_started = bool(data.get("run_started", False))
-            if run_started:
-                times_block += "▶️ **Run gestartet**\n\n"
-
             status_block = f"**Status**\n{status_line}\n\n"
 
             part_lines = []
@@ -1537,10 +1498,6 @@ class GruppensucheTest(commands.Cog):
                 f"**Tag:** {day_str}\n"
                 f"**Start:** {start_text}\n\n"
             )
-
-            run_started = bool(data.get("run_started", False))
-            if run_started:
-                times_block += "▶️ **Run gestartet**\n\n"
 
             status_block = f"**Status**\n{status_line}\n\n"
 
