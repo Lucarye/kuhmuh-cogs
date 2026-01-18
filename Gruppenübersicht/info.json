@@ -1,0 +1,11 @@
+{
+  "author": ["Kuhmuhnisten"],
+  "name": "Gruppenübersicht",
+  "short": "Dashboard-Übersicht für alle aktiven Gruppensuchen.",
+  "description": "Liest die Gruppensuchen-Daten aus dem Gruppensuche-Cog (Config) und erstellt/updated eine zentrale Übersicht in einem separaten Channel. Inklusive Sortierung/Grouping und später Auto-Cleanup.",
+  "install_msg": "✅ **Gruppenübersicht** installiert.\n\nNächste Schritte:\n- Lade den Cog\n- Setze den Dashboard-Channel (kommt als Command im Cog)\n- Der Cog erstellt/updated dann eine feste Übersichtsnachricht.",
+  "requirements": [],
+  "tags": ["group", "lfg", "dashboard", "overview", "utility"],
+  "min_bot_version": "3.5.0",
+  "end_user_data_statement": "Dieser Cog speichert keine zusätzlichen personenbezogenen Daten. Er liest lediglich bestehende Gruppensuche-Configdaten (Message-IDs, Teilnehmer-IDs), um eine Übersichtsnachricht zu generieren."
+}
