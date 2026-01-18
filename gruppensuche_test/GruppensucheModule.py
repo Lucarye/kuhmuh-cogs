@@ -581,19 +581,39 @@ class BossSelectView(WizardBaseView):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
-        
+
         if not self.session.boss_runs:
             await interaction.response.send_message("Bitte wähle mindestens 1 Boss.", ephemeral=True)
             return
 
-        if _sum_runs(self.session.boss_runs) >= 5:
-            if self.session.mode == "edit":
+        total = _sum_runs(self.session.boss_runs)
+        has_double = any(int(v) >= 2 for v in self.session.boss_runs.values())
+
+        # EDIT-MODE:
+        # Wenn bereits Doppelruns existieren, muss der User IMMER die Doppelrun-Ansicht sehen,
+        # damit er sie ggf. wieder abwählen kann - auch bei 5/5.
+        if self.session.mode == "edit":
+            if has_double:
+                await self.cog._send_double_run(interaction, self.session)
+                return
+
+            # keine Doppelruns gesetzt:
+            # wenn voll, können wir direkt speichern
+            if total >= 5:
                 await self.cog._apply_edit_bosses(interaction, self.session)
                 return
+
+            # sonst optional Doppelruns anbieten
+            await self.cog._send_double_run(interaction, self.session)
+            return
+
+        # CREATE-MODE (wie gehabt)
+        if total >= 5:
             await self.cog._send_party_size(interaction, self.session)
             return
 
         await self.cog._send_double_run(interaction, self.session)
+
 
     def embed(self) -> discord.Embed:
         diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
