@@ -1285,14 +1285,30 @@ class GruppensucheTest(commands.Cog):
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _send_double_run(self, interaction: discord.Interaction, session: WizardSession):
-        if _sum_runs(session.boss_runs) >= 5:
-            if session.mode == "edit":
-                await self._apply_edit_bosses(interaction, session)
-                return
+        """
+        Doppelrun-Ansicht anzeigen.
+        WICHTIG:
+        - Im EDIT-Mode muss die Ansicht auch bei 5/5 erreichbar sein,
+          damit man Doppelruns wieder abwählen kann.
+        - Im CREATE-Mode nur anzeigen, wenn noch Runs frei sind (<5), sonst weiter.
+        """
+        total = _sum_runs(session.boss_runs)
+
+        # EDIT: IMMER Doppelrun-View anzeigen (auch bei 5/5),
+        # weil man Doppelruns ggf. entfernen will.
+        if session.mode == "edit":
+            view = DoubleRunView(self, session)
+            await self._edit_or_send_ephemeral(interaction, view.embed(), view)
+            return
+
+        # CREATE: wenn voll, weiter zum nächsten Step
+        if total >= 5:
             await self._send_party_size(interaction, session)
             return
+
         view = DoubleRunView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
+
 
     async def _send_spot_select(self, interaction: discord.Interaction, session: WizardSession):
         view = SpotSelectView(self, session)
