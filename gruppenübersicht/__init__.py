@@ -1,4 +1,5 @@
-from .gruppenuebersicht import Gruppenuebersicht
+from .gruppenübersicht import Gruppenübersicht
+
 
 async def setup(bot):
-    await bot.add_cog(Gruppenuebersicht(bot))
+    await bot.add_cog(Gruppenübersicht(bot))
