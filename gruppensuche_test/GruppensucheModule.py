@@ -948,7 +948,7 @@ class ConfirmView(discord.ui.View):
         super().__init__(timeout=30)
         self.cog = cog
         self.message_id = message_id
-        self.action = action
+        self.action = action  # "close" | "delete"
         self.user_id = user_id
 
         if action == "close":
@@ -956,11 +956,22 @@ class ConfirmView(discord.ui.View):
                 "Möchtest du diese Suche wirklich schließen?\n"
                 "Danach sind keine Anmeldungen/Pings mehr möglich (du kannst sie später wieder öffnen)."
             )
+            confirm_label = "🔒 Ja, schließen"
         else:
             self.text = (
                 "Möchtest du diese Suche wirklich endgültig löschen?\n"
                 "⚠️ Dieser Vorgang kann nicht rückgängig gemacht werden."
             )
+            confirm_label = "🗑 Ja, endgültig löschen"
+
+        confirm_btn = discord.ui.Button(label=confirm_label, style=discord.ButtonStyle.danger)
+        cancel_btn = discord.ui.Button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
+
+        confirm_btn.callback = self._confirm
+        cancel_btn.callback = self._cancel
+
+        self.add_item(confirm_btn)
+        self.add_item(cancel_btn)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -968,26 +979,18 @@ class ConfirmView(discord.ui.View):
             return False
         return True
 
-
-    @discord.ui.button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _cancel(self, interaction: discord.Interaction):
         await interaction.response.edit_message(content="Abgebrochen.", view=None)
 
-    @discord.ui.button(label="🗑 Ja, endgültig löschen", style=discord.ButtonStyle.danger)
-    async def confirm_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.action != "delete":
-            await interaction.response.send_message("Ungültige Aktion.", ephemeral=True)
+    async def _confirm(self, interaction: discord.Interaction):
+        if self.action == "delete":
+            await self.cog._delete_search(interaction, self.message_id)
+            await interaction.response.edit_message(content="Suche wurde gelöscht.", view=None)
             return
-        await self.cog._delete_search(interaction, self.message_id)
-        await interaction.response.edit_message(content="Suche wurde gelöscht.", view=None)
 
-    @discord.ui.button(label="🔒 Ja, schließen", style=discord.ButtonStyle.danger)
-    async def confirm_close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.action != "close":
-            await interaction.response.send_message("Ungültige Aktion.", ephemeral=True)
-            return
         await self.cog._close_search(interaction, self.message_id)
         await interaction.response.edit_message(content="Suche wurde geschlossen.", view=None)
+
     
 
 class PublicPostView(discord.ui.View):
@@ -1296,8 +1299,14 @@ class GruppensucheTest(commands.Cog):
     ):
         try:
             if interaction.response.is_done():
-                await interaction.edit_original_response(embed=embed, view=view)
-                return
+                # Wenn wir aus einem Modal-Submit kommen, gibt es oft kein "original response" zum Editieren.
+                # Dann lieber followup ephemeral, statt crasht / falsche Message zu editieren.
+                try:
+                    await interaction.edit_original_response(embed=embed, view=view)
+                except Exception:
+                    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            return
+
 
             if interaction.message is not None:
                 await interaction.response.edit_message(embed=embed, view=view)
