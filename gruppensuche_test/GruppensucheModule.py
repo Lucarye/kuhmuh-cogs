@@ -301,9 +301,16 @@ class DetailsModal(discord.ui.Modal):
         self.add_item(self.notes)
 
     async def on_submit(self, interaction: discord.Interaction):
+        # Modal immer zuerst sauber beantworten -> Modal schließt zuverlässig
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        # Session-Felder setzen
         if self.session.category == "pilafe" and self.session.mode == "create":
             if not str(self.scroll_amount.value).strip():
-                await interaction.response.send_message("Bei Pila Fe ist die Menge Pflicht.", ephemeral=True)
+                await interaction.followup.send("Bei Pila Fe ist die Menge Pflicht.", ephemeral=True)
                 return
             self.session.scroll_amount = str(self.scroll_amount.value).strip()
         elif self.session.category == "pilafe":
@@ -315,11 +322,16 @@ class DetailsModal(discord.ui.Modal):
         self.session.req_text = str(self.req_text.value).strip() or None
         self.session.notes = str(self.notes.value).strip() or None
 
+        # Ab hier NICHT die Modal-Interaction verwenden,
+        # sondern die Interaction, die das Wizard-Ephemeral besitzt.
+        base_interaction = self.session.wizard_interaction or interaction
+
         if self.session.mode == "create":
-            await self.cog._create_public_post_from_session(interaction, self.session)
+            await self.cog._create_public_post_from_session(base_interaction, self.session)
             return
 
-        await self.cog._apply_edit_details(interaction, self.session)
+        await self.cog._apply_edit_details(base_interaction, self.session)
+
 
 
 # =========================
@@ -1648,6 +1660,7 @@ class GruppensucheTest(commands.Cog):
 
         self._expire_session(session.user_id)
 
+        # Wizard-Ephemeral sauber "abschließen" (immer über wizard_interaction)
         try:
             if session.wizard_interaction:
                 await session.wizard_interaction.edit_original_response(
@@ -1655,17 +1668,9 @@ class GruppensucheTest(commands.Cog):
                     embed=None,
                     view=None,
                 )
-                return
         except Exception:
             pass
 
-        try:
-            if interaction.response.is_done():
-                await interaction.edit_original_response(content="✅ Gruppensuche erstellt.", embed=None, view=None)
-            else:
-                await interaction.response.send_message("✅ Gruppensuche erstellt.", ephemeral=True)
-        except discord.InteractionResponded:
-            await interaction.followup.send("✅ Gruppensuche erstellt.", ephemeral=True)
 
 
     # =========================
@@ -1960,6 +1965,7 @@ class GruppensucheTest(commands.Cog):
             req_text=data.get("req_text"),
             notes=data.get("notes"),
         )
+        session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
         await self._send_edit_menu(interaction, session)
 
