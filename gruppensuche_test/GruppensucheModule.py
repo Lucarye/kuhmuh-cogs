@@ -364,11 +364,12 @@ class StartSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.host_view.session.user_id:
-            await interaction.response.defer()
+            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
             return
 
         self.host_view.session.category = self.values[0]
         await self.host_view.cog._send_day_selection(interaction, self.host_view.session, back_to="start")
+
 
 class StartView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
@@ -430,18 +431,19 @@ class DaySelectView(WizardBaseView):
         return _cb
 
     async def _custom_day(self, interaction: discord.Interaction):
-            if interaction.user.id != self.session.user_id:
-                await interaction.response.defer()
-                return
-
-    async def _done(i: discord.Interaction, d: dt.date):
-        self.session.day_date_iso = d.isoformat()
-        if self.session.mode == "create":
-            await self.cog._send_category_specific(i, self.session)
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
             return
-        await self.cog._apply_edit_day(i, self.session)
+
+        async def _done(i: discord.Interaction, d: dt.date):
+            self.session.day_date_iso = d.isoformat()
+            if self.session.mode == "create":
+                await self.cog._send_category_specific(i, self.session)
+                return
+            await self.cog._apply_edit_day(i, self.session)
 
         await interaction.response.send_modal(CustomDateModal("Anderen Tag wählen", _done))
+
 
     async def _back(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -781,7 +783,7 @@ class PartySizeSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.host_view.session.user_id:
-            await interaction.response.defer()
+            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
             return
 
         self.host_view.session.max_players = int(self.values[0])
@@ -791,8 +793,6 @@ class PartySizeSelect(discord.ui.Select):
             return
 
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
-
-
 
 
 class PartySizeView(WizardBaseView):
@@ -964,9 +964,10 @@ class ConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
-            await interaction.response.defer()
-            return
+            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            return False
         return True
+
 
     @discord.ui.button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1310,6 +1311,16 @@ class GruppensucheTest(commands.Cog):
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             except Exception:
                 return
+            
+    async def _send_ephemeral_new(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
+        """Sendet IMMER eine neue ephemeral Nachricht (niemals edit_message auf einem öffentlichen Post)."""
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        except Exception:
+            pass
 
 
     # =========================
@@ -1967,7 +1978,11 @@ class GruppensucheTest(commands.Cog):
         )
         session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
-        await self._send_edit_menu(interaction, session)
+
+        # WICHTIG: Edit-Menü darf niemals den öffentlichen Post überschreiben.
+        view = EditMenuView(self, session, data)
+        await self._send_ephemeral_new(interaction, view.embed(), view)
+
 
     async def _send_edit_menu(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
