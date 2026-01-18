@@ -1531,12 +1531,6 @@ class GruppensucheTest(commands.Cog):
         owner_id = int(data.get("owner_id", 0))
         owner = guild.get_member(owner_id)
 
-        times_block = (
-            f"**Geplante Dauer:** {duration_text}\n"
-                    f"**Start:** {start_text}\n\n"
-        )
-
-
         day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
         try:
             day_d = dt.date.fromisoformat(day_iso)
@@ -1556,9 +1550,17 @@ class GruppensucheTest(commands.Cog):
         else:
             status_line = "🔴 Voll" if is_full else "🟢 Offen"
 
+        # ✅ Einmal zentral setzen
         duration_text = data.get("duration_text") or "—"
         start_text = data.get("start_text") or "—"
         notes = data.get("notes") or "—"
+
+        # ✅ Times-Block erst jetzt bauen
+        times_block = (
+            f"**Geplante Dauer:** {duration_text}\n"
+            f"**Start:** {start_text}\n\n"
+        )
+
 
         req_text = data.get("req_text") or ""
 
