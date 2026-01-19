@@ -1370,13 +1370,13 @@ class GruppensucheTest(commands.Cog):
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _send_double_run(self, interaction: discord.Interaction, session: WizardSession):
-        """
-        Doppelrun-Ansicht anzeigen.
-        WICHTIG:
-        - Im EDIT-Mode muss die Ansicht auch bei 5/5 erreichbar sein,
-          damit man Doppelruns wieder abwählen kann.
-        - Im CREATE-Mode nur anzeigen, wenn noch Runs frei sind (<5), sonst weiter.
-        """
+        
+        #Doppelrun-Ansicht anzeigen.
+        #WICHTIG:
+        #- Im EDIT-Mode muss die Ansicht auch bei 5/5 erreichbar sein,
+        #- damit man Doppelruns wieder abwählen kann.
+        #- Im CREATE-Mode nur anzeigen, wenn noch Runs frei sind (<5), sonst weiter.
+        
         total = _sum_runs(session.boss_runs)
 
         # EDIT: IMMER Doppelrun-View anzeigen (auch bei 5/5),
@@ -1451,7 +1451,7 @@ class GruppensucheTest(commands.Cog):
 
             
     async def _send_ephemeral_new(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
-        """Sendet IMMER eine neue ephemeral Nachricht (niemals edit_message auf einem öffentlichen Post)."""
+        #Sendet IMMER eine neue ephemeral Nachricht (niemals edit_message auf einem öffentlichen Post).
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
@@ -1530,13 +1530,13 @@ class GruppensucheTest(commands.Cog):
             pass
 
     async def _save_refresh_dispatch(self, data: dict, *, refresh_public: bool = True):
-        """
-        Zentraler Helper:
-        - updated_at setzen
-        - in Config speichern
-        - public message refreshen (optional)
-        - Dashboard-Refresh dispatchen
-        """
+        
+        #Zentraler Helper:
+        #- updated_at setzen
+        #- in Config speichern
+        #- public message refreshen (optional)
+        #- Dashboard-Refresh dispatchen
+        
         try:
             now_ts = int(_now_local().timestamp())
             data["updated_at"] = now_ts
