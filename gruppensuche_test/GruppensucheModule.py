@@ -308,11 +308,17 @@ class DetailsModal(discord.ui.Modal):
         )
 
         if is_pilafe:
+            # PilaFe: Modal max 5 Felder -> req_text NICHT anzeigen
             self.add_item(self.scroll_amount)
-        self.add_item(self.duration_text)
-        self.add_item(self.start_text)
-        self.add_item(self.req_text)
-        self.add_item(self.notes)
+            self.add_item(self.duration_text)
+            self.add_item(self.start_text)
+            self.add_item(self.notes)
+        else:
+            self.add_item(self.duration_text)
+            self.add_item(self.start_text)
+            self.add_item(self.req_text)
+            self.add_item(self.notes)
+
 
     async def on_submit(self, interaction: discord.Interaction):
         # Modal immer zuerst sauber beantworten -> Modal schließt zuverlässig
@@ -2198,7 +2204,7 @@ class GruppensucheTest(commands.Cog):
         if data is None:
             await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
             return
-        data["is_closed"] = True
+        data["is_closed"] = False
         await self._save_refresh_dispatch(data)
 
         await interaction.response.send_message("✅ Suche wieder geöffnet.", ephemeral=True)
