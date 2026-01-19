@@ -2023,10 +2023,10 @@ class GruppensucheTest(commands.Cog):
 
         data["participants"] = participants
         data["waitlist"] = waitlist
-        data["updated_at"] = int(_now_local().timestamp())
         await self._save_refresh_dispatch(data)
 
         await interaction.response.send_message("✅ Du wurdest abgemeldet.", ephemeral=True)
+
 
         if promoted_id:
             await self._notify_promotion(data, promoted_id)
@@ -2327,10 +2327,10 @@ class GruppensucheTest(commands.Cog):
 
         data["participants"] = participants
         data["waitlist"] = waitlist
-        data["updated_at"] = int(_now_local().timestamp())
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
+
 
     async def _apply_edit_details(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
