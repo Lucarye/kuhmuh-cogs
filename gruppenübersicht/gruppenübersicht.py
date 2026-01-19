@@ -271,6 +271,8 @@ class Gruppenübersicht(commands.Cog):
         today = _now_local().date()
 
         items: List[dict] = []
+        stale_message_ids: List[int] = []
+
         for mid_str, data in (searches or {}).items():
             try:
                 day_iso = data.get("day_date_iso")
@@ -281,9 +283,34 @@ class Gruppenübersicht(commands.Cog):
                     continue
                 d2 = dict(data)
                 d2["message_id"] = int(d2.get("message_id") or int(mid_str))
+                channel_id = int(data.get("channel_id") or 0)
+                message_id = int(data.get("message_id") or 0) or int(mid_str)
+
+                ch = guild.get_channel(channel_id)
+                if not isinstance(ch, discord.TextChannel):
+                    stale_message_ids.append(int(message_id))
+                    continue
+
+                try:
+                    await ch.fetch_message(int(message_id))
+                except Exception:
+                    stale_message_ids.append(int(message_id))
+                    continue
+
                 items.append(d2)
             except Exception:
                 continue
+            
+        if stale_message_ids:
+            search_cog = self._get_gruppensuche_cog()
+            if search_cog:
+                try:
+                    async with search_cog.config.guild(guild).searches() as s:
+                        for mid in stale_message_ids:
+                            s.pop(str(mid), None)
+                except Exception:
+                    pass
+
 
         def _sort_key(d: dict):
             day_iso = str(d.get("day_date_iso") or "")
