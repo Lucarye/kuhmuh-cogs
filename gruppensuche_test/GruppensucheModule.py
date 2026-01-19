@@ -1522,6 +1522,38 @@ class GruppensucheTest(commands.Cog):
             if str(message_id) in searches:
                 del searches[str(message_id)]
 
+        def _dispatch_dashboard_update(self, guild_id: int):
+        """Trigger für Gruppenübersicht Cog (sofortiges Refresh)."""
+        try:
+            self.bot.dispatch("gruppensuche_updated", int(guild_id))
+        except Exception:
+            pass
+
+    async def _save_refresh_dispatch(self, data: dict, *, refresh_public: bool = True):
+        """
+        Zentraler Helper:
+        - updated_at setzen
+        - in Config speichern
+        - public message refreshen (optional)
+        - Dashboard-Refresh dispatchen
+        """
+        try:
+            now_ts = int(_now_local().timestamp())
+            data["updated_at"] = now_ts
+
+            mid = int(data.get("message_id", 0))
+            if mid:
+                await self._set_search(mid, data)
+
+            if refresh_public and mid:
+                await self._refresh_public_message(data)
+
+            gid = int(data.get("guild_id", 0))
+            if gid:
+                self._dispatch_dashboard_update(gid)
+        except Exception:
+            pass
+
     # =========================
     # Public Post Build/Refresh
     # =========================
@@ -1867,6 +1899,8 @@ class GruppensucheTest(commands.Cog):
         async with self.config.guild(guild).searches() as searches:
             searches[str(msg.id)] = data
 
+        self._dispatch_dashboard_update(guild.id)
+
         self._expire_session(session.user_id)
 
         # Wizard-Ephemeral sauber "abschließen" (immer über wizard_interaction)
@@ -1911,14 +1945,15 @@ class GruppensucheTest(commands.Cog):
         if len(participants) < max_players:
             participants.append(uid)
             data["participants"] = participants
-            data["updated_at"] = int(_now_local().timestamp())
+
             ap_map = data.get("participant_ap") or {}
             ap_map[str(uid)] = ap_val
             data["participant_ap"] = ap_map
-            await self._set_search(message_id, data)
-            await self._refresh_public_message(data)
+
+            await self._save_refresh_dispatch(data)
             await interaction.response.send_message("✅ Du bist jetzt Teilnehmer.", ephemeral=True)
             return
+
 
         waitlist.append(uid)
         data["waitlist"] = waitlist
@@ -1926,8 +1961,7 @@ class GruppensucheTest(commands.Cog):
         wl_map = data.get("waitlist_ap") or {}
         wl_map[str(uid)] = ap_val
         data["waitlist_ap"] = wl_map
-        await self._set_search(message_id, data)
-        await self._refresh_public_message(data)
+        await self._save_refresh_dispatch(data)
         await interaction.response.send_message("ℹ️ Gruppe ist voll. Du bist in der Warteschlange.", ephemeral=True)
 
     async def _leave(self, interaction: discord.Interaction, message_id: int):
@@ -1984,8 +2018,7 @@ class GruppensucheTest(commands.Cog):
         data["participants"] = participants
         data["waitlist"] = waitlist
         data["updated_at"] = int(_now_local().timestamp())
-        await self._set_search(message_id, data)
-        await self._refresh_public_message(data)
+        await self._save_refresh_dispatch(data)
 
         await interaction.response.send_message("✅ Du wurdest abgemeldet.", ephemeral=True)
 
@@ -2157,19 +2190,17 @@ class GruppensucheTest(commands.Cog):
         if data is None:
             return
         data["is_closed"] = True
-        data["updated_at"] = int(_now_local().timestamp())
-        await self._set_search(message_id, data)
-        await self._refresh_public_message(data)
+        await self._save_refresh_dispatch(data)
+
 
     async def _open_search(self, interaction: discord.Interaction, message_id: int):
         data = await self._get_search(message_id)
         if data is None:
             await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
             return
-        data["is_closed"] = False
-        data["updated_at"] = int(_now_local().timestamp())
-        await self._set_search(message_id, data)
-        await self._refresh_public_message(data)
+        data["is_closed"] = True
+        await self._save_refresh_dispatch(data)
+
         await interaction.response.send_message("✅ Suche wieder geöffnet.", ephemeral=True)
 
     async def _delete_search(self, interaction: discord.Interaction, message_id: int):
@@ -2191,6 +2222,8 @@ class GruppensucheTest(commands.Cog):
                 pass
 
         await self._del_search(message_id)
+        self._dispatch_dashboard_update(int(data.get("guild_id", 0)))
+
 
     # =========================
     # Edit Flow
@@ -2248,9 +2281,7 @@ class GruppensucheTest(commands.Cog):
             return
 
         data["day_date_iso"] = session.day_date_iso
-        data["updated_at"] = int(_now_local().timestamp())
-        await self._set_search(session.edit_message_id, data)
-        await self._refresh_public_message(data)
+        await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
 
@@ -2291,8 +2322,7 @@ class GruppensucheTest(commands.Cog):
         data["participants"] = participants
         data["waitlist"] = waitlist
         data["updated_at"] = int(_now_local().timestamp())
-        await self._set_search(session.edit_message_id, data)
-        await self._refresh_public_message(data)
+        await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
 
@@ -2314,8 +2344,7 @@ class GruppensucheTest(commands.Cog):
         data["notes"] = session.notes
         data["updated_at"] = int(_now_local().timestamp())
 
-        await self._set_search(session.edit_message_id, data)
-        await self._refresh_public_message(data)
+        await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
 
@@ -2337,7 +2366,6 @@ class GruppensucheTest(commands.Cog):
 
         data["boss_runs"] = dict(session.boss_runs)
         data["updated_at"] = int(_now_local().timestamp())
-        await self._set_search(session.edit_message_id, data)
-        await self._refresh_public_message(data)
+        await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
