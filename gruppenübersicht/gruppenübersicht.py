@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from typing import Dict, List, Optional, Tuple
 
 import discord
@@ -8,20 +9,18 @@ from discord.ext import tasks
 from redbot.core import commands, Config
 
 
-# ============
-# WICHTIG:
-# - Dieser Cog liest die "searches" aus dem anderen Cog (Gruppensuche)
-# - Dafür muss die IDENTIFIER-ID gleich sein, damit wir auf dieselbe Config-Datei zeigen.
-# ============
-GRUPPENSUCHE_CONFIG_IDENTIFIER = 935771234123  # muss exakt gleich sein wie im Gruppensuche-Cog
+# =========================
+# FIX: Nur fuer eure Guild
+# =========================
+GUILD_ID = 1198649628787212458
 
-# Eigene Dashboard-Config (separat, damit nichts kollidiert)
+# Eigene Dashboard-Config (separat)
 DASHBOARD_CONFIG_IDENTIFIER = 935771234124
 
 # Update-Intervall
 DASHBOARD_REFRESH_MINUTES = 15
 
-# Emojis (optional – kann man später angleichen)
+# Emojis
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
 PILAFE_EMOJI = "<:pilafe:1450051653297504368>"
 MIRUMOK_EMOJI = "<:Mirumok:1461101498954940428>"
@@ -70,22 +69,34 @@ def _jump_url(guild_id: int, channel_id: int, message_id: int) -> str:
     return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
 
+def _extract_time_sort_key(start_text: str) -> Tuple[int, int]:
+    """
+    Sortiert fixe Uhrzeiten vor "jetzt/spaeter/nach absprache".
+    Wenn keine Uhrzeit erkannt wird => (99, 99)
+    """
+    t = (start_text or "").strip().lower()
+
+    # 20:30
+    m = re.search(r"\b([01]?\d|2[0-3])[:.]\s*([0-5]\d)\b", t)
+    if m:
+        return (int(m.group(1)), int(m.group(2)))
+
+    # 20 uhr / 20uhr / 20
+    m = re.search(r"\b([01]?\d|2[0-3])\s*(uhr)?\b", t)
+    if m:
+        return (int(m.group(1)), 0)
+
+    return (99, 99)
+
+
 class Gruppenübersicht(commands.Cog):
     """Gruppenübersicht - Dashbord"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-        # Lesen aus Gruppensuche-Config (shared via identifier)
-        self.search_config = Config.get_conf(
-            self, identifier=GRUPPENSUCHE_CONFIG_IDENTIFIER, force_registration=True
-        )
-        self.search_config.register_guild(searches={})
-
-        # Eigene Config für Dashboard-Msg/Channel
-        self.config = Config.get_conf(
-            self, identifier=DASHBOARD_CONFIG_IDENTIFIER, force_registration=True
-        )
+        # Eigene Config fuer Dashboard-Msg/Channel
+        self.config = Config.get_conf(self, identifier=DASHBOARD_CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(
             dashboard_channel_id=None,
             dashboard_message_id=None,
@@ -96,9 +107,38 @@ class Gruppenübersicht(commands.Cog):
     def cog_unload(self):
         self._dashboard_refresh_loop.cancel()
 
+    # =========================
+    # Datenquelle: direkt aus Gruppensuche-Cog
+    # =========================
+
+    def _get_gruppensuche_cog(self):
+        """
+        Holt den Cog, der die searches besitzt.
+        Passe hier nur an, falls du den Klassennamen aenderst.
+        """
+        # Erst Test-Cog
+        c = self.bot.get_cog("GruppensucheTest")
+        if c:
+            return c
+
+        # Falls spaeter der Main Cog anders heisst
+        c = self.bot.get_cog("Gruppensuche")
+        if c:
+            return c
+
+        return None
+
     async def _get_searches(self, guild: discord.Guild) -> Dict[str, dict]:
-        data = await self.search_config.guild(guild).searches()
-        return data or {}
+        search_cog = self._get_gruppensuche_cog()
+        if not search_cog:
+            return {}
+
+        # Erwartet: search_cog.config.register_guild(searches={})
+        try:
+            data = await search_cog.config.guild(guild).searches()
+            return data or {}
+        except Exception:
+            return {}
 
     async def _get_dashboard_target(self, guild: discord.Guild) -> Tuple[Optional[int], Optional[int]]:
         ch_id = await self.config.guild(guild).dashboard_channel_id()
@@ -131,13 +171,24 @@ class Gruppenübersicht(commands.Cog):
         if guild is None:
             return
 
-        if not isinstance(ctx.channel, discord.TextChannel):
-            await ctx.send("Bitte in einem Text-Channel ausführen.")
+        if guild.id != GUILD_ID:
+            await ctx.send("Dieser Cog ist nur fuer unsere Guild vorgesehen.")
             return
 
+        if not isinstance(ctx.channel, discord.TextChannel):
+            await ctx.send("Bitte in einem Text-Channel ausfuehren.")
+            return
+
+        await self._ensure_dashboard_message(guild, ctx.channel)
+
+        try:
+            await ctx.message.add_reaction("✅")
+        except Exception:
+            pass
+
+    async def _ensure_dashboard_message(self, guild: discord.Guild, channel: discord.TextChannel):
         embed = await self._build_dashboard_embed(guild)
 
-        # Versuche vorhandenes Dashboard zu editieren
         ch_id, msg_id = await self._get_dashboard_target(guild)
         if ch_id and msg_id:
             ch = guild.get_channel(int(ch_id))
@@ -145,26 +196,54 @@ class Gruppenübersicht(commands.Cog):
                 try:
                     msg = await ch.fetch_message(int(msg_id))
                     await msg.edit(embed=embed, view=None)
-                    try:
-                        await ctx.message.add_reaction("✅")
-                    except Exception:
-                        pass
                     return
                 except Exception:
-                    # message weg -> neu erstellen
                     pass
 
-        # Neu erstellen im aktuellen Channel
-        msg = await ctx.channel.send(embed=embed)
-        await self._set_dashboard_target(guild, ctx.channel.id, msg.id)
-
-        try:
-            await ctx.message.add_reaction("✅")
-        except Exception:
-            pass
+        msg = await channel.send(embed=embed)
+        await self._set_dashboard_target(guild, channel.id, msg.id)
 
     # =========================
-    # Auto Refresh Loop
+    # Sofort-Refresh via Event aus Gruppensuche
+    # =========================
+
+    @commands.Cog.listener()
+    async def on_gruppensuche_updated(self, guild_id: int):
+        if int(guild_id) != GUILD_ID:
+            return
+
+        guild = self.bot.get_guild(int(guild_id))
+        if not guild:
+            return
+
+        await self._refresh_dashboard(guild)
+
+    async def _refresh_dashboard(self, guild: discord.Guild):
+        ch_id, msg_id = await self._get_dashboard_target(guild)
+        if not ch_id or not msg_id:
+            return
+
+        ch = guild.get_channel(int(ch_id))
+        if not isinstance(ch, discord.TextChannel):
+            return
+
+        try:
+            msg = await ch.fetch_message(int(msg_id))
+        except Exception:
+            try:
+                await self._clear_dashboard_target(guild)
+            except Exception:
+                pass
+            return
+
+        try:
+            embed = await self._build_dashboard_embed(guild)
+            await msg.edit(embed=embed, view=None)
+        except Exception:
+            return
+
+    # =========================
+    # Auto Refresh Loop (15 min)
     # =========================
 
     @tasks.loop(minutes=DASHBOARD_REFRESH_MINUTES)
@@ -172,32 +251,11 @@ class Gruppenübersicht(commands.Cog):
         await self.bot.wait_until_red_ready()
         await self.bot.wait_until_ready()
 
-        for guild in self.bot.guilds:
-            # Wenn Dashboard nicht gesetzt ist, skip
-            ch_id, msg_id = await self._get_dashboard_target(guild)
-            if not ch_id or not msg_id:
-                continue
+        guild = self.bot.get_guild(GUILD_ID)
+        if not guild:
+            return
 
-            ch = guild.get_channel(int(ch_id))
-            if not isinstance(ch, discord.TextChannel):
-                continue
-
-            try:
-                msg = await ch.fetch_message(int(msg_id))
-            except Exception:
-                # Dashboard wurde gelöscht -> Target resetten
-                try:
-                    await self._clear_dashboard_target(guild)
-                except Exception:
-                    pass
-                continue
-
-            try:
-                embed = await self._build_dashboard_embed(guild)
-                await msg.edit(embed=embed, view=None)
-            except Exception:
-                # nichts spammen
-                continue
+        await self._refresh_dashboard(guild)
 
     @_dashboard_refresh_loop.before_loop
     async def _before_dashboard_refresh_loop(self):
@@ -210,12 +268,10 @@ class Gruppenübersicht(commands.Cog):
 
     async def _build_dashboard_embed(self, guild: discord.Guild) -> discord.Embed:
         searches = await self._get_searches(guild)
-
         today = _now_local().date()
 
-        # Filter: alles vor heute ignorieren (wie abgesprochen)
         items: List[dict] = []
-        for mid_str, data in searches.items():
+        for mid_str, data in (searches or {}).items():
             try:
                 day_iso = data.get("day_date_iso")
                 if not day_iso:
@@ -223,22 +279,21 @@ class Gruppenübersicht(commands.Cog):
                 day_d = dt.date.fromisoformat(str(day_iso))
                 if day_d < today:
                     continue
-                data = dict(data)
-                data["message_id"] = int(data.get("message_id") or int(mid_str))
-                items.append(data)
+                d2 = dict(data)
+                d2["message_id"] = int(d2.get("message_id") or int(mid_str))
+                items.append(d2)
             except Exception:
                 continue
 
-        # Sortierung: nach Tag, dann Start (optional), dann Kategorie
         def _sort_key(d: dict):
             day_iso = str(d.get("day_date_iso") or "")
-            start = (d.get("start_text") or "").lower()
+            start_text = str(d.get("start_text") or "")
+            tkey = _extract_time_sort_key(start_text)
             cat = str(d.get("category") or "")
-            return (day_iso, start, cat)
+            return (day_iso, tkey[0], tkey[1], cat)
 
         items.sort(key=_sort_key)
 
-        # Gruppen
         muh_normal: List[dict] = []
         muh_schwer: List[dict] = []
         spots: List[dict] = []
@@ -261,11 +316,10 @@ class Gruppenübersicht(commands.Cog):
             title="Gruppenübersicht - Dashbord",
             description=(
                 "Hier siehst du alle aktiven Gruppensuchen **ab heute**.\n"
-                "Auto-Update läuft alle 15 Minuten (und nach Restarts/Cog-Reloads, sobald das Dashboard einmal gesetzt wurde)."
+                "Auto-Update laeuft alle 15 Minuten (und sofort bei Updates der Suche, sobald das Dashboard einmal gesetzt wurde)."
             ),
         )
 
-        # Helfer für Zeile
         def fmt_line(d: dict) -> str:
             owner_id = int(d.get("owner_id") or 0)
             owner = guild.get_member(owner_id)
@@ -299,12 +353,12 @@ class Gruppenübersicht(commands.Cog):
 
             free = max(0, max_players - len(participants))
 
-            # Zusatz je Kategorie
             cat = str(d.get("category") or "")
             extra = ""
             if cat == "spots":
                 spot = str(d.get("spot_key") or "")
-                extra = f"{MIRUMOK_EMOJI if spot == 'mirumok' else (GYFIN_EMOJI if spot == 'gyfin' else CHEER_EMOJI)} {_spot_name(spot)}"
+                emoji = MIRUMOK_EMOJI if spot == "mirumok" else (GYFIN_EMOJI if spot == "gyfin" else CHEER_EMOJI)
+                extra = f"{emoji} {_spot_name(spot)}"
             elif cat == "pilafe":
                 amount = d.get("scroll_amount") or "—"
                 extra = f"{PILAFE_EMOJI} Menge: {amount}"
@@ -313,7 +367,6 @@ class Gruppenübersicht(commands.Cog):
                 diff_label = "Schwer" if diff == "schwer" else "Normal"
                 extra = f"{MUHKUH_EMOJI} {diff_label}"
 
-            # WICHTIG: gewünschte/optionale Req soll mit rein (wie du meintest)
             return (
                 f"• **{day_str}** | Start: **{start_text}** | Dauer: **{duration_text}**\n"
                 f"  {extra} | Req: **{req}** | {status} | Frei: **{free}** | Warteschlange: **{len(waitlist)}**\n"
@@ -323,8 +376,9 @@ class Gruppenübersicht(commands.Cog):
         def add_section(title: str, arr: List[dict]):
             if not arr:
                 return
+
             lines = [fmt_line(x) for x in arr]
-            # Discord field value max ~1024 chars – split falls nötig
+
             chunk = ""
             chunks: List[str] = []
             for line in lines:
@@ -346,7 +400,7 @@ class Gruppenübersicht(commands.Cog):
         add_section(f"{PILAFE_EMOJI} Pila Fe ({len(pilafe)})", pilafe)
 
         if not items:
-            e.add_field(name="Keine Einträge", value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
+            e.add_field(name="Keine Eintraege", value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
 
         e.set_footer(text=f"Aktualisiert: {_now_local().strftime('%d.%m.%Y %H:%M')} Uhr")
         e.timestamp = discord.utils.utcnow()
