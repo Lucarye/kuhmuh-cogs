@@ -1522,7 +1522,7 @@ class GruppensucheTest(commands.Cog):
             if str(message_id) in searches:
                 del searches[str(message_id)]
 
-        def _dispatch_dashboard_update(self, guild_id: int):
+    def _dispatch_dashboard_update(self, guild_id: int):
         #Trigger für Gruppenübersicht Cog (sofortiges Refresh).
         try:
             self.bot.dispatch("gruppensuche_updated", int(guild_id))
