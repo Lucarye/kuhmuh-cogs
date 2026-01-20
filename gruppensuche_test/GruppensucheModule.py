@@ -83,18 +83,33 @@ SPOT_PING_ROLE: Dict[str, int] = {
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 def _format_remaining(seconds: int) -> str:
-    seconds = max(0, int(seconds))
+    seconds = int(seconds)
+
+    if seconds <= 0:
+        seconds = abs(seconds)
+        days, rem = divmod(seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, sec = divmod(rem, 60)
+        if days > 0:
+            return f"vor {days} Tagen"
+        if hours > 0:
+            return f"vor {hours}h {minutes:02d}m"
+        if minutes > 0:
+            return f"vor {minutes}m {sec:02d}s"
+        return f"vor {sec}s"
+
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, sec = divmod(rem, 60)
-
     if days > 0:
-        return f"vor {days} Tagen" if seconds <= 0 else f"in {days} Tagen"
+        return f"in {days} Tagen"
     if hours > 0:
         return f"in {hours}h {minutes:02d}m"
     if minutes > 0:
         return f"in {minutes}m {sec:02d}s"
     return f"in {sec}s"
+
+
 
 
 def _now_local() -> dt.datetime:
@@ -148,6 +163,70 @@ def _parse_date_input(text: str) -> Optional[dt.date]:
                 return None
 
     return None
+
+import re
+
+_TIME_RE = re.compile(r"(?P<h>\d{1,2})(?:[:\.,](?P<m>\d{2}))?\s*(?:uhr)?", re.IGNORECASE)
+
+def _parse_time_token(token: str) -> Optional[tuple[int,int]]:
+    token = (token or "").strip().lower()
+    m = _TIME_RE.search(token)
+    if not m:
+        return None
+    h = int(m.group("h"))
+    mi = int(m.group("m") or 0)
+    if h == 24 and mi == 0:
+        # 24:00 -> wir geben (0,0) zurück, aber markieren es später als "next day end"
+        return (24, 0)
+    if h < 0 or h > 23 or mi < 0 or mi > 59:
+        return None
+    return (h, mi)
+
+def _extract_start_time_from_start_text(start_text: str) -> Optional[tuple[int,int]]:
+    t = (start_text or "").strip().lower()
+    if not t:
+        return None
+
+    # Schnellfilter: "jetzt" etc.
+    if any(x in t for x in ["jetzt", "sofort"]):
+        now = _now_local()
+        return (now.hour, now.minute)
+
+    # Fenster: zwischen X und Y / X-Y
+    if "zwischen" in t and "und" in t:
+        parts = t.replace("zwischen", "").split("und")
+        if len(parts) >= 2:
+            p1 = _parse_time_token(parts[0])
+            return p1
+
+    if "-" in t:
+        left = t.split("-", 1)[0]
+        p1 = _parse_time_token(left)
+        return p1
+
+    # Fixzeit
+    return _parse_time_token(t)
+
+def _build_start_dt_if_possible(data: dict) -> Optional[dt.datetime]:
+    day_iso = str(data.get("day_date_iso") or "").strip()
+    if not day_iso:
+        return None
+    try:
+        day_d = dt.date.fromisoformat(day_iso)
+    except Exception:
+        return None
+
+    start_text = str(data.get("start_text") or "")
+    hm = _extract_start_time_from_start_text(start_text)
+    if not hm:
+        return None
+
+    h, m = hm
+    # Wenn jemand "24:00" als Start reinhaut (selten) -> interpretieren als 00:00 nächster Tag
+    if h == 24 and m == 0:
+        return dt.datetime.combine(day_d + dt.timedelta(days=1), dt.time(0, 0))
+
+    return dt.datetime.combine(day_d, dt.time(h, m))
 
 
 def _has_mod_rights(member: discord.Member) -> bool:
@@ -1294,10 +1373,15 @@ class GruppensucheTest(commands.Cog):
 
         self._sessions: Dict[int, WizardSession] = {}
         self._startup_task: Optional[asyncio.Task] = self.bot.loop.create_task(self._startup_register_views())
+        self._reminder_task: Optional[asyncio.Task] = self.bot.loop.create_task(self._reminder_loop())
+
 
     def cog_unload(self):
         if self._startup_task and not self._startup_task.done():
             self._startup_task.cancel()
+        if self._reminder_task and not self._reminder_task.done():
+            self._reminder_task.cancel()
+    
 
     async def _startup_register_views(self):
         await self.bot.wait_until_red_ready()
@@ -1971,6 +2055,120 @@ class GruppensucheTest(commands.Cog):
     # =========================
     # Public Actions
     # =========================
+
+    async def _reminder_loop(self):
+        await self.bot.wait_until_red_ready()
+        await self.bot.wait_until_ready()
+
+        while True:
+            try:
+                await self._run_start_reminders()
+            except Exception:
+                pass
+
+            await asyncio.sleep(30)  # alle 30s checken reicht völlig
+
+    async def _run_start_reminders(self):
+        guild = self.bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+
+        searches = await self.config.guild(guild).searches()
+        if not searches:
+            return
+
+        now = _now_local()
+
+        for mid_str, data in (searches or {}).items():
+            try:
+                if bool(data.get("is_closed", False)):
+                    continue
+
+                start_dt = _build_start_dt_if_possible(data)
+                if not start_dt:
+                    continue
+
+                remind_at = start_dt - dt.timedelta(minutes=30)
+                if now < remind_at or now >= start_dt:
+                    continue
+
+                reminders = data.get("reminders")
+                if not isinstance(reminders, dict):
+                    reminders = {}
+
+                # bereits gesendet?
+                if int(reminders.get("start_30m", 0)) > 0:
+                    continue
+
+                # senden + markieren
+                await self._send_start_30m_reminder(guild, int(data.get("message_id", 0)), data)
+
+                ts = int(_now_local().timestamp())
+                reminders["start_30m"] = ts
+                data["reminders"] = reminders
+                data["updated_at"] = ts
+                await self._set_search(int(data.get("message_id", 0)), data)
+
+            except Exception:
+                continue
+
+    async def _send_start_30m_reminder(self, guild: discord.Guild, message_id: int, data: dict):
+        channel = guild.get_channel(int(data.get("channel_id", 0)))
+        jump = f"https://discord.com/channels/{guild.id}/{int(data.get('channel_id', 0))}/{message_id}"
+
+        max_players = int(data.get("max_players", 2))
+        participants = list(data.get("participants") or [])
+
+        owner_id = int(data.get("owner_id", 0))  # <-- NEU (früher holen)
+
+        free = max(0, max_players - len(participants))
+
+        # Owner NICHT in Teilnehmer-DM aufnehmen (sonst 2x DM)
+        participants_dm = [uid for uid in participants if int(uid) != owner_id]  # <-- NEU
+
+
+        # schöner Text
+        day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
+        try:
+            day_str = _format_day(dt.date.fromisoformat(day_iso))
+        except Exception:
+            day_str = str(day_iso)
+
+        start_text = data.get("start_text") or "—"
+
+        # 1) DM an Teilnehmer
+        failed: list[int] = []
+        for uid in participants_dm:
+            m = guild.get_member(int(uid))
+            if not m:
+                continue
+            try:
+                await m.send(f"⏰ **Reminder:** In ~30 Minuten geht’s los.\n**Tag:** {day_str}\n**Start:** {start_text}\n{jump}")
+            except Exception:
+                failed.append(int(uid))
+
+        # Fallback: wer DMs zu hat
+        if failed and isinstance(channel, discord.TextChannel):
+            mentions = " ".join(f"<@{uid}>" for uid in failed)
+            try:
+                await channel.send(
+                    f"⏰ Reminder (DM fehlgeschlagen): {mentions}\n**Start:** {start_text} | {day_str}\n{jump}",
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                )
+            except Exception:
+                pass
+
+        # 2) Extra DM an Ersteller mit “es fehlen noch X”
+        owner = guild.get_member(owner_id)
+        if owner:
+            try:
+                extra = f"\n⚠️ Es fehlen noch **{free}** Teilnehmer." if free > 0 else "\n✅ Gruppe ist voll."
+                await owner.send(
+                    f"⏰ **Reminder (Host):** In ~30 Minuten.\n**Tag:** {day_str}\n**Start:** {start_text}{extra}\n{jump}"
+                )
+            except Exception:
+                pass
+
 
     async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
 
