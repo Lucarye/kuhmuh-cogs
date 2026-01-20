@@ -1920,11 +1920,9 @@ class GruppensucheTest(commands.Cog):
             "ping_role_id": int(ping_role_id),
             "created_at": int(_now_local().timestamp()),
             "updated_at": int(_now_local().timestamp()),
-            "ping_cd" = {
-            "type": { "<message_id>": <timestamp> },
-            "wait": { "<message_id>": <timestamp> },
-            "parts": { "<message_id>": <timestamp> }
-            }
+
+            "ping_cd" = {},
+
             "duration_text": session.duration_text,
             "start_text": session.start_text,
             "req_text": session.req_text,
