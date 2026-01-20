@@ -472,7 +472,7 @@ class DaySelectView(WizardBaseView):
 
     def _add_day_buttons(self):
         today = _now_local().date()
-        for i in range(6):
+        for i in range(7):
             d = today + dt.timedelta(days=i)
             label = "Heute" if i == 0 else _format_day(d)
             if i == 0:
@@ -527,7 +527,7 @@ class DaySelectView(WizardBaseView):
             title=f"{MUHKUH_EMOJI} Tag",
             description=(
                 "Wähle den Tag, für den die Suche gedacht ist.\n"
-                "Du kannst bis zu **6 Tage im Voraus** planen."
+                "Du kannst bis zu **7 Tage im Voraus** planen."
             ),
         )
 
