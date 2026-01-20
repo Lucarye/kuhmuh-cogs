@@ -30,6 +30,9 @@ ADMIN_ROLE_ID: Optional[int] = 1198650646786736240
 OFFIZIER_ROLE_ID: Optional[int] = 1198652039312453723
 
 PING_COOLDOWN_SECONDS = 600
+PARTICIPANT_PING_COOLDOWN_SECONDS = 60
+WIZARD_TIMEOUT_SECONDS = 300  # 5 Minuten (oder 600 = 10 Minuten)
+
 
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
 PILAFE_EMOJI = "<:pilafe:1450051653297504368>"
@@ -78,6 +81,20 @@ SPOT_PING_ROLE: Dict[str, int] = {
 # =========================
 
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+def _format_remaining(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, sec = divmod(rem, 60)
+
+    if days > 0:
+        return f"vor {days} Tagen" if seconds <= 0 else f"in {days} Tagen"
+    if hours > 0:
+        return f"in {hours}h {minutes:02d}m"
+    if minutes > 0:
+        return f"in {minutes}m {sec:02d}s"
+    return f"in {sec}s"
 
 
 def _now_local() -> dt.datetime:
@@ -391,7 +408,7 @@ class JoinApModal(discord.ui.Modal):
 # =========================
 
 class WizardBaseView(discord.ui.View):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, timeout_seconds: int = 90):
+    def __init__(self, cog: "GruppensucheTest", session: WizardSession, timeout_seconds: int = WIZARD_TIMEOUT_SECONDS):
         super().__init__(timeout=timeout_seconds)
         self.cog = cog
         self.session = session
@@ -1474,9 +1491,36 @@ class GruppensucheTest(commands.Cog):
         if bool(data.get("is_closed", False)):
             return
 
+        # ========= Cooldown (pro Post) =========
+        cd = data.get("ping_cd") or {}
+        now_ts = int(_now_local().timestamp())
+        last = int(cd.get("participants", 0))
+
+        remaining = PARTICIPANT_PING_COOLDOWN_SECONDS - (now_ts - last)
+        if remaining > 0:
+            # kurze, klare Rückmeldung
+            await interaction.followup.send(
+                f"📣 Teilnehmer-Ping ist noch im Cooldown. Bitte warte **{remaining}s**.",
+                ephemeral=True,
+            )
+            return
+
+        # Cooldown setzen (pro Post)
+        cd["participants"] = now_ts
+        data["ping_cd"] = cd
+        data["updated_at"] = now_ts
+
+        # Speichern reicht – Dashboard/Public-Post muss dafür nicht refreshen
+        try:
+            await self._set_search(message_id, data)
+        except Exception:
+            pass
+        # =======================================
+
         guild = interaction.guild
         if guild is None:
             return
+
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         if not isinstance(channel, discord.TextChannel):
             return
@@ -1501,6 +1545,7 @@ class GruppensucheTest(commands.Cog):
             f"{mentions}\n📣 Teilnehmer-Ping | Start: {start_text} | {day_str}\n{jump}",
             allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
         )
+
 
     # =========================
     # Storage
@@ -1594,11 +1639,14 @@ class GruppensucheTest(commands.Cog):
         notes = data.get("notes") or "—"
 
         # ✅ Times-Block erst jetzt bauen
+        # ✅ Times-Block
         times_block = (
             f"**Geplante Dauer:** {duration_text}\n"
             f"**Start:** {start_text}\n\n"
         )
 
+        # ✅ Notes-Block (NEU)
+        notes_block = f"**Notiz:** {notes}\n\n"
 
         req_text = data.get("req_text") or ""
 
@@ -1685,7 +1733,7 @@ class GruppensucheTest(commands.Cog):
                 + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
             )
 
-            e.description = header + bosses_block + times_block + status_block + participants_block + wait_block
+            e.description = header + bosses_block + times_block + notes_block + status_block + participants_block + wait_block
 
         elif cat == "spots":
             spot = str(data.get("spot_key", ""))
@@ -1737,7 +1785,7 @@ class GruppensucheTest(commands.Cog):
                 + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
             )
 
-            e.description = header + spot_block + times_block + status_block + participants_block + wait_block
+            e.description = header + spot_block + times_block + notes_block + status_block + participants_block + wait_block
 
         else:
             amount = data.get("scroll_amount") or "—"
@@ -1776,7 +1824,7 @@ class GruppensucheTest(commands.Cog):
                 + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
             )
 
-            e.description = header + times_block + status_block + participants_block + wait_block
+            e.description = header + times_block + notes_block + status_block + participants_block + wait_block
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
@@ -1872,7 +1920,11 @@ class GruppensucheTest(commands.Cog):
             "ping_role_id": int(ping_role_id),
             "created_at": int(_now_local().timestamp()),
             "updated_at": int(_now_local().timestamp()),
-            "ping_cd": {},
+            "ping_cd" = {
+            "type": { "<message_id>": <timestamp> },
+            "wait": { "<message_id>": <timestamp> },
+            "parts": { "<message_id>": <timestamp> }
+            }
             "duration_text": session.duration_text,
             "start_text": session.start_text,
             "req_text": session.req_text,
@@ -2106,16 +2158,27 @@ class GruppensucheTest(commands.Cog):
 
         cd = data.get("ping_cd") or {}
         now_ts = int(_now_local().timestamp())
-        last = int(cd.get("type", 0))
-        if now_ts - last < PING_COOLDOWN_SECONDS:
-            await interaction.followup.send("Ping-Cooldown aktiv.", ephemeral=True)
+
+        type_map = cd.get("type")
+        if not isinstance(type_map, dict):
+            type_map = {}
+
+        last = int(type_map.get(str(message_id), 0))
+        diff = now_ts - last
+        if diff < PING_COOLDOWN_SECONDS:
+            remaining = PING_COOLDOWN_SECONDS - diff
+            await interaction.followup.send(
+                f"⏳ Ping-Cooldown aktiv. Du kannst das wieder {_format_remaining(remaining)} benutzen.",
+                ephemeral=True,
+            )
             return
 
-
-        cd["type"] = now_ts
+        type_map[str(message_id)] = now_ts
+        cd["type"] = type_map
         data["ping_cd"] = cd
-        data["updated_at"] = now_ts
-        await self._set_search(message_id, data)
+
+        await self._save_refresh_dispatch(data, refresh_public=False)
+
 
         guild = interaction.guild
         if guild is None:
@@ -2157,16 +2220,27 @@ class GruppensucheTest(commands.Cog):
 
         cd = data.get("ping_cd") or {}
         now_ts = int(_now_local().timestamp())
-        last = int(cd.get("wait", 0))
-        if now_ts - last < PING_COOLDOWN_SECONDS:
-            await interaction.followup.send("Ping-Cooldown aktiv.", ephemeral=True)
+
+        wait_map = cd.get("wait")
+        if not isinstance(wait_map, dict):
+            wait_map = {}
+
+        last = int(wait_map.get(str(message_id), 0))
+        diff = now_ts - last
+        if diff < PING_COOLDOWN_SECONDS:
+            remaining = PING_COOLDOWN_SECONDS - diff
+            await interaction.followup.send(
+                f"⏳ Ping-Cooldown aktiv. Du kannst das wieder {_format_remaining(remaining)} benutzen.",
+                ephemeral=True,
+            )
             return
 
-
-        cd["wait"] = now_ts
+        wait_map[str(message_id)] = now_ts
+        cd["wait"] = wait_map
         data["ping_cd"] = cd
-        data["updated_at"] = now_ts
-        await self._set_search(message_id, data)
+
+        await self._save_refresh_dispatch(data, refresh_public=False)
+
 
         guild = interaction.guild
         if guild is None:
