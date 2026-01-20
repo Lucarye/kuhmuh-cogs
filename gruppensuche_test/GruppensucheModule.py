@@ -466,17 +466,13 @@ class DaySelectView(WizardBaseView):
 
         self._add_day_buttons()
 
-        custom_btn = discord.ui.Button(label="Anderen Tag wählen", style=discord.ButtonStyle.secondary, row=2)
-        custom_btn.callback = self._custom_day
-        self.add_item(custom_btn)
-
         back_btn = discord.ui.Button(label="Zurück", style=discord.ButtonStyle.secondary, row=3)
         back_btn.callback = self._back
         self.add_item(back_btn)
 
     def _add_day_buttons(self):
         today = _now_local().date()
-        for i in range(5):
+        for i in range(6):
             d = today + dt.timedelta(days=i)
             label = "Heute" if i == 0 else _format_day(d)
             if i == 0:
@@ -501,24 +497,6 @@ class DaySelectView(WizardBaseView):
             await self.cog._apply_edit_day(interaction, self.session)
 
         return _cb
-
-    async def _custom_day(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
-
-        async def _done(i: discord.Interaction, d: dt.date):
-            self.session.day_date_iso = d.isoformat()
-
-            if self.session.mode == "create":
-                await self.cog._send_party_size(i, self.session)
-                return
-
-            # EDIT: Tag speichern + zurück ins Edit-Menü
-            await self.cog._apply_edit_day(i, self.session)
-
-        await interaction.response.send_modal(CustomDateModal("Anderen Tag wählen", _done))
-
 
     async def _back(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -547,8 +525,11 @@ class DaySelectView(WizardBaseView):
     def embed(self) -> discord.Embed:
         return discord.Embed(
             title=f"{MUHKUH_EMOJI} Tag",
-            description="Wähle den Tag, für den die Suche gedacht ist.\nDas erscheint später im öffentlichen Beitrag.",
-        )
+            description=(
+                "Wähle den Tag, für den die Suche gedacht ist.\n"
+                "Du kannst bis zu **6 Tage im Voraus** planen."
+            ),
+
 
 
 class DifficultyView(WizardBaseView):
