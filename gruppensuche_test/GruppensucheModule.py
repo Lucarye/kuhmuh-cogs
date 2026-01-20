@@ -112,9 +112,8 @@ def _format_remaining(seconds: int) -> str:
 
 
 
-def _now_local() -> dt.datetime:
-    return dt.datetime.now()
-
+def _now_utc() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
 
 def _format_day(d: dt.date) -> str:
     wd = WEEKDAYS_DE[d.weekday()]
@@ -222,11 +221,22 @@ def _build_start_dt_if_possible(data: dict) -> Optional[dt.datetime]:
         return None
 
     h, m = hm
-    # Wenn jemand "24:00" als Start reinhaut (selten) -> interpretieren als 00:00 nächster Tag
-    if h == 24 and m == 0:
-        return dt.datetime.combine(day_d + dt.timedelta(days=1), dt.time(0, 0))
+    tz = dt.timezone.utc  # ← HIER der entscheidende Punkt
 
-    return dt.datetime.combine(day_d, dt.time(h, m))
+    # 24:00 → nächster Tag 00:00 UTC
+    if h == 24 and m == 0:
+        return dt.datetime.combine(
+            day_d + dt.timedelta(days=1),
+            dt.time(0, 0),
+            tzinfo=tz,
+        )
+
+    return dt.datetime.combine(
+        day_d,
+        dt.time(h, m),
+        tzinfo=tz,
+    )
+
 
 
 def _has_mod_rights(member: discord.Member) -> bool:
