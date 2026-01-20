@@ -115,6 +115,17 @@ def _format_remaining(seconds: int) -> str:
 def _now_utc() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
+from zoneinfo import ZoneInfo
+
+BERLIN = ZoneInfo("Europe/Berlin")
+
+def _now_local() -> dt.datetime:
+    return dt.datetime.now(BERLIN)
+
+
+
+
+
 def _format_day(d: dt.date) -> str:
     wd = WEEKDAYS_DE[d.weekday()]
     return f"{wd}, {d.day:02d}.{d.month:02d}."
@@ -221,9 +232,11 @@ def _build_start_dt_if_possible(data: dict) -> Optional[dt.datetime]:
         return None
 
     h, m = hm
-    tz = dt.timezone.utc  # ← HIER der entscheidende Punkt
 
-    # 24:00 → nächster Tag 00:00 UTC
+    # ✅ gleiche Zeitzone wie _now_local()
+    tz = BERLIN
+
+    # 24:00 → nächster Tag 00:00 (lokale Zeit)
     if h == 24 and m == 0:
         return dt.datetime.combine(
             day_d + dt.timedelta(days=1),
@@ -236,6 +249,7 @@ def _build_start_dt_if_possible(data: dict) -> Optional[dt.datetime]:
         dt.time(h, m),
         tzinfo=tz,
     )
+
 
 
 
