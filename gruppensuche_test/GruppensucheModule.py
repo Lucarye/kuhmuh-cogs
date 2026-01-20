@@ -158,6 +158,12 @@ def _has_mod_rights(member: discord.Member) -> bool:
         return True
     return False
 
+def _is_admin_only(member: discord.Member) -> bool:
+    # NUR Admin-Rolle
+    if not ADMIN_ROLE_ID:
+        return False
+    return ADMIN_ROLE_ID in {r.id for r in member.roles}
+
 
 def _boss_name(key: str) -> str:
     for k, name in BOSSES:
@@ -892,7 +898,15 @@ class PartySizeView(WizardBaseView):
         super().__init__(cog, session)
 
         mn, mx = _allowed_party_range(session.category or "")
+
+        # ✅ Admin-only: 1 Teilnehmer als Testoption
+        guild = cog.bot.get_guild(session.guild_id)
+        member = guild.get_member(session.user_id) if guild else None
+        if member and _is_admin_only(member):
+            mn = 1
+
         self.add_item(PartySizeSelect(self, mn, mx, current=current))
+
 
         back_btn = discord.ui.Button(label="Zurück", style=discord.ButtonStyle.secondary, row=1)
         back_btn.callback = self._back
@@ -2355,10 +2369,19 @@ class GruppensucheTest(commands.Cog):
 
         new_max = int(session.max_players or int(data.get("max_players", 2)))
         mn, mx = _allowed_party_range(str(data.get("category", "")))
+        # ✅ Admin-only Absicherung: 1 Teilnehmer nur für Admin-Testzwecke
+        member = interaction.user if isinstance(interaction.user, discord.Member) else None
+        if new_max == 1 and not (member and _is_admin_only(member)):
+            await interaction.response.send_message(
+                "1 Teilnehmer ist nur für Admin-Testzwecke erlaubt.",
+                ephemeral=True,
+            )
+            return
+        
         if new_max < mn or new_max > mx:
             await interaction.response.send_message("Ungültige Teilnehmerzahl.", ephemeral=True)
-            return
-
+            return     
+  
         data["max_players"] = new_max
 
         participants = list(data.get("participants") or [])
