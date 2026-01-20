@@ -528,7 +528,9 @@ class DaySelectView(WizardBaseView):
             description=(
                 "Wähle den Tag, für den die Suche gedacht ist.\n"
                 "Du kannst bis zu **6 Tage im Voraus** planen."
-            )
+            ),
+        )
+
 
 
 
