@@ -1498,23 +1498,21 @@ class GruppensucheTest(commands.Cog):
 
         remaining = PARTICIPANT_PING_COOLDOWN_SECONDS - (now_ts - last)
         if remaining > 0:
-            # kurze, klare Rückmeldung
             await interaction.followup.send(
                 f"📣 Teilnehmer-Ping ist noch im Cooldown. Bitte warte **{remaining}s**.",
                 ephemeral=True,
             )
             return
 
-        # Cooldown setzen (pro Post)
         cd["participants"] = now_ts
         data["ping_cd"] = cd
         data["updated_at"] = now_ts
 
-        # Speichern reicht – Dashboard/Public-Post muss dafür nicht refreshen
         try:
             await self._set_search(message_id, data)
         except Exception:
             pass
+
         # =======================================
 
         guild = interaction.guild
@@ -1921,7 +1919,7 @@ class GruppensucheTest(commands.Cog):
             "created_at": int(_now_local().timestamp()),
             "updated_at": int(_now_local().timestamp()),
 
-            "ping_cd" = {},
+            "ping_cd": {},
 
             "duration_text": session.duration_text,
             "start_text": session.start_text,
