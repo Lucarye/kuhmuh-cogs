@@ -75,6 +75,50 @@ SPOT_PING_ROLE: Dict[str, int] = {
     "mirumok": ROLE_MIRUMOK_ID,
     "gyfin": ROLE_GYFIN_ID,
 }
+# =========================
+# Wizard UI Schema (global)
+# =========================
+
+def _muh_title(session: "WizardSession") -> str:
+    diff_label = "Schwer" if session.difficulty == "schwer" else "Normal"
+    return f"{MUHKUH_EMOJI} Gruppensuche – Muhhelfer ({diff_label})"
+
+def _spots_title(session: "WizardSession") -> str:
+    spot = session.spot_key or ""
+    emoji = MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
+    return f"{emoji} Gruppensuche – {_spot_name(spot) if spot else 'Gruppenspots'}"
+
+def _pilafe_title(session: "WizardSession") -> str:
+    return f"{PILAFE_EMOJI} Gruppensuche – Pila Fe"
+
+WIZARD_UI = {
+    "muhhelfer": {
+        "party_min": 2,
+        "party_max": 5,
+        "party_text": "Wähle die maximale Teilnehmerzahl **2–5**.",
+        "title_fn": _muh_title,
+    },
+    "spots": {
+        "party_min": 2,
+        "party_max": 3,
+        "party_text": "Wähle die maximale Teilnehmerzahl **2–3**.",
+        "title_fn": _spots_title,
+    },
+    "pilafe": {
+        "party_min": 2,
+        "party_max": 5,
+        "party_text": "Wähle die maximale Teilnehmerzahl **2–5**.",
+        "title_fn": _pilafe_title,
+    },
+}
+
+def _ui_for(category: str) -> dict:
+    return WIZARD_UI.get(category or "", {
+        "party_min": 2,
+        "party_max": 5,
+        "party_text": "Wähle die maximale Teilnehmerzahl.",
+        "title_fn": lambda s: "Gruppensuche",
+    })
 
 
 # =========================
@@ -289,13 +333,9 @@ def _sum_runs(boss_runs: Dict[str, int]) -> int:
 
 
 def _allowed_party_range(category: str) -> Tuple[int, int]:
-    if category == "spots":
-        return (2, 3)
-    if category == "muhhelfer":
-        return (2, 5)
-    if category == "pilafe":
-        return (2, 5)
-    return (2, 5)
+    ui = _ui_for(category)
+    return (int(ui["party_min"]), int(ui["party_max"]))
+
 
 
 def _default_req_for(data: dict) -> str:
@@ -1040,37 +1080,44 @@ class PartySizeView(WizardBaseView):
         await self.cog._send_day_selection(interaction, self.session, back_to="start")
 
     def embed(self) -> discord.Embed:
-        if self.session.category == "muhhelfer":
+        cat = self.session.category or ""
+        ui = _ui_for(cat)
+
+        # Einheitlicher Titel (kommt aus Mapping)
+        title = ui["title_fn"](self.session)
+
+        # Einheitlicher Text (kommt aus Mapping)
+        base_text = ui.get("party_text", "Wähle die maximale Teilnehmerzahl.")
+
+        # Optionaler Info-Block je Kategorie (vorne dran, immer gleich aufgebaut)
+        info_lines: list[str] = []
+
+        if cat == "muhhelfer":
             diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
             req = AKVK_SCHWER if self.session.difficulty == "schwer" else AKVK_NORMAL
-            return discord.Embed(
-                title=f"{MUHKUH_EMOJI} Muhhelfer – Gruppengröße",
-                description=(
-                    f"Schwierigkeit: {diff}\n"
-                    f"Empfohlen mind. AK/VK: {req}\n\n"
-                    "Wähle die maximale Teilnehmerzahl 2-5"
-                ),
-            )
+            info_lines.append(f"**Schwierigkeit:** {diff}")
+            info_lines.append(f"**Empfohlen mind. AK/VK:** {req}")
 
-        if self.session.category == "spots" and self.session.spot_key:
+        elif cat == "spots" and self.session.spot_key:
             spot = self.session.spot_key
-            emoji = MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
-            return discord.Embed(
-                title=f"{emoji} {_spot_name(spot)} - Gruppengröße",
-                description=(
-                    f"• Empfohlen mind. {SPOT_REQ.get(spot, '')}\n"
-                    f"• {SPOT_TOTAL_AP.get(spot, '')}\n\n"
-                    "Wähle die maximale Teilnehmerzahl."
-                ),
-            )
+            req = SPOT_REQ.get(spot, "")
+            total = SPOT_TOTAL_AP.get(spot, "")
+            if req:
+                info_lines.append(f"**Empfohlen mind.:** {req}")
+            if total:
+                info_lines.append(f"**{total}**")
 
-        if self.session.category == "pilafe":
-            return discord.Embed(
-                title=f"{PILAFE_EMOJI} Gruppensuche – Pila Fe",
-                description="\n\nWähle die maximale Teilnehmerzahl 2-5",
-            )
+        # Beschreibung bauen (Info-Block + Leerzeile + Auswahltext)
+        desc = ""
+        if info_lines:
+            desc += "\n".join(info_lines) + "\n\n"
+        desc += base_text
 
-        return discord.Embed(title="Gruppengröße", description="Wähle die maximale Teilnehmerzahl.")
+        return discord.Embed(
+            title=title,
+            description=desc,
+        )
+
 
 
 # =========================
