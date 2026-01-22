@@ -741,9 +741,9 @@ class StartView(WizardBaseView):
                 "• **Muhhelfer** (LoML Bosse)\n"
                 "• **Gruppenspots** (Mirumok / Gyfin)\n"
                 "• **Pila Fe** Schriftrollen\n"
-                ("• **Altar des Blutes**\n" if FEATURE_ALTAR else "")
-                ("• **Atoraxxion**\n" if FEATURE_ATORAXXION else "")
-                "\nNach der Auswahl kannst du Details wie **Menge**, **Geplante Dauer** und **Startzeit** angeben."
+                + ("• **Altar des Blutes**\n" if FEATURE_ALTAR else "")
+                + ("• **Atoraxxion**\n" if FEATURE_ATORAXXION else "")
+                + "\nNach der Auswahl kannst du Details wie **Menge**, **Geplante Dauer** und **Startzeit** angeben."
             ),
         )
 
