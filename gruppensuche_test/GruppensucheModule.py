@@ -1482,7 +1482,7 @@ class GruppensucheTest(commands.Cog):
             await self._send_spot_select(interaction, session)
             return
         if session.category == "pilafe":
-            await self._send_party_size(interaction, session)
+            await self._send_day_selection(interaction, session, back_to="start")
             return
         await interaction.response.edit_message(
             content="Ungültige Auswahl. Bitte neu starten.",
@@ -1896,9 +1896,11 @@ class GruppensucheTest(commands.Cog):
             header = (
                 f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Pila Fe Schriftrollen\n"
+                f"**Tag:** {day_str}\n"
                 f"**Menge:** {amount}\n"
                 f"**Max. Teilnehmer:** {max_players}\n\n"
             )
+
 
             status_block = f"**Status**\n{status_line}\n\n"
 
