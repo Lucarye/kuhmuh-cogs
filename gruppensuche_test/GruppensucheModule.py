@@ -5,6 +5,7 @@ import asyncio
 import datetime as dt
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+from discord import PartialEmoji  
 
 import discord
 from redbot.core import commands, Config
@@ -81,6 +82,18 @@ SPOT_PING_ROLE: Dict[str, int] = {
 # =========================
 
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def _emoji_for_ping_button(data: dict) -> str:
+    cat = str(data.get("category", ""))
+    if cat == "muhhelfer":
+        return MUHKUH_EMOJI
+    if cat == "spots":
+        spot = str(data.get("spot_key", ""))
+        return MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
+    if cat == "pilafe":
+        return PILAFE_EMOJI
+    return "🔔"
 
 def _format_remaining(seconds: int) -> str:
     seconds = int(seconds)
@@ -1968,31 +1981,32 @@ class GruppensucheTest(commands.Cog):
 
 
     async def _apply_dynamic_button_labels(self, view: discord.ui.View, data: dict):
-        cat = str(data.get("category", ""))
-
-        # Default
         label = "Rollen-Ping"
-        emoji = "🔔"
+        cat = str(data.get("category", ""))
 
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal"))
             label = f"Rollen-Ping ({'Schwer' if diff == 'schwer' else 'Normal'})"
-            emoji = MUHKUH_EMOJI
-
         elif cat == "spots":
             spot = str(data.get("spot_key", ""))
             label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping (Spot)"
-            emoji = GYFIN_EMOJI if spot == "gyfin" else MIRUMOK_EMOJI
-
         elif cat == "pilafe":
             label = "Rollen-Ping (Pila Fe)"
-            emoji = PILAFE_EMOJI
+
+        emoji_str = _emoji_for_ping_button(data)
+
+        emoji_str = _emoji_for_ping_button(data)
 
         for item in view.children:
             if isinstance(item, discord.ui.Button) and str(item.custom_id or "").startswith("gst:pingtype:"):
-                item.label = label
-                item.emoji = emoji
+                item.label = f" {label}"
+                if emoji_str.startswith("<:") or emoji_str.startswith("<a:"):
+                    item.emoji = discord.PartialEmoji.from_str(emoji_str)
+                else:
+                    item.emoji = emoji_str
                 break
+
+
 
 
 
@@ -2065,8 +2079,10 @@ class GruppensucheTest(commands.Cog):
         data["message_id"] = msg.id
 
         view = PublicPostView(self, msg.id)
+        await self._apply_dynamic_button_labels(view, data)   # ✅ HIER
         await msg.edit(view=view)
         self.bot.add_view(view)
+
 
         async with self.config.guild(guild).searches() as searches:
             searches[str(msg.id)] = data
