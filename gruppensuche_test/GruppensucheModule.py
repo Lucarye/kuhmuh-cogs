@@ -155,6 +155,12 @@ def _format_remaining(seconds: int) -> str:
         return f"in {minutes}m {sec:02d}s"
     return f"in {sec}s"
 
+def _party_size_help_text(min_n: int, max_n: int) -> str:
+    return (
+        f"Wähle die maximale Teilnehmerzahl **{min_n}–{max_n}** (inkl. dir).\n"
+        f"Beispiel: **{max_n}** = du + **{max_n - 1}** weitere."
+    )
+
 
 
 
@@ -576,7 +582,7 @@ class StartSelect(discord.ui.Select):
     def __init__(self, host_view: "StartView"):
         options = [
             discord.SelectOption(label="Muhhelfer (LoML Bosse)", value="muhhelfer", emoji=MUHKUH_EMOJI),
-            discord.SelectOption(label="Gruppenspots", value="spots", emoji=CHEER_EMOJI),
+            discord.SelectOption(label="Gruppenspots (Mirumok / Gyfin)", value="spots", emoji=CHEER_EMOJI),
             discord.SelectOption(label="Pila Fe Schriftrollen", value="pilafe", emoji=PILAFE_EMOJI),
         ]
         super().__init__(placeholder="Wähle eine Kategorie...", min_values=1, max_values=1, options=options)
@@ -841,16 +847,16 @@ class BossSelectView(WizardBaseView):
         return discord.Embed(
             title=f"{MUHKUH_EMOJI} Muhhelfer – Bossauswahl",
             description=(
-                f"Schwierigkeit: {diff}\n"
-                f"Empfohlen mind. AK/VK: {req}\n\n"
-                "Wähle bis zu 5 Runs.\n"
-                "Wenn noch Runs frei sind, kannst du danach optional Doppelruns markieren.\n"
-                "Doppelrun = Boss wird 2x gelaufen (⚠️ 2. Charakter erforderlich).\n\n"
+                f"**Schwierigkeit:** {diff}\n"
+                f"**Empfohlen mind. AK/VK:** {req}\n\n"
+                "Wähle bis zu **5 Runs**.\n"
+                "Optional: **Doppel-Runs** können im nächsten Schritt markiert werden.\n"
+                "Beispiel: **3 Runs** auswählen, davon **2** im nächsten Schritt als Doppelrun markieren.\n"
+                "Doppelrun = Boss wird **2×** gelaufen (⚠️ **2. Charakter erforderlich**).\n\n"
                 f"{self._runs_info()}"
             ),
         )
-
-
+    
 class DoubleRunView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
@@ -1017,7 +1023,7 @@ class PartySizeSelect(discord.ui.Select):
             options.append(opt)
 
         super().__init__(
-            placeholder="Wähle die maximale Teilnehmerzahl...",
+            placeholder="Wähle die maximale Teilnehmerzahl (inkl. dir)...",
             min_values=1,
             max_values=1,
             options=options,
@@ -1080,43 +1086,40 @@ class PartySizeView(WizardBaseView):
         await self.cog._send_day_selection(interaction, self.session, back_to="start")
 
     def embed(self) -> discord.Embed:
-        cat = self.session.category or ""
-        ui = _ui_for(cat)
+        mn, mx = _allowed_party_range(self.session.category or "")
 
-        # Einheitlicher Titel (kommt aus Mapping)
-        title = ui["title_fn"](self.session)
-
-        # Einheitlicher Text (kommt aus Mapping)
-        base_text = ui.get("party_text", "Wähle die maximale Teilnehmerzahl.")
-
-        # Optionaler Info-Block je Kategorie (vorne dran, immer gleich aufgebaut)
-        info_lines: list[str] = []
-
-        if cat == "muhhelfer":
+        if self.session.category == "muhhelfer":
             diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
             req = AKVK_SCHWER if self.session.difficulty == "schwer" else AKVK_NORMAL
-            info_lines.append(f"**Schwierigkeit:** {diff}")
-            info_lines.append(f"**Empfohlen mind. AK/VK:** {req}")
+            return discord.Embed(
+                title=f"{MUHKUH_EMOJI} Muhhelfer – Gruppengröße",
+                description=(
+                    f"Schwierigkeit: {diff}\n"
+                    f"Empfohlen mind. AK/VK: {req}\n\n"
+                    f"{_party_size_help_text(mn, mx)}"
+                ),
+            )
 
-        elif cat == "spots" and self.session.spot_key:
+        if self.session.category == "spots" and self.session.spot_key:
             spot = self.session.spot_key
-            req = SPOT_REQ.get(spot, "")
-            total = SPOT_TOTAL_AP.get(spot, "")
-            if req:
-                info_lines.append(f"**Empfohlen mind.:** {req}")
-            if total:
-                info_lines.append(f"**{total}**")
+            emoji = MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
+            return discord.Embed(
+                title=f"{emoji} {_spot_name(spot)} – Gruppengröße",
+                description=(
+                    f"• Empfohlen mind. {SPOT_REQ.get(spot, '')}\n"
+                    f"• {SPOT_TOTAL_AP.get(spot, '')}\n\n"
+                    f"{_party_size_help_text(mn, mx)}"
+                ),
+            )
 
-        # Beschreibung bauen (Info-Block + Leerzeile + Auswahltext)
-        desc = ""
-        if info_lines:
-            desc += "\n".join(info_lines) + "\n\n"
-        desc += base_text
+        if self.session.category == "pilafe":
+            return discord.Embed(
+                title=f"{PILAFE_EMOJI} Gruppensuche – Pila Fe",
+                description=_party_size_help_text(mn, mx),
+            )
 
-        return discord.Embed(
-            title=title,
-            description=desc,
-        )
+        return discord.Embed(title="Gruppengröße", description=_party_size_help_text(mn, mx))
+
 
 
 
