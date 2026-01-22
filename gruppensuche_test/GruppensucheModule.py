@@ -445,7 +445,7 @@ class DetailsModal(discord.ui.Modal):
 
 
         self.scroll_amount = discord.ui.TextInput(
-            label="Menge an Schriftrollen (nur Pila Fe)",
+            label="Menge an Schriftrollen",
             placeholder="z.B. 1000",
             required=is_pilafe and session.mode == "create",
             max_length=30,
@@ -608,10 +608,10 @@ class StartView(WizardBaseView):
             title=f"{MUHKUH_EMOJI} Gruppensuche erstellen",
             description=(
                 "Wähle, wofür du eine Gruppe suchst.\n\n"
-                "• Muhhelfer (LoML Bosse)\n"
-                "• Gruppenspots\n"
-                "• Pila Fe Schriftrollen\n\n"
-                "Nach der Auswahl kannst du Details wie Menge, Geplante Dauer und Startzeit angeben."
+                "• **Muhhelfer** (LoML Bosse)\n"
+                "• **Gruppenspots** (Mirumok / Gyfin)\n"
+                "• **Pila Fe** Schriftrollen\n\n"
+                "Nach der Auswahl kannst du Details wie **Menge**, **Geplante Dauer** und **Startzeit** angeben."
             ),
         )
 
@@ -1009,8 +1009,8 @@ class SpotSelectView(WizardBaseView):
             title=f"{CHEER_EMOJI} Gruppensuche – Mirumok / Gyfin",
             description=(
                 "Wähle den Spot, für den du eine Gruppe suchst.\n\n"
-                f"Mirumok\n• Empfohlen mind. {SPOT_REQ['mirumok']}\n• {SPOT_TOTAL_AP['mirumok']}\n\n"
-                f"Gyfin\n• Empfohlen mind. {SPOT_REQ['gyfin']}\n• {SPOT_TOTAL_AP['gyfin']}"
+                f"**Mirumok**\n• Empfohlen mind. {SPOT_REQ['mirumok']}\n• {SPOT_TOTAL_AP['mirumok']}\n\n"
+                f"**Gyfin**\n• Empfohlen mind. {SPOT_REQ['gyfin']}\n• {SPOT_TOTAL_AP['gyfin']}"
             ),
         )
 
