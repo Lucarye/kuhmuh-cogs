@@ -84,17 +84,6 @@ SPOT_PING_ROLE: Dict[str, int] = {
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
-def _emoji_for_ping_button(data: dict) -> str:
-    cat = str(data.get("category", ""))
-    if cat == "muhhelfer":
-        return MUHKUH_EMOJI
-    if cat == "spots":
-        spot = str(data.get("spot_key", ""))
-        return MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
-    if cat == "pilafe":
-        return PILAFE_EMOJI
-    return "🔔"
-
 def _format_remaining(seconds: int) -> str:
     seconds = int(seconds)
 
@@ -1989,25 +1978,15 @@ class GruppensucheTest(commands.Cog):
             label = f"Rollen-Ping ({'Schwer' if diff == 'schwer' else 'Normal'})"
         elif cat == "spots":
             spot = str(data.get("spot_key", ""))
-            label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping (Spot)"
+            label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping"
         elif cat == "pilafe":
             label = "Rollen-Ping (Pila Fe)"
 
-        emoji_str = _emoji_for_ping_button(data)
-
-        emoji_str = _emoji_for_ping_button(data)
-
         for item in view.children:
             if isinstance(item, discord.ui.Button) and str(item.custom_id or "").startswith("gst:pingtype:"):
-                item.label = f" {label}"
-                if emoji_str.startswith("<:") or emoji_str.startswith("<a:"):
-                    item.emoji = discord.PartialEmoji.from_str(emoji_str)
-                else:
-                    item.emoji = emoji_str
+                item.label = label
+                item.emoji = "🔔"
                 break
-
-
-
 
 
     # =========================
