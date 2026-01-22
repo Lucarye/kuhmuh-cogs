@@ -708,22 +708,33 @@ class DaySelectView(WizardBaseView):
         )
 
     def _add_day_buttons(self):
-        # 7 Tage: heute + 0..6
         self._day_buttons: Dict[str, discord.ui.Button] = {}
 
         today = _now_local().date()
+
+        # ✅ Heute vorauswählen (falls noch nichts gesetzt)
+        if not self.session.day_date_iso:
+            self.session.day_date_iso = today.isoformat()
+
         days = [today + dt.timedelta(days=i) for i in range(7)]
 
         for idx, day in enumerate(days):
             iso = day.isoformat()
-            label = _format_day(day)
 
-            # rows hübsch verteilen (max 5 pro row)
-            row = 0 if idx < 5 else 1
+            # Label: Heute ist länger
+            if idx == 0:
+                label = f"Heute ({day.day:02d}.{day.month:02d}.)"
+            else:
+                label = _format_day(day)
+
+            # Layout:
+            # Row 0: Heute + 2 weitere = 3 Buttons
+            # Row 1: Rest = 4 Buttons
+            row = 0 if idx <= 2 else 1
 
             btn = discord.ui.Button(
                 label=label,
-                style=discord.ButtonStyle.secondary,
+                style=discord.ButtonStyle.primary,  # 👈 standard: blau
                 row=row,
             )
 
@@ -732,27 +743,32 @@ class DaySelectView(WizardBaseView):
                     await interaction.response.defer()
                     return
 
-                # Tag setzen
+                # Auswahl setzen + Styles updaten
                 self.session.day_date_iso = iso_val
+                self._refresh_day_styles()
 
-                # Weiterflow abhängig vom Mode
                 if self.session.mode == "edit":
+                    # optional: sofort visuell updaten
+                    await interaction.response.edit_message(embed=self.embed(), view=self)
                     await self.cog._apply_edit_day(interaction, self.session)
                     return
 
-                # create -> nächster Step: Teilnehmerzahl
+                # create-mode: sofort visuell updaten, dann weiter
+                await interaction.response.edit_message(embed=self.embed(), view=self)
                 await self.cog._send_party_size(interaction, self.session)
 
             btn.callback = _cb
             self._day_buttons[iso] = btn
             self.add_item(btn)
 
+        # initial styles setzen (Heute = grün, Rest = blau)
         self._refresh_day_styles()
 
     def _refresh_day_styles(self):
         selected = str(self.session.day_date_iso or "")
         for iso, btn in self._day_buttons.items():
-            btn.style = discord.ButtonStyle.success if iso == selected else discord.ButtonStyle.secondary
+            # ✅ ausgewählter Tag grün, sonst blau
+            btn.style = discord.ButtonStyle.success if iso == selected else discord.ButtonStyle.primary
 
 
 class DifficultyView(WizardBaseView):
