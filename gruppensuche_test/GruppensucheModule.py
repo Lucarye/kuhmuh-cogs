@@ -707,6 +707,53 @@ class DaySelectView(WizardBaseView):
             ),
         )
 
+        def _add_day_buttons(self):
+        # 7 Tage: heute + 0..6
+        self._day_buttons: Dict[str, discord.ui.Button] = {}
+
+        today = _now_local().date()
+        days = [today + dt.timedelta(days=i) for i in range(7)]
+
+        for idx, day in enumerate(days):
+            iso = day.isoformat()
+            label = _format_day(day)
+
+            # rows hübsch verteilen (max 5 pro row)
+            row = 0 if idx < 5 else 1
+
+            btn = discord.ui.Button(
+                label=label,
+                style=discord.ButtonStyle.secondary,
+                row=row,
+            )
+
+            async def _cb(interaction: discord.Interaction, iso_val=iso):
+                if interaction.user.id != self.session.user_id:
+                    await interaction.response.defer()
+                    return
+
+                # Tag setzen
+                self.session.day_date_iso = iso_val
+
+                # Weiterflow abhängig vom Mode
+                if self.session.mode == "edit":
+                    await self.cog._apply_edit_day(interaction, self.session)
+                    return
+
+                # create -> nächster Step: Teilnehmerzahl
+                await self.cog._send_party_size(interaction, self.session)
+
+            btn.callback = _cb
+            self._day_buttons[iso] = btn
+            self.add_item(btn)
+
+        self._refresh_day_styles()
+
+    def _refresh_day_styles(self):
+        selected = str(self.session.day_date_iso or "")
+        for iso, btn in self._day_buttons.items():
+            btn.style = discord.ButtonStyle.success if iso == selected else discord.ButtonStyle.secondary
+
 
 class DifficultyView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
