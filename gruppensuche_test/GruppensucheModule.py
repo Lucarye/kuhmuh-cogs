@@ -1064,8 +1064,8 @@ class PartySizeView(WizardBaseView):
 
         if self.session.category == "pilafe":
             return discord.Embed(
-                title="👥 Pila Fe - Gruppengröße",
-                description="Wähle die maximale Teilnehmerzahl.",
+                title=f"{PILAFE_EMOJI} Gruppensuche – Pila Fe",
+                description="\n\nWähle die maximale Teilnehmerzahl 2-5",
             )
 
         return discord.Embed(title="Gruppengröße", description="Wähle die maximale Teilnehmerzahl.")
@@ -1968,22 +1968,32 @@ class GruppensucheTest(commands.Cog):
 
 
     async def _apply_dynamic_button_labels(self, view: discord.ui.View, data: dict):
-        label = "🔔 Rollen-Ping"
         cat = str(data.get("category", ""))
+
+        # Default
+        label = "Rollen-Ping"
+        emoji = "🔔"
 
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal"))
-            label = f"🔔 Rollen-Ping ({'Schwer' if diff == 'schwer' else 'Normal'})"
+            label = f"Rollen-Ping ({'Schwer' if diff == 'schwer' else 'Normal'})"
+            emoji = MUHKUH_EMOJI
+
         elif cat == "spots":
             spot = str(data.get("spot_key", ""))
-            label = f"🔔 Rollen-Ping ({_spot_name(spot)})" if spot else "🔔 Rollen-Ping (Spot)"
+            label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping (Spot)"
+            emoji = GYFIN_EMOJI if spot == "gyfin" else MIRUMOK_EMOJI
+
         elif cat == "pilafe":
-            label = "🔔 Rollen-Ping (Pila Fe)"
+            label = "Rollen-Ping (Pila Fe)"
+            emoji = PILAFE_EMOJI
 
         for item in view.children:
             if isinstance(item, discord.ui.Button) and str(item.custom_id or "").startswith("gst:pingtype:"):
                 item.label = label
+                item.emoji = emoji
                 break
+
 
 
     # =========================
