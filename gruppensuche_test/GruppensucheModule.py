@@ -161,6 +161,14 @@ def _party_size_help_text(min_n: int, max_n: int) -> str:
         f"Beispiel: **{max_n}** = du + **{max_n - 1}** weitere."
     )
 
+class BackTarget:
+    START = "start"          # Kategorieauswahl
+    DIFFICULTY = "difficulty"
+    SPOT = "spot"
+    BOSSES = "bosses"
+    DOUBLE = "double"
+    DAY = "day"
+    EDIT_MENU = "edit_menu"
 
 
 
@@ -173,6 +181,51 @@ BERLIN = ZoneInfo("Europe/Berlin")
 
 def _now_local() -> dt.datetime:
     return dt.datetime.now(BERLIN)
+
+from typing import Callable, Union, Any
+
+BackSpec = Union[
+    str,                                  # z.B. BackTarget.START
+    tuple[str, dict],                     # z.B. (BackTarget.DAY, {"back_target": BackTarget.SPOT})
+    Callable[["WizardSession"], Union[str, tuple[str, dict]]],  # dynamisch je nach Session
+]
+
+def build_back_button(
+    label: str,
+    target: BackSpec,
+    view: "WizardBaseView",
+    *,
+    row: int = 2,
+) -> discord.ui.Button:
+    btn = discord.ui.Button(
+        label=f"Zurück ({label})",
+        style=discord.ButtonStyle.secondary,
+        row=row,
+    )
+
+    async def _cb(interaction: discord.Interaction):
+        if interaction.user.id != view.session.user_id:
+            await interaction.response.defer()
+            return
+
+        # --- target auflösen (statisch / tuple / callable) ---
+        spec: Any = target(view.session) if callable(target) else target
+
+        if isinstance(spec, tuple):
+            resolved_target, kwargs = spec
+            kwargs = dict(kwargs or {})
+        else:
+            resolved_target, kwargs = spec, {}
+
+        # --- Edit-Mode: Back IMMER ins Edit-Menü (keine Mischlogik mehr) ---
+        if view.session.mode == "edit":
+            resolved_target = BackTarget.EDIT_MENU
+            kwargs = {}
+
+        await view.cog._go_back(interaction, view.session, resolved_target, **kwargs)
+
+    btn.callback = _cb
+    return btn
 
 
 
@@ -617,67 +670,82 @@ class StartView(WizardBaseView):
 
 
 class DaySelectView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, back_to: str):
+    def __init__(self, cog: "GruppensucheTest", session: WizardSession, back_target: str):
         super().__init__(cog, session)
-        self.back_to = back_to
+        self.back_target = back_target
 
         self._add_day_buttons()
 
-        back_btn = discord.ui.Button(label="Zurück", style=discord.ButtonStyle.secondary, row=3)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
+        label_map = {
+            BackTarget.START: "Kategorie",
+            BackTarget.DIFFICULTY: "Schwierigkeit",
+            BackTarget.BOSSES: "Bosse",
+            BackTarget.SPOT: "Spot",
+            BackTarget.DOUBLE: "Doppelrun",
+            BackTarget.EDIT_MENU: "Bearbeiten",
+        }
+        back_label = label_map.get(self.back_target, "Zurück")
+        self.add_item(build_back_button(back_label, self.back_target, self))
 
     def _add_day_buttons(self):
         today = _now_local().date()
-        for i in range(7):
-            d = today + dt.timedelta(days=i)
-            label = "Heute" if i == 0 else _format_day(d)
-            if i == 0:
-                label = f"Heute ({_format_day(d)})"
-            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.primary, row=0 if i < 3 else 1)
-            btn.callback = self._make_day_cb(d)
+        days = [today + dt.timedelta(days=i) for i in range(0, 7)]  # heute..+6 => 7 Tage
+
+        for idx, d in enumerate(days):
+            row = 0 if idx < 4 else 1  # 4 oben, 3 unten
+            label = _format_day(d)
+
+            btn = discord.ui.Button(
+                label=label,
+                style=discord.ButtonStyle.primary,
+                row=row,
+            )
+
+            async def _cb(interaction: discord.Interaction, day=d):
+                if interaction.user.id != self.session.user_id:
+                    await interaction.response.defer()
+                    return
+
+                self.session.day_date_iso = day.isoformat()
+
+                # ✅ Edit vs Create sauber trennen
+                if self.session.mode == "edit":
+                    await self.cog._apply_edit_day(interaction, self.session)
+                    return
+
+                # ✅ Create Flow: danach Gruppengröße
+                await self.cog._send_party_size(interaction, self.session)
+
+            btn.callback = _cb
             self.add_item(btn)
 
-    def _make_day_cb(self, d: dt.date):
-        async def _cb(interaction: discord.Interaction):
+        # Optional: Custom Date (Modal)
+        custom_btn = discord.ui.Button(
+            label="📅 Anderes Datum…",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+        )
+
+        async def _custom_cb(interaction: discord.Interaction):
             if interaction.user.id != self.session.user_id:
                 await interaction.response.defer()
                 return
-            self.session.day_date_iso = d.isoformat()
 
-            if self.session.mode == "create":
-                # Nach Datum geht es jetzt weiter zu PartySize (für Muhhelfer/Spots)
-                # bzw. für PilaFe bleibt es auch PartySize (passt)
-                await self.cog._send_party_size(interaction, self.session)
-                return
-            
-            await self.cog._apply_edit_day(interaction, self.session)
+            async def _done(i: discord.Interaction, d: dt.date):
+                self.session.day_date_iso = d.isoformat()
 
-        return _cb
+                if self.session.mode == "edit":
+                    await self.cog._apply_edit_day(i, self.session)
+                    return
+                await self.cog._send_party_size(i, self.session)
 
-    async def _back(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
+            try:
+                await interaction.response.send_modal(CustomDateModal("Datum auswählen", _done))
+            except discord.InteractionResponded:
+                await interaction.followup.send_modal(CustomDateModal("Datum auswählen", _done))
 
-        if self.session.mode == "edit":
-            await self.cog._send_edit_menu(interaction, self.session)
-            return
-
-        if self.back_to == "bosses":
-            if self.session.category == "muhhelfer":
-                await self.cog._send_boss_select(interaction, self.session)
-                return
-
-        if self.back_to == "spot":
-            if self.session.category == "spots":
-                await self.cog._send_spot_select(interaction, self.session)
-                return
-
-        # default
-        await self.cog._send_start(interaction, self.session)
-
-
+        custom_btn.callback = _custom_cb
+        self.add_item(custom_btn)
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
@@ -687,10 +755,6 @@ class DaySelectView(WizardBaseView):
                 "Du kannst bis zu **7 Tage im Voraus** planen."
             ),
         )
-
-
-
-
 
 class DifficultyView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
@@ -703,9 +767,8 @@ class DifficultyView(WizardBaseView):
         self.add_item(normal_btn)
         self.add_item(schwer_btn)
 
-        back_btn = discord.ui.Button(label="Zurück", style=discord.ButtonStyle.secondary, row=1)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
+        # ✅ Einheitlich: Back über build_back_button
+        self.add_item(build_back_button("Kategorie", BackTarget.START, self, row=1))
 
     async def _pick_normal(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -721,12 +784,6 @@ class DifficultyView(WizardBaseView):
         self.session.difficulty = "schwer"
         await self.cog._send_boss_select(interaction, self.session)
 
-    async def _back(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
-        await self.cog._send_day_selection(interaction, self.session, back_to="start")
-
     def embed(self) -> discord.Embed:
         return discord.Embed(
             title=f"{MUHKUH_EMOJI} Muhhelfer – Schwierigkeit",
@@ -736,6 +793,7 @@ class DifficultyView(WizardBaseView):
                 f"Schwer → Empfohlen mind. AK/VK {AKVK_SCHWER}"
             ),
         )
+
 
 
 class BossSelectView(WizardBaseView):
@@ -751,12 +809,14 @@ class BossSelectView(WizardBaseView):
             self._boss_buttons[key] = btn
             self.add_item(btn)
 
-        back_btn = discord.ui.Button(label="Zurück", style=discord.ButtonStyle.secondary, row=2)
+        # ✅ Einheitlich: Back über build_back_button
+        self.add_item(build_back_button("Schwierigkeit", BackTarget.DIFFICULTY, self, row=2))
+
         next_btn = discord.ui.Button(label="Weiter", style=discord.ButtonStyle.success, row=2)
-        back_btn.callback = self._back
         next_btn.callback = self._next
-        self.add_item(back_btn)
         self.add_item(next_btn)
+
+
 
         self._refresh_styles()
 
@@ -791,16 +851,6 @@ class BossSelectView(WizardBaseView):
 
         return _cb
 
-    async def _back(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
-
-        if self.session.mode == "edit":
-            await self.cog._send_edit_menu(interaction, self.session)
-            return
-
-        await self.cog._send_difficulty(interaction, self.session)
 
     async def _next(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -834,7 +884,7 @@ class BossSelectView(WizardBaseView):
 
         # CREATE-MODE (wie gehabt)
         if total >= 5:
-            await self.cog._send_day_selection(interaction, self.session, back_to="bosses")
+            await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.BOSSES)
             return
 
         await self.cog._send_double_run(interaction, self.session)
@@ -878,13 +928,14 @@ class DoubleRunView(WizardBaseView):
             self._dr_buttons[key] = btn
             self.add_item(btn)
 
-        back_btn = discord.ui.Button(label="Zurück", style=discord.ButtonStyle.secondary, row=2)
+        # ✅ Einheitlich: Back über build_back_button
+        self.add_item(build_back_button("Bosse", BackTarget.BOSSES, self, row=2))
+
         next_label = "Speichern" if session.mode == "edit" else "Weiter"
         next_btn = discord.ui.Button(label=next_label, style=discord.ButtonStyle.success, row=2)
-        back_btn.callback = self._back
         next_btn.callback = self._next
-        self.add_item(back_btn)
         self.add_item(next_btn)
+
 
         self._refresh_styles()
 
@@ -918,12 +969,6 @@ class DoubleRunView(WizardBaseView):
 
         return _cb
 
-    async def _back(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
-        await self.cog._send_boss_select(interaction, self.session)
-
     async def _next(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
@@ -933,7 +978,7 @@ class DoubleRunView(WizardBaseView):
             await self.cog._apply_edit_bosses(interaction, self.session)
             return
 
-        await self.cog._send_day_selection(interaction, self.session, back_to="bosses")
+        await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.DOUBLE)
 
 
     def embed(self) -> discord.Embed:
@@ -978,31 +1023,22 @@ class SpotSelectView(WizardBaseView):
         self.add_item(miru_btn)
         self.add_item(gyfin_btn)
 
-        back_btn = discord.ui.Button(label="Zurück", style=discord.ButtonStyle.secondary, row=1)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
+        # ✅ Einheitlich: Back über build_back_button
+        self.add_item(build_back_button("Kategorie", BackTarget.START, self, row=1))
 
     async def _pick_miru(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
         self.session.spot_key = "mirumok"
-        await self.cog._send_day_selection(interaction, self.session, back_to="spot")
-
+        await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.SPOT)
 
     async def _pick_gyfin(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
         self.session.spot_key = "gyfin"
-        await self.cog._send_day_selection(interaction, self.session, back_to="spot")
-
-
-    async def _back(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
-        await self.cog._send_day_selection(interaction, self.session, back_to="start")
+        await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.SPOT)
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
@@ -1013,6 +1049,7 @@ class SpotSelectView(WizardBaseView):
                 f"**Gyfin**\n• Empfohlen mind. {SPOT_REQ['gyfin']}\n• {SPOT_TOTAL_AP['gyfin']}"
             ),
         )
+
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -1043,47 +1080,27 @@ class PartySizeSelect(discord.ui.Select):
 
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
 
-
 class PartySizeView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession, current: Optional[int] = None):
         super().__init__(cog, session)
 
         mn, mx = _allowed_party_range(session.category or "")
-
-        # ✅ Admin-only: 1 Teilnehmer als Testoption
-        guild = cog.bot.get_guild(session.guild_id)
-        member = guild.get_member(session.user_id) if guild else None
-        if member and _is_admin_only(member):
-            mn = 1
-
         self.add_item(PartySizeSelect(self, mn, mx, current=current))
 
+        # Zurück-Ziel hängt an der Kategorie / dem Flow
+        def _party_back_spec(s: WizardSession):
+            if s.category == "spots":
+                return (BackTarget.DAY, {"back_target": BackTarget.SPOT})
 
-        back_btn = discord.ui.Button(label="Zurück", style=discord.ButtonStyle.secondary, row=1)
-        back_btn.callback = self._back
-        self.add_item(back_btn)
+            if s.category == "pilafe":
+                return (BackTarget.DAY, {"back_target": BackTarget.START})
 
-    async def _back(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
+            # muhhelfer:
+            total = _sum_runs(s.boss_runs)
+            prev = BackTarget.BOSSES if total >= 5 else BackTarget.DOUBLE
+            return (BackTarget.DAY, {"back_target": prev})
 
-        if self.session.mode == "edit":
-            await self.cog._send_edit_menu(interaction, self.session)
-            return
-
-        if self.session.category == "spots":
-            await self.cog._send_spot_select(interaction, self.session)
-            return
-
-        if self.session.category == "muhhelfer":
-            if _sum_runs(self.session.boss_runs) >= 5:
-                await self.cog._send_boss_select(interaction, self.session)
-                return
-            await self.cog._send_double_run(interaction, self.session)
-            return
-
-        await self.cog._send_day_selection(interaction, self.session, back_to="start")
+        self.add_item(build_back_button("Tag", _party_back_spec, self, row=1))
 
     def embed(self) -> discord.Embed:
         mn, mx = _allowed_party_range(self.session.category or "")
@@ -1120,12 +1137,10 @@ class PartySizeView(WizardBaseView):
 
         return discord.Embed(title="Gruppengröße", description=_party_size_help_text(mn, mx))
 
-
-
-
 # =========================
 # Edit Menu (ephemeral)
 # =========================
+
 
 class EditMenuView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession, post_data: dict):
@@ -1157,7 +1172,8 @@ class EditMenuView(WizardBaseView):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
-        await self.cog._send_day_selection(interaction, self.session, back_to="edit_menu")
+        await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.EDIT_MENU)
+
 
     async def _size(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -1198,7 +1214,6 @@ class EditMenuView(WizardBaseView):
                 "Wenn du etwas anderes suchst, starte bitte eine neue Gruppensuche."
             ),
         )
-
 
 # =========================
 # Persistent Public Views
@@ -1491,6 +1506,39 @@ class GruppensucheTest(commands.Cog):
         if user_id in self._sessions:
             del self._sessions[user_id]
 
+    async def _go_back(
+        self,
+        interaction: discord.Interaction,
+        session: WizardSession,
+        target: str,
+        **kwargs,
+    ):
+        if target == BackTarget.START:
+            await self._send_start(interaction, session)
+
+        elif target == BackTarget.DIFFICULTY:
+            await self._send_difficulty(interaction, session)
+
+        elif target == BackTarget.SPOT:
+            await self._send_spot_select(interaction, session)
+
+        elif target == BackTarget.BOSSES:
+            await self._send_boss_select(interaction, session)
+
+        elif target == BackTarget.DOUBLE:
+            await self._send_double_run(interaction, session)
+
+        elif target == BackTarget.DAY:
+            # back_target für die Zurück-Schaltfläche im DaySelectView
+            back_target = str(kwargs.get("back_target") or BackTarget.START)
+            await self._send_day_selection(interaction, session, back_target=back_target)
+
+        elif target == BackTarget.EDIT_MENU:
+            await self._send_edit_menu(interaction, session)
+
+    
+
+
     # =========================
     # Command (Test)
     # =========================
@@ -1522,9 +1570,11 @@ class GruppensucheTest(commands.Cog):
         view = StartView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
-    async def _send_day_selection(self, interaction: discord.Interaction, session: WizardSession, back_to: str):
-        view = DaySelectView(self, session, back_to=back_to)
+    async def _send_day_selection(self, interaction: discord.Interaction, session: WizardSession, back_target: str):
+        view = DaySelectView(self, session, back_target=back_target)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
+
+
 
     async def _send_category_specific(self, interaction: discord.Interaction, session: WizardSession):
         if session.category == "muhhelfer":
@@ -1534,8 +1584,9 @@ class GruppensucheTest(commands.Cog):
             await self._send_spot_select(interaction, session)
             return
         if session.category == "pilafe":
-            await self._send_day_selection(interaction, session, back_to="start")
+            await self._send_day_selection(interaction, session, back_target=BackTarget.START)
             return
+
         await interaction.response.edit_message(
             content="Ungültige Auswahl. Bitte neu starten.",
             embed=None,
@@ -1569,8 +1620,9 @@ class GruppensucheTest(commands.Cog):
 
         # CREATE: wenn voll, weiter zum nächsten Step
         if total >= 5:
-            await self._send_party_size(interaction, session)
+            await self._send_day_selection(interaction, session, back_target=BackTarget.BOSSES)
             return
+
 
         view = DoubleRunView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
