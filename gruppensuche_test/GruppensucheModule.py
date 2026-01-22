@@ -29,6 +29,7 @@ ROLE_GYFIN_ID = 1459832490603708590
 
 ROLE_PILAFE_ID = 1458832343149318269
 ROLE_ALTAR_ID = 1459833455369130140
+ROLE_ATORAXXION_ID = 1463872163516911808
 
 ADMIN_ROLE_ID: Optional[int] = 1452050940952838214
 OFFIZIER_ROLE_ID: Optional[int] = 1198652039312453723
@@ -78,6 +79,19 @@ SPOT_PING_ROLE: Dict[str, int] = {
     "mirumok": ROLE_MIRUMOK_ID,
     "gyfin": ROLE_GYFIN_ID,
 }
+
+# =========================
+# Feature Flags
+# =========================
+FEATURE_SPOTS_GYFIN = True          # (falls du mal einzelne Spots togglen willst)
+FEATURE_SPOTS_MIRUMOK = True
+
+FEATURE_ALTAR = False              # <- vorbereitet, aber nicht im Menü
+FEATURE_ATORAXXION = False         # <- vorbereitet, aber nicht im Menü
+
+FEATURE_POST_IN_CURRENT_CHANNEL = True  # statt TEST_CHANNEL_ID
+
+
 # =========================
 # Wizard UI Schema (global)
 # =========================
@@ -178,6 +192,17 @@ class BackTarget:
     BOSSES = "bosses"
     DOUBLE = "double"
     DAY = "day"
+    EDIT_MENU = "edit_menu"
+
+class Step:
+    START = "start"
+    DIFFICULTY = "difficulty"
+    BOSSES = "bosses"
+    DOUBLE = "double"
+    SPOT = "spot"
+    DAY = "day"
+    PARTY = "party"
+    DETAILS = "details"
     EDIT_MENU = "edit_menu"
 
 
@@ -642,24 +667,65 @@ class WizardBaseView(discord.ui.View):
 class StartSelect(discord.ui.Select):
     def __init__(self, host_view: "StartView"):
         options = [
-            discord.SelectOption(label="Muhhelfer (LoML Bosse)",
-                                 value="muhhelfer", emoji=MUHKUH_EMOJI),
             discord.SelectOption(
-                label="Gruppenspots (Mirumok / Gyfin)", value="spots", emoji=CHEER_EMOJI),
-            discord.SelectOption(label="Pila Fe Schriftrollen",
-                                 value="pilafe", emoji=PILAFE_EMOJI),
+                label="Muhhelfer (LoML Bosse)",
+                value="muhhelfer",
+                emoji=MUHKUH_EMOJI,
+            ),
+            discord.SelectOption(
+                label="Gruppenspots (Mirumok / Gyfin)",
+                value="spots",
+                emoji=CHEER_EMOJI,
+            ),
+            discord.SelectOption(
+                label="Pila Fe Schriftrollen",
+                value="pilafe",
+                emoji=PILAFE_EMOJI,
+            ),
         ]
-        super().__init__(placeholder="Wähle eine Kategorie...",
-                         min_values=1, max_values=1, options=options)
+
+        if FEATURE_ALTAR:
+            options.append(discord.SelectOption(
+                label="Altar des Blutes (Tower Defense)",
+                value="altar",
+                emoji="🩸",
+            ))
+
+        if FEATURE_ATORAXXION:
+            options.append(discord.SelectOption(
+                label="Atoraxxion (Dungeon)",
+                value="atoraxxion",
+                emoji="🏛️",
+            ))
+
+        super().__init__(
+            placeholder="Wähle eine Kategorie...",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
         self.host_view = host_view
 
     async def callback(self, interaction: discord.Interaction):
+        # nur der Ersteller darf bedienen
         if interaction.user.id != self.host_view.session.user_id:
             await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
             return
 
-        self.host_view.session.category = self.values[0]
-        await self.host_view.cog._send_category_specific(interaction, self.host_view.session)
+        picked = str(self.values[0])
+        self.host_view.session.category = picked
+
+        # optional: Felder resetten, wenn Kategorie gewechselt wird
+        self.host_view.session.difficulty = None
+        self.host_view.session.boss_runs = {}
+        self.host_view.session.spot_key = None
+        self.host_view.session.scroll_amount = None
+        self.host_view.session.day_date_iso = None
+        self.host_view.session.max_players = None
+
+        # und weiter im Flow (zentraler Router)
+        await self.host_view.cog._goto_next(interaction, self.host_view.session, Step.START)
+
 
 
 class StartView(WizardBaseView):
@@ -674,8 +740,10 @@ class StartView(WizardBaseView):
                 "Wähle, wofür du eine Gruppe suchst.\n\n"
                 "• **Muhhelfer** (LoML Bosse)\n"
                 "• **Gruppenspots** (Mirumok / Gyfin)\n"
-                "• **Pila Fe** Schriftrollen\n\n"
-                "Nach der Auswahl kannst du Details wie **Menge**, **Geplante Dauer** und **Startzeit** angeben."
+                "• **Pila Fe** Schriftrollen\n"
+                ("• **Altar des Blutes**\n" if FEATURE_ALTAR else "")
+                ("• **Atoraxxion**\n" if FEATURE_ATORAXXION else "")
+                "\nNach der Auswahl kannst du Details wie **Menge**, **Geplante Dauer** und **Startzeit** angeben."
             ),
         )
 
@@ -1533,35 +1601,31 @@ class GruppensucheTest(commands.Cog):
         if user_id in self._sessions:
             del self._sessions[user_id]
 
-    async def _go_back(
-        self,
-        interaction: discord.Interaction,
-        session: WizardSession,
-        target: str,
-        **kwargs,
-    ):
+    async def _go_back(self, interaction: discord.Interaction, session: WizardSession, target: str, **kwargs):
+        # Edit-Mode Back bleibt wie bei euch über build_back_button geregelt.
         if target == BackTarget.START:
-            await self._send_start(interaction, session)
-
-        elif target == BackTarget.DIFFICULTY:
-            await self._send_difficulty(interaction, session)
-
-        elif target == BackTarget.SPOT:
-            await self._send_spot_select(interaction, session)
-
-        elif target == BackTarget.BOSSES:
-            await self._send_boss_select(interaction, session)
-
-        elif target == BackTarget.DOUBLE:
-            await self._send_double_run(interaction, session)
-
-        elif target == BackTarget.DAY:
-            # back_target für die Zurück-Schaltfläche im DaySelectView
+            await self._send_step(interaction, session, Step.START)
+            return
+        if target == BackTarget.DIFFICULTY:
+            await self._send_step(interaction, session, Step.DIFFICULTY)
+            return
+        if target == BackTarget.SPOT:
+            await self._send_step(interaction, session, Step.SPOT)
+            return
+        if target == BackTarget.BOSSES:
+            await self._send_step(interaction, session, Step.BOSSES)
+            return
+        if target == BackTarget.DOUBLE:
+            await self._send_step(interaction, session, Step.DOUBLE)
+            return
+        if target == BackTarget.DAY:
             back_target = str(kwargs.get("back_target") or BackTarget.START)
-            await self._send_day_selection(interaction, session, back_target=back_target)
+            await self._send_step(interaction, session, Step.DAY, back_target=back_target)
+            return
+        if target == BackTarget.EDIT_MENU:
+            await self._send_step(interaction, session, Step.EDIT_MENU)
+            return
 
-        elif target == BackTarget.EDIT_MENU:
-            await self._send_edit_menu(interaction, session)
 
     # =========================
     # Command (Test)
@@ -1587,6 +1651,154 @@ class GruppensucheTest(commands.Cog):
     # =========================
     # Wizard Senders
     # =========================
+
+    async def _send_step(self, interaction: discord.Interaction, session: WizardSession, step: str, **kwargs):
+        """
+        Zentrale Render-Funktion für Wizard-Steps.
+        kwargs sind nur für spezielle Steps (z.B. back_target bei DAY).
+        """
+        if step == Step.START:
+            await self._send_start(interaction, session)
+            return
+
+        if step == Step.DIFFICULTY:
+            await self._send_difficulty(interaction, session)
+            return
+
+        if step == Step.BOSSES:
+            await self._send_boss_select(interaction, session)
+            return
+
+        if step == Step.DOUBLE:
+            await self._send_double_run(interaction, session)
+            return
+
+        if step == Step.SPOT:
+            await self._send_spot_select(interaction, session)
+            return
+
+        if step == Step.DAY:
+            # DAY braucht back_target, damit "Zurück(...)" richtig ist.
+            back_target = str(kwargs.get("back_target") or BackTarget.START)
+            await self._send_day_selection(interaction, session, back_target=back_target)
+            return
+
+        if step == Step.PARTY:
+            await self._send_party_size(interaction, session)
+            return
+
+        if step == Step.DETAILS:
+            await self._send_final_form(interaction, session)
+            return
+
+        if step == Step.EDIT_MENU:
+            await self._send_edit_menu(interaction, session)
+            return
+
+        # Fallback
+        await interaction.followup.send("Unbekannter Step.", ephemeral=True)
+
+    def _resolve_back_target_for_day(self, session: WizardSession) -> str:
+        """
+        Wenn wir DAY anzeigen: Wohin zeigt der Zurück-Button?
+        Das hängt von Kategorie / Flow ab.
+        """
+        if session.mode == "edit":
+            return BackTarget.EDIT_MENU
+
+        if session.category == "spots":
+            return BackTarget.SPOT
+
+        if session.category == "pilafe":
+            return BackTarget.START
+
+        # muhhelfer:
+        total = _sum_runs(session.boss_runs)
+        prev = BackTarget.BOSSES if total >= 5 else BackTarget.DOUBLE
+        return prev
+
+    def _resolve_next_step(self, session: WizardSession, current_step: str) -> str:
+        """
+        Zentrale Next-Entscheidung.
+        Gibt den nächsten Step zurück.
+        """
+        # Edit-Mode: “Back-Regel” bleibt separat (über build_back_button). Next-Flow bleibt hier zentral steuerbar.
+        cat = session.category or ""
+
+        # -------- START --------
+        if current_step == Step.START:
+            if cat == "muhhelfer":
+                return Step.DIFFICULTY
+            if cat == "spots":
+                return Step.SPOT
+            if cat == "pilafe":
+                return Step.DAY
+            return Step.START
+
+        # -------- MUHHELFER --------
+        if cat == "muhhelfer":
+            if current_step == Step.DIFFICULTY:
+                return Step.BOSSES
+
+            if current_step == Step.BOSSES:
+                # Im BossStep entscheidet ihr: bei voll -> DAY, sonst DOUBLE
+                total = _sum_runs(session.boss_runs)
+                if session.mode == "edit":
+                    # Edit: Wenn Doppelruns existieren, muss man in DOUBLE rein (zum Abwählen)
+                    has_double = any(int(v) >= 2 for v in session.boss_runs.values())
+                    if has_double:
+                        return Step.DOUBLE
+                    # Wenn voll und keine Doppelruns: direkt speichern (das macht euer BossStep aktuell)
+                    # Router-seitig geben wir DOUBLE zurück, aber du kannst auch BOSSES->EDIT_MENU machen,
+                    # wenn du es komplett zentral willst. Für minimal-invasive behalten wir eure BossStep-Logik.
+                    return Step.DOUBLE
+
+                if total >= 5:
+                    return Step.DAY
+                return Step.DOUBLE
+
+            if current_step == Step.DOUBLE:
+                # Create: danach DAY; Edit: danach speichern (macht _apply_edit_bosses im View)
+                return Step.DAY if session.mode == "create" else Step.EDIT_MENU
+
+            if current_step == Step.DAY:
+                return Step.PARTY
+
+            if current_step == Step.PARTY:
+                return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
+
+        # -------- SPOTS --------
+        if cat == "spots":
+            if current_step == Step.SPOT:
+                return Step.DAY
+            if current_step == Step.DAY:
+                return Step.PARTY
+            if current_step == Step.PARTY:
+                return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
+
+        # -------- PILAFE --------
+        if cat == "pilafe":
+            if current_step == Step.DAY:
+                return Step.PARTY
+            if current_step == Step.PARTY:
+                return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
+
+        # Fallback
+        return Step.START
+
+    async def _goto_next(self, interaction: discord.Interaction, session: WizardSession, current_step: str):
+        """
+        Zentraler Übergang zum nächsten Step.
+        """
+        next_step = self._resolve_next_step(session, current_step)
+
+        # Spezielle Schritte brauchen Zusatzinfo (DAY back_target)
+        if next_step == Step.DAY:
+            back_target = self._resolve_back_target_for_day(session)
+            await self._send_step(interaction, session, Step.DAY, back_target=back_target)
+            return
+
+        await self._send_step(interaction, session, next_step)
 
     async def _send_start(self, interaction: discord.Interaction, session: WizardSession):
         view = StartView(self, session)
@@ -2121,10 +2333,30 @@ class GruppensucheTest(commands.Cog):
             await interaction.response.send_message("Nur auf einem Server nutzbar.", ephemeral=True)
             return
 
-        channel = guild.get_channel(TEST_CHANNEL_ID)
-        if not isinstance(channel, discord.TextChannel):
-            await interaction.response.send_message("Zielchannel nicht gefunden.", ephemeral=True)
+        channel: Optional[discord.TextChannel] = None
+
+        if FEATURE_POST_IN_CURRENT_CHANNEL:
+            # bevorzugt dort posten, wo der Slash Command / Wizard gestartet wurde
+            if isinstance(interaction.channel, discord.TextChannel):
+                channel = interaction.channel
+        else:
+            # fallback: alter Test-Channel Modus
+            ch = guild.get_channel(TEST_CHANNEL_ID)
+            if isinstance(ch, discord.TextChannel):
+                channel = ch
+
+        if channel is None:
+            # letzter Fallback: Systemchannel, falls vorhanden
+            if isinstance(guild.system_channel, discord.TextChannel):
+                channel = guild.system_channel
+
+        if channel is None:
+            await interaction.response.send_message(
+                "Ich konnte keinen Ziel-Textchannel bestimmen (kein Zugriff / falscher Channel-Typ).",
+                ephemeral=True,
+            )
             return
+
 
         day_iso = session.day_date_iso or _now_local().date().isoformat()
         max_players = int(session.max_players or 2)
