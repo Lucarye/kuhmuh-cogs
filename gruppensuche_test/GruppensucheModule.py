@@ -707,7 +707,7 @@ class DaySelectView(WizardBaseView):
             ),
         )
 
-        def _add_day_buttons(self):
+    def _add_day_buttons(self):
         # 7 Tage: heute + 0..6
         self._day_buttons: Dict[str, discord.ui.Button] = {}
 
