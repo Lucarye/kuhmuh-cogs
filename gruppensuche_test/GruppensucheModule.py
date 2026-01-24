@@ -2897,9 +2897,10 @@ class GruppensucheTest(commands.Cog):
 
         # ✅ Reminder reset, weil Tag geändert wurde
         rem = data.get("reminders")
-        if isinstance(rem, dict):
-            rem.pop("start_30m", None)
-            data["reminders"] = rem
+        if not isinstance(rem, dict):
+            rem = {}
+        rem.pop("start_30m", None)
+        data["reminders"] = rem
 
         await self._save_refresh_dispatch(data)
 
@@ -2977,10 +2978,10 @@ class GruppensucheTest(commands.Cog):
         # ✅ Reminder reset, wenn Startzeit (oder optional Tag) geändert wurde
         if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day):
             rem = data.get("reminders")
-            if isinstance(rem, dict):
-                rem.pop("start_30m", None)
-                data["reminders"] = rem
-
+            if not isinstance(rem, dict):
+                rem = {}
+            rem.pop("start_30m", None)
+            data["reminders"] = rem
 
         await self._save_refresh_dispatch(data)
 
