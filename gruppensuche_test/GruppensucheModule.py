@@ -2,16 +2,16 @@ from __future__ import annotations
 import re
 from typing import Callable, Union, Any
 from zoneinfo import ZoneInfo
-from discord import app_commands
+from discord import app_commands # pyright: ignore[reportMissingImports]
 
 import asyncio
 import datetime as dt
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-from discord import PartialEmoji
+from discord import PartialEmoji # pyright: ignore[reportMissingImports]
 
-import discord
-from redbot.core import commands, Config
+import discord # pyright: ignore[reportMissingImports]
+from redbot.core import commands, Config # pyright: ignore[reportMissingImports]
 
 
 # =========================
@@ -749,9 +749,11 @@ class StartView(WizardBaseView):
 
 
 class DaySelectView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, back_target: str):
+    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
-        self.back_target = back_target
+
+        # ✅ BackTarget wird IMMER zentral berechnet
+        self.back_target = cog._resolve_back_target_for_day(session)
 
         self._add_day_buttons()
 
@@ -765,6 +767,7 @@ class DaySelectView(WizardBaseView):
         }
         back_label = label_map.get(self.back_target, "Zurück")
         self.add_item(build_back_button(back_label, self.back_target, self))
+
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
@@ -823,7 +826,8 @@ class DaySelectView(WizardBaseView):
 
                 # create-mode: sofort visuell updaten, dann weiter
                 await interaction.response.edit_message(embed=self.embed(), view=self)
-                await self.cog._send_party_size(interaction, self.session)
+                await self.cog._goto_next(interaction, self.session, Step.DAY)
+
 
             btn.callback = _cb
             self._day_buttons[iso] = btn
@@ -852,7 +856,6 @@ class DifficultyView(WizardBaseView):
         self.add_item(normal_btn)
         self.add_item(schwer_btn)
 
-        # ✅ Einheitlich: Back über build_back_button
         self.add_item(build_back_button(
             "Kategorie", BackTarget.START, self, row=1))
 
@@ -861,14 +864,14 @@ class DifficultyView(WizardBaseView):
             await interaction.response.defer()
             return
         self.session.difficulty = "normal"
-        await self.cog._send_boss_select(interaction, self.session)
+        await self.cog._goto_next(interaction, self.session, Step.DIFFICULTY)
 
     async def _pick_schwer(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
         self.session.difficulty = "schwer"
-        await self.cog._send_boss_select(interaction, self.session)
+        await self.cog._goto_next(interaction, self.session, Step.DIFFICULTY)
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
@@ -895,9 +898,7 @@ class BossSelectView(WizardBaseView):
             self._boss_buttons[key] = btn
             self.add_item(btn)
 
-        # ✅ Einheitlich: Back über build_back_button
-        self.add_item(build_back_button("Schwierigkeit",
-                      BackTarget.DIFFICULTY, self, row=2))
+        self.add_item(build_back_button("Schwierigkeit", BackTarget.DIFFICULTY, self, row=2))
 
         next_btn = discord.ui.Button(
             label="Weiter", style=discord.ButtonStyle.success, row=2)
@@ -950,29 +951,24 @@ class BossSelectView(WizardBaseView):
         has_double = any(int(v) >= 2 for v in self.session.boss_runs.values())
 
         # EDIT-MODE:
-        # Wenn bereits Doppelruns existieren, muss der User IMMER die Doppelrun-Ansicht sehen,
-        # damit er sie ggf. wieder abwählen kann - auch bei 5/5.
+        # - Wenn Doppelruns existieren: IMMER DOUBLE anzeigen (zum Abwählen)
+        # - Wenn 5/5 und keine Doppelruns: direkt speichern
+        # - Sonst: DOUBLE anzeigen
         if self.session.mode == "edit":
             if has_double:
                 await self.cog._send_double_run(interaction, self.session)
                 return
 
-            # keine Doppelruns gesetzt:
-            # wenn voll, können wir direkt speichern
             if total >= 5:
                 await self.cog._apply_edit_bosses(interaction, self.session)
                 return
 
-            # sonst optional Doppelruns anbieten
             await self.cog._send_double_run(interaction, self.session)
             return
 
-        # CREATE-MODE (wie gehabt)
-        if total >= 5:
-            await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.BOSSES)
-            return
+        # ✅ CREATE-MODE: ab hier nur noch Router
+        await self.cog._goto_next(interaction, self.session, Step.BOSSES)
 
-        await self.cog._send_double_run(interaction, self.session)
 
     def embed(self) -> discord.Embed:
         diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
@@ -1012,13 +1008,10 @@ class DoubleRunView(WizardBaseView):
             self._dr_buttons[key] = btn
             self.add_item(btn)
 
-        # ✅ Einheitlich: Back über build_back_button
-        self.add_item(build_back_button(
-            "Bosse", BackTarget.BOSSES, self, row=2))
+        self.add_item(build_back_button("Bosse", BackTarget.BOSSES, self, row=2))
 
         next_label = "Speichern" if session.mode == "edit" else "Weiter"
-        next_btn = discord.ui.Button(
-            label=next_label, style=discord.ButtonStyle.success, row=2)
+        next_btn = discord.ui.Button(label=next_label, style=discord.ButtonStyle.success, row=2)
         next_btn.callback = self._next
         self.add_item(next_btn)
 
@@ -1045,7 +1038,10 @@ class DoubleRunView(WizardBaseView):
                 self.session.boss_runs[key] = 1
             else:
                 if self._free_runs() <= 0:
-                    await interaction.response.send_message("Keine freien Runs mehr. Maximal 5 Runs insgesamt.", ephemeral=True)
+                    await interaction.response.send_message(
+                        "Keine freien Runs mehr. Maximal 5 Runs insgesamt.",
+                        ephemeral=True,
+                    )
                     return
                 self.session.boss_runs[key] = 2
 
@@ -1059,11 +1055,14 @@ class DoubleRunView(WizardBaseView):
             await interaction.response.defer()
             return
 
+        # Edit bleibt eine Aktion (speichern)
         if self.session.mode == "edit":
             await self.cog._apply_edit_bosses(interaction, self.session)
             return
 
-        await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.DOUBLE)
+        # ✅ Create: zentraler Flow
+        await self.cog._goto_next(interaction, self.session, Step.DOUBLE)
+
 
     def embed(self) -> discord.Embed:
         diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
@@ -1096,6 +1095,7 @@ class DoubleRunView(WizardBaseView):
         )
 
 
+
 class SpotSelectView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
@@ -1109,7 +1109,6 @@ class SpotSelectView(WizardBaseView):
         self.add_item(miru_btn)
         self.add_item(gyfin_btn)
 
-        # ✅ Einheitlich: Back über build_back_button
         self.add_item(build_back_button(
             "Kategorie", BackTarget.START, self, row=1))
 
@@ -1118,14 +1117,14 @@ class SpotSelectView(WizardBaseView):
             await interaction.response.defer()
             return
         self.session.spot_key = "mirumok"
-        await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.SPOT)
+        await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
     async def _pick_gyfin(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
         self.session.spot_key = "gyfin"
-        await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.SPOT)
+        await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
@@ -1136,6 +1135,7 @@ class SpotSelectView(WizardBaseView):
                 f"**Gyfin**\n• Empfohlen mind. {SPOT_REQ['gyfin']}\n• {SPOT_TOTAL_AP['gyfin']}"
             ),
         )
+
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -1161,12 +1161,13 @@ class PartySizeSelect(discord.ui.Select):
 
         self.host_view.session.max_players = int(self.values[0])
 
+        # ✅ Create: Flow zentral über Router
         if self.host_view.session.mode == "create":
-            await self.host_view.cog._send_final_form(interaction, self.host_view.session)
+            await self.host_view.cog._goto_next(interaction, self.host_view.session, Step.PARTY)
             return
 
+        # Edit: bleibt speichern
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
-
 
 class PartySizeView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession, current: Optional[int] = None):
@@ -1176,19 +1177,9 @@ class PartySizeView(WizardBaseView):
         self.add_item(PartySizeSelect(self, mn, mx, current=current))
 
         # Zurück-Ziel hängt an der Kategorie / dem Flow
-        def _party_back_spec(s: WizardSession):
-            if s.category == "spots":
-                return (BackTarget.DAY, {"back_target": BackTarget.SPOT})
+        self.add_item(build_back_button("Tag", BackTarget.DAY, self, row=1))
 
-            if s.category == "pilafe":
-                return (BackTarget.DAY, {"back_target": BackTarget.START})
 
-            # muhhelfer:
-            total = _sum_runs(s.boss_runs)
-            prev = BackTarget.BOSSES if total >= 5 else BackTarget.DOUBLE
-            return (BackTarget.DAY, {"back_target": prev})
-
-        self.add_item(build_back_button("Tag", _party_back_spec, self, row=1))
 
     def embed(self) -> discord.Embed:
         mn, mx = _allowed_party_range(self.session.category or "")
@@ -1265,7 +1256,7 @@ class EditMenuView(WizardBaseView):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
-        await self.cog._send_day_selection(interaction, self.session, back_target=BackTarget.EDIT_MENU)
+        await self.cog._send_day_selection(interaction, self.session)
 
     async def _size(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -1619,8 +1610,7 @@ class GruppensucheTest(commands.Cog):
             await self._send_step(interaction, session, Step.DOUBLE)
             return
         if target == BackTarget.DAY:
-            back_target = str(kwargs.get("back_target") or BackTarget.START)
-            await self._send_step(interaction, session, Step.DAY, back_target=back_target)
+            await self._send_step(interaction, session, Step.DAY)
             return
         if target == BackTarget.EDIT_MENU:
             await self._send_step(interaction, session, Step.EDIT_MENU)
@@ -1678,9 +1668,7 @@ class GruppensucheTest(commands.Cog):
             return
 
         if step == Step.DAY:
-            # DAY braucht back_target, damit "Zurück(...)" richtig ist.
-            back_target = str(kwargs.get("back_target") or BackTarget.START)
-            await self._send_day_selection(interaction, session, back_target=back_target)
+            await self._send_day_selection(interaction, session)
             return
 
         if step == Step.PARTY:
@@ -1741,21 +1729,9 @@ class GruppensucheTest(commands.Cog):
                 return Step.BOSSES
 
             if current_step == Step.BOSSES:
-                # Im BossStep entscheidet ihr: bei voll -> DAY, sonst DOUBLE
                 total = _sum_runs(session.boss_runs)
-                if session.mode == "edit":
-                    # Edit: Wenn Doppelruns existieren, muss man in DOUBLE rein (zum Abwählen)
-                    has_double = any(int(v) >= 2 for v in session.boss_runs.values())
-                    if has_double:
-                        return Step.DOUBLE
-                    # Wenn voll und keine Doppelruns: direkt speichern (das macht euer BossStep aktuell)
-                    # Router-seitig geben wir DOUBLE zurück, aber du kannst auch BOSSES->EDIT_MENU machen,
-                    # wenn du es komplett zentral willst. Für minimal-invasive behalten wir eure BossStep-Logik.
-                    return Step.DOUBLE
+                return Step.DAY if total >= 5 else Step.DOUBLE
 
-                if total >= 5:
-                    return Step.DAY
-                return Step.DOUBLE
 
             if current_step == Step.DOUBLE:
                 # Create: danach DAY; Edit: danach speichern (macht _apply_edit_bosses im View)
@@ -1787,26 +1763,18 @@ class GruppensucheTest(commands.Cog):
         return Step.START
 
     async def _goto_next(self, interaction: discord.Interaction, session: WizardSession, current_step: str):
-        """
-        Zentraler Übergang zum nächsten Step.
-        """
         next_step = self._resolve_next_step(session, current_step)
-
-        # Spezielle Schritte brauchen Zusatzinfo (DAY back_target)
-        if next_step == Step.DAY:
-            back_target = self._resolve_back_target_for_day(session)
-            await self._send_step(interaction, session, Step.DAY, back_target=back_target)
-            return
-
         await self._send_step(interaction, session, next_step)
+
 
     async def _send_start(self, interaction: discord.Interaction, session: WizardSession):
         view = StartView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
-    async def _send_day_selection(self, interaction: discord.Interaction, session: WizardSession, back_target: str):
-        view = DaySelectView(self, session, back_target=back_target)
+    async def _send_day_selection(self, interaction: discord.Interaction, session: WizardSession):
+        view = DaySelectView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
+
 
     async def _send_category_specific(self, interaction: discord.Interaction, session: WizardSession):
         if session.category == "muhhelfer":
@@ -1816,7 +1784,7 @@ class GruppensucheTest(commands.Cog):
             await self._send_spot_select(interaction, session)
             return
         if session.category == "pilafe":
-            await self._send_day_selection(interaction, session, back_target=BackTarget.START)
+            await self._send_day_selection(interaction, session)
             return
 
         await interaction.response.edit_message(
@@ -1834,29 +1802,10 @@ class GruppensucheTest(commands.Cog):
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _send_double_run(self, interaction: discord.Interaction, session: WizardSession):
-
-        # Doppelrun-Ansicht anzeigen.
-        # WICHTIG:
-        # - Im EDIT-Mode muss die Ansicht auch bei 5/5 erreichbar sein,
-        # - damit man Doppelruns wieder abwählen kann.
-        # - Im CREATE-Mode nur anzeigen, wenn noch Runs frei sind (<5), sonst weiter.
-
-        total = _sum_runs(session.boss_runs)
-
-        # EDIT: IMMER Doppelrun-View anzeigen (auch bei 5/5),
-        # weil man Doppelruns ggf. entfernen will.
-        if session.mode == "edit":
-            view = DoubleRunView(self, session)
-            await self._edit_or_send_ephemeral(interaction, view.embed(), view)
-            return
-
-        # CREATE: wenn voll, weiter zum nächsten Step
-        if total >= 5:
-            await self._send_day_selection(interaction, session, back_target=BackTarget.BOSSES)
-            return
-
+        # ✅ Nur rendern. Flow-Entscheidung macht der Router.
         view = DoubleRunView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
+
 
     async def _send_spot_select(self, interaction: discord.Interaction, session: WizardSession):
         view = SpotSelectView(self, session)
