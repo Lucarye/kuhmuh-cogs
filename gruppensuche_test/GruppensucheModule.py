@@ -1787,6 +1787,7 @@ class GruppensucheTest(commands.Cog):
             await self._send_day_selection(interaction, session)
             return
 
+
         await interaction.response.edit_message(
             content="Ungültige Auswahl. Bitte neu starten.",
             embed=None,
@@ -1860,6 +1861,16 @@ class GruppensucheTest(commands.Cog):
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             except Exception:
                 return
+
+    async def _ephemeral_notice(self, interaction: discord.Interaction, text: str):
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(text, ephemeral=True)
+            else:
+                await interaction.response.send_message(text, ephemeral=True)
+        except Exception:
+            pass
+    
 
     async def _send_ephemeral_new(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
         # Sendet IMMER eine neue ephemeral Nachricht (niemals edit_message auf einem öffentlichen Post).
@@ -2279,8 +2290,9 @@ class GruppensucheTest(commands.Cog):
     async def _create_public_post_from_session(self, interaction: discord.Interaction, session: WizardSession):
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Nur auf einem Server nutzbar.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Nur auf einem Server nutzbar.")
             return
+
 
         channel: Optional[discord.TextChannel] = None
 
@@ -2300,11 +2312,12 @@ class GruppensucheTest(commands.Cog):
                 channel = guild.system_channel
 
         if channel is None:
-            await interaction.response.send_message(
+            await self._ephemeral_notice(
+                interaction,
                 "Ich konnte keinen Ziel-Textchannel bestimmen (kein Zugriff / falscher Channel-Typ).",
-                ephemeral=True,
             )
             return
+
 
 
         day_iso = session.day_date_iso or _now_local().date().isoformat()
@@ -2881,6 +2894,13 @@ class GruppensucheTest(commands.Cog):
             return
 
         data["day_date_iso"] = session.day_date_iso
+
+        # ✅ Reminder reset, weil Tag geändert wurde
+        rem = data.get("reminders")
+        if isinstance(rem, dict):
+            rem.pop("start_30m", None)
+            data["reminders"] = rem
+
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
@@ -2946,11 +2966,21 @@ class GruppensucheTest(commands.Cog):
             if session.scroll_amount is not None:
                 data["scroll_amount"] = session.scroll_amount
 
+        old_start = data.get("start_text")
+        old_day = data.get("day_date_iso")  # optional
+
         data["duration_text"] = session.duration_text
         data["start_text"] = session.start_text
         data["req_text"] = session.req_text
         data["notes"] = session.notes
-        data["updated_at"] = int(_now_local().timestamp())
+
+        # ✅ Reminder reset, wenn Startzeit (oder optional Tag) geändert wurde
+        if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day):
+            rem = data.get("reminders")
+            if isinstance(rem, dict):
+                rem.pop("start_30m", None)
+                data["reminders"] = rem
+
 
         await self._save_refresh_dispatch(data)
 
