@@ -1248,7 +1248,7 @@ class EditMenuView(WizardBaseView):
             self.add_item(bosses_btn)
 
         back_btn = discord.ui.Button(
-            label="Zurück", style=discord.ButtonStyle.secondary, row=2)
+            label="Bearbeitung beenden", style=discord.ButtonStyle.secondary, row=2)
         back_btn.callback = self._back
         self.add_item(back_btn)
 
@@ -2039,8 +2039,9 @@ class GruppensucheTest(commands.Cog):
         # ✅ Times-Block erst jetzt bauen
         # ✅ Times-Block
         times_block = (
-            f"**Geplante Dauer:** {duration_text}\n"
-            f"**Start:** {start_text}\n\n"
+            f"**Tag:** {day_str}\n"
+            f"**Start:** {start_text}\n"
+            f"**Geplante Dauer:** {duration_text}\n\n"
         )
 
         # ✅ Notes-Block (NEU)
@@ -2076,8 +2077,7 @@ class GruppensucheTest(commands.Cog):
 
             header = (
                 f"**Suchender:** {owner_display}\n"
-                f"**Kategorie:** Muhhelfer (LoML Bosse)\n"
-                f"**Tag:** {day_str}\n"
+                f"**Kategorie:** Muhhelfer (LoML Bosse)\n"                
                 f"**Schwierigkeit:** {diff_icon} {diff_label}\n"
                 f"**Anforderung AK/VK:** {req}\n"
                 f"**Max. Teilnehmer:** {max_players}\n\n"
@@ -2142,7 +2142,6 @@ class GruppensucheTest(commands.Cog):
             header = (
                 f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Gruppenspots\n"
-                f"**Tag:** {day_str}\n"
                 f"**Anforderung AK/VK:** {req if req else '—'}\n"
                 f"**Max. Teilnehmer:** {max_players}\n\n"
             )
@@ -2192,7 +2191,6 @@ class GruppensucheTest(commands.Cog):
             header = (
                 f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Pila Fe Schriftrollen\n"
-                f"**Tag:** {day_str}\n"
                 f"**Menge:** {amount}\n"
                 f"**Max. Teilnehmer:** {max_players}\n\n"
             )
