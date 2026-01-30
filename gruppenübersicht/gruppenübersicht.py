@@ -582,7 +582,14 @@ class Gruppenübersicht(commands.Cog):
 
             for idx, ch in enumerate(chunks):
                 field_name = title if idx == 0 else f"{title} (weiter)"
-                e.add_field(name=field_name, value=ch, inline=False)
+                # ⬇️ am Ende einen unsichtbaren Abstand anhängen
+                spaced_value = ch + "\n\u200b"
+
+                e.add_field(
+                    name=field_name,
+                    value=spaced_value,
+                    inline=False
+                )
 
         add_section(f"{MUHKUH_EMOJI} Muhhelfer – Normal ({len(muh_normal)})", muh_normal)
         add_section(f"{MUHKUH_EMOJI} Muhhelfer – Schwer ({len(muh_schwer)})", muh_schwer)
