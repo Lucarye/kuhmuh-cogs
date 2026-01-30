@@ -83,13 +83,23 @@ SPOT_PING_ROLE: Dict[str, int] = {
 # =========================
 # Feature Flags
 # =========================
+FEATURE_MUHHILFER = True
+
+FEATURE_SPOTS = True 
 FEATURE_SPOTS_GYFIN = True          # (falls du mal einzelne Spots togglen willst)
 FEATURE_SPOTS_MIRUMOK = True
 
+FEATURE_PILAFE = True
 FEATURE_ALTAR = False              # <- vorbereitet, aber nicht im Menü
 FEATURE_ATORAXXION = False         # <- vorbereitet, aber nicht im Menü
 
 FEATURE_POST_IN_CURRENT_CHANNEL = True  # statt TEST_CHANNEL_ID
+FEATURE_DM_REMINDERS = True
+
+
+
+  # Master für Spots (zusätzlich zu MIRU/GYFIN)
+
 
 
 # =========================
@@ -504,7 +514,7 @@ class CustomDateModal(discord.ui.Modal):
 
 
 class DetailsModal(discord.ui.Modal):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession, defaults: Optional[dict] = None):
+    def __init__(self, cog: "gruppensuche", session: WizardSession, defaults: Optional[dict] = None):
         super().__init__(title="Details zur Gruppensuche")
         self.cog = cog
         self.session = session
@@ -651,7 +661,7 @@ class JoinApModal(discord.ui.Modal):
 # =========================
 
 class WizardBaseView(discord.ui.View):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession, timeout_seconds: int = WIZARD_TIMEOUT_SECONDS):
+    def __init__(self, cog: "gruppensuche", session: WizardSession, timeout_seconds: int = WIZARD_TIMEOUT_SECONDS):
         super().__init__(timeout=timeout_seconds)
         self.cog = cog
         self.session = session
@@ -666,23 +676,29 @@ class WizardBaseView(discord.ui.View):
 
 class StartSelect(discord.ui.Select):
     def __init__(self, host_view: "StartView"):
-        options = [
-            discord.SelectOption(
+        options = []
+
+        if FEATURE_MUHHILFER:
+            options.append(discord.SelectOption(
                 label="Muhhelfer (LoML Bosse)",
                 value="muhhelfer",
                 emoji=MUHKUH_EMOJI,
-            ),
-            discord.SelectOption(
+            ))
+
+        # Spots nur wenn Master an + mindestens ein Spot an
+        if FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN):
+            options.append(discord.SelectOption(
                 label="Gruppenspots (Mirumok / Gyfin)",
                 value="spots",
                 emoji=CHEER_EMOJI,
-            ),
-            discord.SelectOption(
+            ))
+
+        if FEATURE_PILAFE:
+            options.append(discord.SelectOption(
                 label="Pila Fe Schriftrollen",
                 value="pilafe",
                 emoji=PILAFE_EMOJI,
-            ),
-        ]
+            ))
 
         if FEATURE_ALTAR:
             options.append(discord.SelectOption(
@@ -729,27 +745,59 @@ class StartSelect(discord.ui.Select):
 
 
 class StartView(WizardBaseView):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession):
+    def __init__(self, cog: "gruppensuche", session: WizardSession):
         super().__init__(cog, session)
         self.add_item(StartSelect(self))
 
     def embed(self) -> discord.Embed:
+        lines = []
+
+        # Muhhelfer
+        if FEATURE_MUHHILFER:
+            lines.append("• **Muhhelfer (LoML Bosse)**")
+        else:
+            lines.append("• ~~Muhhelfer (LoML Bosse)~~ *(Wartung)*")
+
+        # Gruppenspots (Master + mindestens ein Spot aktiv)
+        spots_enabled = FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN)
+        if spots_enabled:
+            lines.append("• **Gruppenspots (Mirumok / Gyfin)**")
+        else:
+            lines.append("• ~~Gruppenspots (Mirumok / Gyfin)~~ *(Wartung)*")
+
+        # Pila Fe
+        if FEATURE_PILAFE:
+            lines.append("• **Pila Fe Schriftrollen**")
+        else:
+            lines.append("• ~~Pila Fe Schriftrollen~~ *(Wartung)*")
+
+        # Altar (immer anzeigen, aber Wartung wenn aus)
+        if FEATURE_ALTAR:
+            lines.append("• **Altar des Blutes**")
+        else:
+            lines.append("• ~~Altar des Blutes~~ *(Wartung)*")
+
+        # Atoraxxion (immer anzeigen, aber Wartung wenn aus)
+        if FEATURE_ATORAXXION:
+            lines.append("• **Atoraxxion**")
+        else:
+            lines.append("• ~~Atoraxxion~~ *(Wartung)*")
+
+        desc = (
+            "Wähle, wofür du eine Gruppe suchst.\n\n"
+            + "\n".join(lines)
+            + "\n\nNach der Auswahl kannst du Details wie **Menge**, **Geplante Dauer** und **Startzeit** angeben."
+        )
+
         return discord.Embed(
             title=f"{MUHKUH_EMOJI} Gruppensuche erstellen",
-            description=(
-                "Wähle, wofür du eine Gruppe suchst.\n\n"
-                "• **Muhhelfer** (LoML Bosse)\n"
-                "• **Gruppenspots** (Mirumok / Gyfin)\n"
-                "• **Pila Fe** Schriftrollen\n"
-                + ("• **Altar des Blutes**\n" if FEATURE_ALTAR else "")
-                + ("• **Atoraxxion**\n" if FEATURE_ATORAXXION else "")
-                + "\nNach der Auswahl kannst du Details wie **Menge**, **Geplante Dauer** und **Startzeit** angeben."
-            ),
+            description=desc,
         )
 
 
+
 class DaySelectView(WizardBaseView):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession):
+    def __init__(self, cog: "gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         # ✅ BackTarget wird IMMER zentral berechnet
@@ -844,7 +892,7 @@ class DaySelectView(WizardBaseView):
 
 
 class DifficultyView(WizardBaseView):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession):
+    def __init__(self, cog: "gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         normal_btn = discord.ui.Button(
@@ -885,7 +933,7 @@ class DifficultyView(WizardBaseView):
 
 
 class BossSelectView(WizardBaseView):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession):
+    def __init__(self, cog: "gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         self._boss_buttons: Dict[str, discord.ui.Button] = {}
@@ -988,7 +1036,7 @@ class BossSelectView(WizardBaseView):
 
 
 class DoubleRunView(WizardBaseView):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession):
+    def __init__(self, cog: "gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         self._dr_buttons: Dict[str, discord.ui.Button] = {}
@@ -1097,24 +1145,44 @@ class DoubleRunView(WizardBaseView):
 
 
 class SpotSelectView(WizardBaseView):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession):
+    def __init__(self, cog: "gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
-        miru_btn = discord.ui.Button(
-            label="Mirumok", style=discord.ButtonStyle.primary, row=0)
-        gyfin_btn = discord.ui.Button(
-            label="Gyfin", style=discord.ButtonStyle.primary, row=0)
-        miru_btn.callback = self._pick_miru
-        gyfin_btn.callback = self._pick_gyfin
-        self.add_item(miru_btn)
-        self.add_item(gyfin_btn)
+        # Wenn nur genau ein Spot aktiv ist, auto-auswählen und direkt weiter
+        active_spots = []
+        if FEATURE_SPOTS_MIRUMOK:
+            active_spots.append("mirumok")
+        if FEATURE_SPOTS_GYFIN:
+            active_spots.append("gyfin")
 
-        self.add_item(build_back_button(
-            "Kategorie", BackTarget.START, self, row=1))
+        # Keine Spots aktiv -> zurück ins Start-Menü
+        if not active_spots:
+            session.spot_key = None
+            # Hier kein interaction verfügbar, also nur UI bauen (wird eh durch Router abgefangen)
+        elif len(active_spots) == 1:
+            session.spot_key = active_spots[0]
+            # Der eigentliche "weiter" passiert über Router nach Auswahl –
+            # das Auto-Weiter kannst du optional in _send_spot_select machen (siehe unten).
+
+        # Buttons nur für aktive Spots
+        if FEATURE_SPOTS_MIRUMOK:
+            miru_btn = discord.ui.Button(label="Mirumok", style=discord.ButtonStyle.primary, row=0)
+            miru_btn.callback = self._pick_miru
+            self.add_item(miru_btn)
+
+        if FEATURE_SPOTS_GYFIN:
+            gyfin_btn = discord.ui.Button(label="Gyfin", style=discord.ButtonStyle.primary, row=0)
+            gyfin_btn.callback = self._pick_gyfin
+            self.add_item(gyfin_btn)
+
+        self.add_item(build_back_button("Kategorie", BackTarget.START, self, row=1))
 
     async def _pick_miru(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
+            return
+        if not FEATURE_SPOTS_MIRUMOK:
+            await interaction.response.send_message("Mirumok ist aktuell deaktiviert.", ephemeral=True)
             return
         self.session.spot_key = "mirumok"
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
@@ -1123,18 +1191,32 @@ class SpotSelectView(WizardBaseView):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
+        if not FEATURE_SPOTS_GYFIN:
+            await interaction.response.send_message("Gyfin ist aktuell deaktiviert.", ephemeral=True)
+            return
         self.session.spot_key = "gyfin"
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
     def embed(self) -> discord.Embed:
+        lines = ["Wähle den Spot, für den du eine Gruppe suchst.\n"]
+
+        if FEATURE_SPOTS_MIRUMOK:
+            lines.append(
+                f"**Mirumok**\n• Empfohlen mind. {SPOT_REQ['mirumok']}\n• {SPOT_TOTAL_AP['mirumok']}\n"
+            )
+        if FEATURE_SPOTS_GYFIN:
+            lines.append(
+                f"**Gyfin**\n• Empfohlen mind. {SPOT_REQ['gyfin']}\n• {SPOT_TOTAL_AP['gyfin']}\n"
+            )
+
+        # Wenn nur einer aktiv ist, Text sauber halten
+        desc = "\n".join(lines).strip()
+
         return discord.Embed(
-            title=f"{CHEER_EMOJI} Gruppensuche – Mirumok / Gyfin",
-            description=(
-                "Wähle den Spot, für den du eine Gruppe suchst.\n\n"
-                f"**Mirumok**\n• Empfohlen mind. {SPOT_REQ['mirumok']}\n• {SPOT_TOTAL_AP['mirumok']}\n\n"
-                f"**Gyfin**\n• Empfohlen mind. {SPOT_REQ['gyfin']}\n• {SPOT_TOTAL_AP['gyfin']}"
-            ),
+            title=f"{CHEER_EMOJI} Gruppensuche – Spots",
+            description=desc,
         )
+
 
 
 
@@ -1170,7 +1252,7 @@ class PartySizeSelect(discord.ui.Select):
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
 
 class PartySizeView(WizardBaseView):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession, current: Optional[int] = None):
+    def __init__(self, cog: "gruppensuche", session: WizardSession, current: Optional[int] = None):
         super().__init__(cog, session)
 
         mn, mx = _allowed_party_range(session.category or "")
@@ -1222,7 +1304,7 @@ class PartySizeView(WizardBaseView):
 
 
 class EditMenuView(WizardBaseView):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession, post_data: dict):
+    def __init__(self, cog: "gruppensuche", session: WizardSession, post_data: dict):
         super().__init__(cog, session)
         self.post_data = post_data
 
@@ -1304,7 +1386,7 @@ class EditMenuView(WizardBaseView):
 
 
 class ConfirmView(discord.ui.View):
-    def __init__(self, cog: "Gruppensuche", message_id: int, action: str, user_id: int):
+    def __init__(self, cog: "gruppensuche", message_id: int, action: str, user_id: int):
         super().__init__(timeout=30)
         self.cog = cog
         self.message_id = message_id
@@ -1355,7 +1437,7 @@ class ConfirmView(discord.ui.View):
 
 
 class PublicPostView(discord.ui.View):
-    def __init__(self, cog: "Gruppensuche", message_id: int):
+    def __init__(self, cog: "gruppensuche", message_id: int):
         super().__init__(timeout=None)
         self.cog = cog
         self.message_id = message_id
@@ -1507,7 +1589,7 @@ class PublicPostView(discord.ui.View):
 
 
 class ClosedPostView(discord.ui.View):
-    def __init__(self, cog: "Gruppensuche", message_id: int):
+    def __init__(self, cog: "gruppensuche", message_id: int):
         super().__init__(timeout=None)
         self.cog = cog
         self.message_id = message_id
@@ -1622,7 +1704,7 @@ class Gruppensuche(commands.Cog):
     # =========================
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="gruppensuche", description="TEST: Starte eine neue Gruppensuche (Wizard).")
+    @app_commands.command(name="gruppensuche", description="Starte eine neue Gruppensuche (Wizard).")
     async def gruppensuche_command(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -1712,6 +1794,38 @@ class Gruppensuche(commands.Cog):
         """
         # Edit-Mode: “Back-Regel” bleibt separat (über build_back_button). Next-Flow bleibt hier zentral steuerbar.
         cat = session.category or ""
+
+        # --- Feature-Guard (hart) ---
+        if cat == "muhhelfer" and not FEATURE_MUHHILFER:
+            session.category = None
+            return Step.START
+
+        if cat == "pilafe" and not FEATURE_PILAFE:
+            session.category = None
+            return Step.START
+
+        if cat == "spots":
+            if not FEATURE_SPOTS:
+                session.category = None
+                return Step.START
+            if not (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN):
+                session.category = None
+                return Step.START
+            # falls Spot schon gesetzt, aber Flag ist aus:
+            if session.spot_key == "mirumok" and not FEATURE_SPOTS_MIRUMOK:
+                session.spot_key = None
+                return Step.SPOT
+            if session.spot_key == "gyfin" and not FEATURE_SPOTS_GYFIN:
+                session.spot_key = None
+                return Step.SPOT
+
+        if cat == "altar" and not FEATURE_ALTAR:
+            session.category = None
+            return Step.START
+
+        if cat == "atoraxxion" and not FEATURE_ATORAXXION:
+            session.category = None
+            return Step.START
 
         # -------- START --------
         if current_step == Step.START:
@@ -1809,6 +1923,18 @@ class Gruppensuche(commands.Cog):
 
 
     async def _send_spot_select(self, interaction: discord.Interaction, session: WizardSession):
+        # Auto-pick wenn nur ein Spot aktiv ist
+        active = []
+        if FEATURE_SPOTS_MIRUMOK:
+            active.append("mirumok")
+        if FEATURE_SPOTS_GYFIN:
+            active.append("gyfin")
+
+        if len(active) == 1 and session.mode == "create":
+            session.spot_key = active[0]
+            await self._goto_next(interaction, session, Step.SPOT)
+            return
+
         view = SpotSelectView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
@@ -2291,6 +2417,35 @@ class Gruppensuche(commands.Cog):
             await self._ephemeral_notice(interaction, "Nur auf einem Server nutzbar.")
             return
 
+        cat = session.category or ""
+
+        if cat == "muhhelfer" and not FEATURE_MUHHILFER:
+            await self._ephemeral_notice(interaction, "Muhhelfer ist aktuell deaktiviert.")
+            return
+
+        if cat == "pilafe" and not FEATURE_PILAFE:
+            await self._ephemeral_notice(interaction, "Pila Fe ist aktuell deaktiviert.")
+            return
+
+        if cat == "spots":
+            if not FEATURE_SPOTS:
+                await self._ephemeral_notice(interaction, "Gruppenspots sind aktuell deaktiviert.")
+                return
+            if session.spot_key == "mirumok" and not FEATURE_SPOTS_MIRUMOK:
+                await self._ephemeral_notice(interaction, "Mirumok ist aktuell deaktiviert.")
+                return
+            if session.spot_key == "gyfin" and not FEATURE_SPOTS_GYFIN:
+                await self._ephemeral_notice(interaction, "Gyfin ist aktuell deaktiviert.")
+                return
+
+        if cat == "altar" and not FEATURE_ALTAR:
+            await self._ephemeral_notice(interaction, "Altar ist aktuell deaktiviert.")
+            return
+
+        if cat == "atoraxxion" and not FEATURE_ATORAXXION:
+            await self._ephemeral_notice(interaction, "Atoraxxion ist aktuell deaktiviert.")
+            return
+
 
         channel: Optional[discord.TextChannel] = None
 
@@ -2413,6 +2568,9 @@ class Gruppensuche(commands.Cog):
             await asyncio.sleep(30)  # alle 30s checken reicht völlig
 
     async def _run_start_reminders(self):
+        if not FEATURE_DM_REMINDERS:
+            return
+
         guild = self.bot.get_guild(GUILD_ID)
         if guild is None:
             return
@@ -2457,6 +2615,9 @@ class Gruppensuche(commands.Cog):
                 continue
 
     async def _send_start_30m_reminder(self, guild: discord.Guild, message_id: int, data: dict):
+        if not FEATURE_DM_REMINDERS:
+            return
+
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         jump = f"https://discord.com/channels/{guild.id}/{int(data.get('channel_id', 0))}/{message_id}"
 
@@ -3006,6 +3167,3 @@ class Gruppensuche(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
-
-
-
