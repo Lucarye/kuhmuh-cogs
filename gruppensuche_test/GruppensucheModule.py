@@ -751,19 +751,37 @@ class StartView(WizardBaseView):
 
     def embed(self) -> discord.Embed:
         lines = []
-        lines.append(_menu_line("Muhhelfer (LoML Bosse)", enabled=FEATURE_MUHHILFER))
 
-        # Spots: Master + einzelne Spots (optional fein)
+        # Muhhelfer
+        if FEATURE_MUHHILFER:
+            lines.append("• **Muhhelfer (LoML Bosse)**")
+        else:
+            lines.append("• ~~Muhhelfer (LoML Bosse)~~ *(Wartung)*")
+
+        # Gruppenspots (Master + mindestens ein Spot aktiv)
         spots_enabled = FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN)
-        lines.append(_menu_line("Gruppenspots (Mirumok / Gyfin)", enabled=spots_enabled))
+        if spots_enabled:
+            lines.append("• **Gruppenspots (Mirumok / Gyfin)**")
+        else:
+            lines.append("• ~~Gruppenspots (Mirumok / Gyfin)~~ *(Wartung)*")
 
-        lines.append(_menu_line("Pila Fe Schriftrollen", enabled=FEATURE_PILAFE))
+        # Pila Fe
+        if FEATURE_PILAFE:
+            lines.append("• **Pila Fe Schriftrollen**")
+        else:
+            lines.append("• ~~Pila Fe Schriftrollen~~ *(Wartung)*")
 
-        if FEATURE_ALTAR or True:   # <- wenn du es IMMER im Text zeigen willst
-            lines.append(_menu_line("Altar des Blutes", enabled=FEATURE_ALTAR))
+        # Altar (immer anzeigen, aber Wartung wenn aus)
+        if FEATURE_ALTAR:
+            lines.append("• **Altar des Blutes**")
+        else:
+            lines.append("• ~~Altar des Blutes~~ *(Wartung)*")
 
-        if FEATURE_ATORAXXION or True:
-            lines.append(_menu_line("Atoraxxion", enabled=FEATURE_ATORAXXION))
+        # Atoraxxion (immer anzeigen, aber Wartung wenn aus)
+        if FEATURE_ATORAXXION:
+            lines.append("• **Atoraxxion**")
+        else:
+            lines.append("• ~~Atoraxxion~~ *(Wartung)*")
 
         desc = (
             "Wähle, wofür du eine Gruppe suchst.\n\n"
@@ -775,6 +793,7 @@ class StartView(WizardBaseView):
             title=f"{MUHKUH_EMOJI} Gruppensuche erstellen",
             description=desc,
         )
+
 
 
 class DaySelectView(WizardBaseView):
