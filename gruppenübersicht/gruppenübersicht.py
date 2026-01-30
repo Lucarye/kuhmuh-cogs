@@ -171,7 +171,6 @@ class Gruppenübersicht(commands.Cog):
             dashboard_test_message_id=None,
         )
 
-        self._dashboard_refresh_loop.start()
 
     async def force_refresh_all(self, guild_id: int):
         if int(guild_id) != GUILD_ID:
@@ -204,6 +203,9 @@ class Gruppenübersicht(commands.Cog):
             await self.bot.tree.sync(guild=gobj)
         except Exception:
             pass
+        if not self._dashboard_refresh_loop.is_running():
+        self._dashboard_refresh_loop.start()
+
 
     def cog_unload(self):
         # Loop stoppen
@@ -616,7 +618,7 @@ class Gruppenübersicht(commands.Cog):
             add_section(f"{CHEER_EMOJI} Gruppenspots – Sonstige ({len(spots_other)})", spots_other)
 
         add_section(f"{PILAFE_EMOJI} Pila Fe ({len(pilafe)})", pilafe)
-        
+
 
         if not items:
             e.add_field(name="Keine Eintraege", value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
