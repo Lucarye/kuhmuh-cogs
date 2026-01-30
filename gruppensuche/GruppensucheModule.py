@@ -1622,7 +1622,7 @@ class GruppensucheTest(commands.Cog):
     # =========================
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="gruppensuche", description="TEST: Starte eine neue Gruppensuche (Wizard).")
+    @app_commands.command(name="Gruppensuche", description="TEST: Starte eine neue Gruppensuche (Wizard).")
     async def gruppensuche_command(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -3006,3 +3006,4 @@ class GruppensucheTest(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
+
