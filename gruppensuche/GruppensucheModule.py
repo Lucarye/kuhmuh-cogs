@@ -2677,6 +2677,21 @@ class Gruppensuche(commands.Cog):
             except Exception:
                 pass
 
+    # 2) Extra DM an Ersteller (Host) – ebenfalls opt-out respektieren
+    owner = guild.get_member(owner_id)
+    if owner and not _member_has_no_dm_role(owner):
+        try:
+            extra = f"\n⚠️ Es fehlen noch **{free}** Teilnehmer." if free > 0 else "\n✅ Gruppe ist voll."
+            await owner.send(
+                f"⏰ **Reminder (Host):** In ~30 Minuten.\n"
+                f"**Tag:** {day_str}\n"
+                f"**Start:** {start_text}"
+                f"{extra}\n{jump}"
+            )
+        except Exception:
+            pass
+
+
     async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
 
         data = await self._get_search(message_id)
@@ -3169,4 +3184,5 @@ class Gruppensuche(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
+
 
