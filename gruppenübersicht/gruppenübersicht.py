@@ -600,5 +600,4 @@ class Gruppenübersicht(commands.Cog):
             e.add_field(name="Keine Eintraege", value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
 
         e.set_footer(text=f"Aktualisiert: {_now_local().strftime('%d.%m.%Y %H:%M')} Uhr")
-        e.timestamp = discord.utils.utcnow()
         return e
