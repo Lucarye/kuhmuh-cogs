@@ -504,7 +504,7 @@ class CustomDateModal(discord.ui.Modal):
 
 
 class DetailsModal(discord.ui.Modal):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, defaults: Optional[dict] = None):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession, defaults: Optional[dict] = None):
         super().__init__(title="Details zur Gruppensuche")
         self.cog = cog
         self.session = session
@@ -651,7 +651,7 @@ class JoinApModal(discord.ui.Modal):
 # =========================
 
 class WizardBaseView(discord.ui.View):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, timeout_seconds: int = WIZARD_TIMEOUT_SECONDS):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession, timeout_seconds: int = WIZARD_TIMEOUT_SECONDS):
         super().__init__(timeout=timeout_seconds)
         self.cog = cog
         self.session = session
@@ -729,7 +729,7 @@ class StartSelect(discord.ui.Select):
 
 
 class StartView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
         self.add_item(StartSelect(self))
 
@@ -749,7 +749,7 @@ class StartView(WizardBaseView):
 
 
 class DaySelectView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         # ✅ BackTarget wird IMMER zentral berechnet
@@ -844,7 +844,7 @@ class DaySelectView(WizardBaseView):
 
 
 class DifficultyView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         normal_btn = discord.ui.Button(
@@ -885,7 +885,7 @@ class DifficultyView(WizardBaseView):
 
 
 class BossSelectView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         self._boss_buttons: Dict[str, discord.ui.Button] = {}
@@ -988,7 +988,7 @@ class BossSelectView(WizardBaseView):
 
 
 class DoubleRunView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         self._dr_buttons: Dict[str, discord.ui.Button] = {}
@@ -1097,7 +1097,7 @@ class DoubleRunView(WizardBaseView):
 
 
 class SpotSelectView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         miru_btn = discord.ui.Button(
@@ -1170,7 +1170,7 @@ class PartySizeSelect(discord.ui.Select):
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
 
 class PartySizeView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, current: Optional[int] = None):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession, current: Optional[int] = None):
         super().__init__(cog, session)
 
         mn, mx = _allowed_party_range(session.category or "")
@@ -1222,7 +1222,7 @@ class PartySizeView(WizardBaseView):
 
 
 class EditMenuView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, post_data: dict):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession, post_data: dict):
         super().__init__(cog, session)
         self.post_data = post_data
 
@@ -1304,7 +1304,7 @@ class EditMenuView(WizardBaseView):
 
 
 class ConfirmView(discord.ui.View):
-    def __init__(self, cog: "GruppensucheTest", message_id: int, action: str, user_id: int):
+    def __init__(self, cog: "Gruppensuche", message_id: int, action: str, user_id: int):
         super().__init__(timeout=30)
         self.cog = cog
         self.message_id = message_id
@@ -1355,7 +1355,7 @@ class ConfirmView(discord.ui.View):
 
 
 class PublicPostView(discord.ui.View):
-    def __init__(self, cog: "GruppensucheTest", message_id: int):
+    def __init__(self, cog: "Gruppensuche", message_id: int):
         super().__init__(timeout=None)
         self.cog = cog
         self.message_id = message_id
@@ -1507,7 +1507,7 @@ class PublicPostView(discord.ui.View):
 
 
 class ClosedPostView(discord.ui.View):
-    def __init__(self, cog: "GruppensucheTest", message_id: int):
+    def __init__(self, cog: "Gruppensuche", message_id: int):
         super().__init__(timeout=None)
         self.cog = cog
         self.message_id = message_id
@@ -1622,7 +1622,7 @@ class Gruppensuche(commands.Cog):
     # =========================
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="Gruppensuche", description="TEST: Starte eine neue Gruppensuche (Wizard).")
+    @app_commands.command(name="gruppensuche", description="TEST: Starte eine neue Gruppensuche (Wizard).")
     async def gruppensuche_command(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -3006,5 +3006,6 @@ class Gruppensuche(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
+
 
 
