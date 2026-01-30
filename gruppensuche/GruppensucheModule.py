@@ -38,6 +38,8 @@ PING_COOLDOWN_SECONDS = 600
 PARTICIPANT_PING_COOLDOWN_SECONDS = 60
 WIZARD_TIMEOUT_SECONDS = 300  # 5 Minuten (oder 600 = 10 Minuten)
 
+ROLE_NO_DM_ID = 1466752408779751509  # "Gruppensuche DM-Funktion" (Reverse: hat Rolle => KEINE DM)
+
 
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
 PILAFE_EMOJI = "<:pilafe:1450051653297504368>"
@@ -2624,13 +2626,14 @@ class Gruppensuche(commands.Cog):
         max_players = int(data.get("max_players", 2))
         participants = list(data.get("participants") or [])
 
-        owner_id = int(data.get("owner_id", 0))  # <-- NEU (früher holen)
-
+        owner_id = int(data.get("owner_id", 0))
         free = max(0, max_players - len(participants))
 
+        def _member_has_no_dm_role(member: discord.Member) -> bool:
+            return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
+
         # Owner NICHT in Teilnehmer-DM aufnehmen (sonst 2x DM)
-        participants_dm = [uid for uid in participants if int(
-            uid) != owner_id]  # <-- NEU
+        participants_dm = [uid for uid in participants if int(uid) != owner_id]
 
         # schöner Text
         day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
@@ -2641,36 +2644,35 @@ class Gruppensuche(commands.Cog):
 
         start_text = data.get("start_text") or "—"
 
-        # 1) DM an Teilnehmer
+        # 1) DM an Teilnehmer (opt-out respektieren)
         failed: list[int] = []
         for uid in participants_dm:
             m = guild.get_member(int(uid))
             if not m:
                 continue
+
+            # ✅ Reverse Rolle: hat Rolle => keine DM
+            if _member_has_no_dm_role(m):
+                continue
+
             try:
-                await m.send(f"⏰ **Reminder:** In ~30 Minuten geht’s los.\n**Tag:** {day_str}\n**Start:** {start_text}\n{jump}")
+                await m.send(
+                    f"⏰ **Reminder:** In ~30 Minuten geht’s los.\n"
+                    f"**Tag:** {day_str}\n"
+                    f"**Start:** {start_text}\n"
+                    f"{jump}"
+                )
             except Exception:
                 failed.append(int(uid))
 
-        # Fallback: wer DMs zu hat
+        # Fallback: wer DMs zu hat (oder Fehler) -> Ping im Channel (wenn Channel existiert)
         if failed and isinstance(channel, discord.TextChannel):
             mentions = " ".join(f"<@{uid}>" for uid in failed)
             try:
                 await channel.send(
-                    f"⏰ Reminder (DM fehlgeschlagen): {mentions}\n**Start:** {start_text} | {day_str}\n{jump}",
-                    allowed_mentions=discord.AllowedMentions(
-                        users=True, roles=False, everyone=False),
-                )
-            except Exception:
-                pass
-
-        # 2) Extra DM an Ersteller mit “es fehlen noch X”
-        owner = guild.get_member(owner_id)
-        if owner:
-            try:
-                extra = f"\n⚠️ Es fehlen noch **{free}** Teilnehmer." if free > 0 else "\n✅ Gruppe ist voll."
-                await owner.send(
-                    f"⏰ **Reminder (Host):** In ~30 Minuten.\n**Tag:** {day_str}\n**Start:** {start_text}{extra}\n{jump}"
+                    f"⏰ Reminder (DM fehlgeschlagen/Opt-Out ignoriert? nein): {mentions}\n"
+                    f"**Start:** {start_text} | {day_str}\n{jump}",
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
                 )
             except Exception:
                 pass
@@ -3167,3 +3169,4 @@ class Gruppensuche(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
+
