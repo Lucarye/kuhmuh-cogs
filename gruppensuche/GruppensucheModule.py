@@ -2616,81 +2616,80 @@ class Gruppensuche(commands.Cog):
             except Exception:
                 continue
 
-    async def _send_start_30m_reminder(self, guild: discord.Guild, message_id: int, data: dict):
-        if not FEATURE_DM_REMINDERS:
-            return
+        async def _send_start_30m_reminder(self, guild: discord.Guild, message_id: int, data: dict):
+            if not FEATURE_DM_REMINDERS:
+                return
 
-        channel = guild.get_channel(int(data.get("channel_id", 0)))
-        jump = f"https://discord.com/channels/{guild.id}/{int(data.get('channel_id', 0))}/{message_id}"
+            channel = guild.get_channel(int(data.get("channel_id", 0)))
+            jump = f"https://discord.com/channels/{guild.id}/{int(data.get('channel_id', 0))}/{message_id}"
 
-        max_players = int(data.get("max_players", 2))
-        participants = list(data.get("participants") or [])
+            max_players = int(data.get("max_players", 2))
+            participants = list(data.get("participants") or [])
 
-        owner_id = int(data.get("owner_id", 0))
-        free = max(0, max_players - len(participants))
+            owner_id = int(data.get("owner_id", 0))
+            free = max(0, max_players - len(participants))
 
-        def _member_has_no_dm_role(member: discord.Member) -> bool:
-            return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
+            def _member_has_no_dm_role(member: discord.Member) -> bool:
+                return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
 
-        # Owner NICHT in Teilnehmer-DM aufnehmen (sonst 2x DM)
-        participants_dm = [uid for uid in participants if int(uid) != owner_id]
+            # Owner NICHT in Teilnehmer-DM aufnehmen (sonst 2x DM)
+            participants_dm = [uid for uid in participants if int(uid) != owner_id]
 
-        # schöner Text
-        day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
-        try:
-            day_str = _format_day(dt.date.fromisoformat(day_iso))
-        except Exception:
-            day_str = str(day_iso)
-
-        start_text = data.get("start_text") or "—"
-
-        # 1) DM an Teilnehmer (opt-out respektieren)
-        failed: list[int] = []
-        for uid in participants_dm:
-            m = guild.get_member(int(uid))
-            if not m:
-                continue
-
-            # ✅ Reverse Rolle: hat Rolle => keine DM
-            if _member_has_no_dm_role(m):
-                continue
-
+            # schöner Text
+            day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
             try:
-                await m.send(
-                    f"⏰ **Reminder:** In ~30 Minuten geht’s los.\n"
-                    f"**Tag:** {day_str}\n"
-                    f"**Start:** {start_text}\n"
-                    f"{jump}"
-                )
+                day_str = _format_day(dt.date.fromisoformat(day_iso))
             except Exception:
-                failed.append(int(uid))
+                day_str = str(day_iso)
 
-        # Fallback: wer DMs zu hat (oder Fehler) -> Ping im Channel (wenn Channel existiert)
-        if failed and isinstance(channel, discord.TextChannel):
-            mentions = " ".join(f"<@{uid}>" for uid in failed)
+            start_text = data.get("start_text") or "—"
+
+            # 1) DM an Teilnehmer (opt-out respektieren)
+            failed: list[int] = []
+            for uid in participants_dm:
+                m = guild.get_member(int(uid))
+                if not m:
+                    continue
+
+                # ✅ Reverse Rolle: hat Rolle => keine DM
+                if _member_has_no_dm_role(m):
+                    continue
+
+                try:
+                    await m.send(
+                        f"⏰ **Reminder:** In ~30 Minuten geht’s los.\n"
+                        f"**Tag:** {day_str}\n"
+                        f"**Start:** {start_text}\n"
+                        f"{jump}"
+                    )
+                except Exception:
+                    failed.append(int(uid))
+
+            # Fallback: wer DMs zu hat (oder Fehler) -> Ping im Channel (wenn Channel existiert)
+            if failed and isinstance(channel, discord.TextChannel):
+                mentions = " ".join(f"<@{uid}>" for uid in failed)
+                try:
+                    await channel.send(
+                        f"⏰ Reminder (DM fehlgeschlagen/Opt-Out ignoriert? nein): {mentions}\n"
+                        f"**Start:** {start_text} | {day_str}\n{jump}",
+                        allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                    )
+                except Exception:
+                    pass
+
+        # 2) Extra DM an Ersteller (Host) – ebenfalls opt-out respektieren
+        owner = guild.get_member(owner_id)
+        if owner and not _member_has_no_dm_role(owner):
             try:
-                await channel.send(
-                    f"⏰ Reminder (DM fehlgeschlagen/Opt-Out ignoriert? nein): {mentions}\n"
-                    f"**Start:** {start_text} | {day_str}\n{jump}",
-                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                extra = f"\n⚠️ Es fehlen noch **{free}** Teilnehmer." if free > 0 else "\n✅ Gruppe ist voll."
+                await owner.send(
+                    f"⏰ **Reminder (Host):** In ~30 Minuten.\n"
+                    f"**Tag:** {day_str}\n"
+                    f"**Start:** {start_text}"
+                    f"{extra}\n{jump}"
                 )
             except Exception:
                 pass
-
-    # 2) Extra DM an Ersteller (Host) – ebenfalls opt-out respektieren
-    owner = guild.get_member(owner_id)
-    if owner and not _member_has_no_dm_role(owner):
-        try:
-            extra = f"\n⚠️ Es fehlen noch **{free}** Teilnehmer." if free > 0 else "\n✅ Gruppe ist voll."
-            await owner.send(
-                f"⏰ **Reminder (Host):** In ~30 Minuten.\n"
-                f"**Tag:** {day_str}\n"
-                f"**Start:** {start_text}"
-                f"{extra}\n{jump}"
-            )
-        except Exception:
-            pass
-
 
     async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
 
@@ -3184,5 +3183,6 @@ class Gruppensuche(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
+
 
 
