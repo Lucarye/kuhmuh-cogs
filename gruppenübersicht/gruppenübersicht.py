@@ -237,82 +237,74 @@ class Gruppenübersicht(commands.Cog):
     # Prefix Command
     # =========================
 
+        # =========================
+    # Slash Commands
+    # =========================
+
     @commands.guild_only()
-    @commands.command(name="dashboard_live")
-    async def dashboard_live(self, ctx: commands.Context):
+    @commands.hybrid_command(name="dashboard_live", with_app_command=True)
+    async def dashboard_live_slash(self, ctx: commands.Context):
         guild = ctx.guild
         if not guild:
             return
         if guild.id != GUILD_ID:
-            await ctx.send("Dieser Cog ist nur fuer unsere Guild vorgesehen.")
+            await ctx.send("Dieser Cog ist nur fuer unsere Guild vorgesehen.", ephemeral=True)
             return
         if not isinstance(ctx.author, discord.Member) or not _can_post_dashboard(ctx.author):
-            await ctx.send("Nur Admins dürfen das Dashboard posten/verschieben.")
+            await ctx.send("Nur Admins dürfen das Dashboard posten/verschieben.", ephemeral=True)
             return
         if not isinstance(ctx.channel, discord.TextChannel):
-            await ctx.send("Bitte in einem Text-Channel ausfuehren.")
+            await ctx.send("Bitte in einem Text-Channel ausführen.", ephemeral=True)
             return
 
         await self._ensure_dashboard_message(guild, ctx.channel, which="live")
-        try:
-            await ctx.message.add_reaction("✅")
-        except Exception:
-            pass
-
+        await ctx.send("✅ LIVE Dashboard gesetzt/aktualisiert.", ephemeral=True)
 
     @commands.guild_only()
-    @commands.command(name="dashboard_test")
-    async def dashboard_test(self, ctx: commands.Context):
+    @commands.hybrid_command(name="dashboard_test", with_app_command=True)
+    async def dashboard_test_slash(self, ctx: commands.Context):
         guild = ctx.guild
         if not guild:
             return
         if guild.id != GUILD_ID:
-            await ctx.send("Dieser Cog ist nur fuer unsere Guild vorgesehen.")
+            await ctx.send("Dieser Cog ist nur fuer unsere Guild vorgesehen.", ephemeral=True)
             return
         if not isinstance(ctx.author, discord.Member) or not _can_post_dashboard(ctx.author):
-            await ctx.send("Nur Admins dürfen das Dashboard posten/verschieben.")
+            await ctx.send("Nur Admins dürfen das Dashboard posten/verschieben.", ephemeral=True)
             return
         if not isinstance(ctx.channel, discord.TextChannel):
-            await ctx.send("Bitte in einem Text-Channel ausfuehren.")
+            await ctx.send("Bitte in einem Text-Channel ausführen.", ephemeral=True)
             return
 
         await self._ensure_dashboard_message(guild, ctx.channel, which="test")
-        try:
-            await ctx.message.add_reaction("✅")
-        except Exception:
-            pass
-
+        await ctx.send("✅ TEST Dashboard gesetzt/aktualisiert.", ephemeral=True)
 
     @commands.guild_only()
-    @commands.command(name="dashboard_refresh_live")
-    async def dashboard_refresh_live(self, ctx: commands.Context):
+    @commands.hybrid_command(name="dashboard_refresh_live", with_app_command=True)
+    async def dashboard_refresh_live_slash(self, ctx: commands.Context):
         guild = ctx.guild
         if not guild:
             return
         if not isinstance(ctx.author, discord.Member) or not _can_refresh_dashboard(ctx.author):
-            await ctx.send("Nur Admin/Offizier dürfen refreshen.")
+            await ctx.send("Nur Admin/Offizier dürfen refreshen.", ephemeral=True)
             return
+
         await self._refresh_dashboard(guild, which="live")
-        try:
-            await ctx.message.add_reaction("🔄")
-        except Exception:
-            pass
-
+        await ctx.send("🔄 LIVE Dashboard refreshed.", ephemeral=True)
 
     @commands.guild_only()
-    @commands.command(name="dashboard_refresh_test")
-    async def dashboard_refresh_test(self, ctx: commands.Context):
+    @commands.hybrid_command(name="dashboard_refresh_test", with_app_command=True)
+    async def dashboard_refresh_test_slash(self, ctx: commands.Context):
         guild = ctx.guild
         if not guild:
             return
         if not isinstance(ctx.author, discord.Member) or not _can_refresh_dashboard(ctx.author):
-            await ctx.send("Nur Admin/Offizier dürfen refreshen.")
+            await ctx.send("Nur Admin/Offizier dürfen refreshen.", ephemeral=True)
             return
+
         await self._refresh_dashboard(guild, which="test")
-        try:
-            await ctx.message.add_reaction("🔄")
-        except Exception:
-            pass
+        await ctx.send("🔄 TEST Dashboard refreshed.", ephemeral=True)
+
 
 
     async def _ensure_dashboard_message(self, guild: discord.Guild, channel: discord.TextChannel, which: str):
