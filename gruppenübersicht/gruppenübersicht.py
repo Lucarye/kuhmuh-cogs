@@ -15,6 +15,7 @@ from discord import app_commands
 # =========================
 GUILD_ID = 1198649628787212458
 
+
 # Eigene Dashboard-Config (separat)
 DASHBOARD_CONFIG_IDENTIFIER = 935771234124
 
@@ -175,19 +176,21 @@ class Gruppenübersicht(commands.Cog):
         )
 
         self._dashboard_refresh_loop.start()
-        self.bot.add_view(DashboardDMView("live"))
-        self.bot.add_view(DashboardDMView("test"))
 
     async def cog_load(self):
-        # Guild-only sync (schnell & zuverlässig)
         try:
             await self.bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         except Exception:
             pass
 
-    def cog_unload(self):
-        self._dashboard_refresh_loop.cancel()
+        # Persistent Views registrieren (Buttons funktionieren dann auch nach Neustart)
+        try:
+            self.bot.add_view(DashboardDMView("live"))
+            self.bot.add_view(DashboardDMView("test"))
+        except Exception:
+            pass
 
+        
     # =========================
     # Datenquelle: direkt aus Gruppensuche-Cog
     # =========================
