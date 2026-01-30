@@ -173,6 +173,17 @@ class Gruppenübersicht(commands.Cog):
 
         self._dashboard_refresh_loop.start()
 
+    async def force_refresh_all(self, guild_id: int):
+        if int(guild_id) != GUILD_ID:
+            return
+        guild = self.bot.get_guild(GUILD_ID)
+        if not guild:
+            return
+        await self._refresh_dashboard(guild, which="live")
+        await self._refresh_dashboard(guild, which="test")
+    
+
+
     async def cog_load(self):
         # 1) Persistent Views registrieren
         try:
@@ -206,6 +217,7 @@ class Gruppenübersicht(commands.Cog):
             self.bot.tree.remove_command("dashboard", type=discord.AppCommandType.chat_input)
         except Exception:
             pass
+
 
     # =========================
     # Datenquelle: direkt aus Gruppensuche-Cog
@@ -462,12 +474,27 @@ class Gruppenübersicht(commands.Cog):
                 except Exception:
                     pass
 
+        SPOT_ORDER = ["mirumok", "gyfin", "newspot"]  # erweitern
+        def _spot_order_key(spot_key: str) -> int:
+            try:
+                return SPOT_ORDER.index(spot_key)
+            except ValueError:
+                return 999
+        
+
         def _sort_key(d: dict):
             day_iso = str(d.get("day_date_iso") or "")
             start_text = str(d.get("start_text") or "")
             tkey = _extract_time_sort_key(start_text)
             cat = str(d.get("category") or "")
-            return (day_iso, tkey[0], tkey[1], cat)
+
+            # Spots: extra sort nach Spot (miru -> gyfin -> neu)
+            if cat == "spots":
+                spot = str(d.get("spot_key") or "")
+                return (day_iso, tkey[0], tkey[1], 0, _spot_order_key(spot))
+
+            return (day_iso, tkey[0], tkey[1], 1, cat)
+
 
         items.sort(key=_sort_key)
 
@@ -497,10 +524,6 @@ class Gruppenübersicht(commands.Cog):
         )
 
         def fmt_line(d: dict) -> str:
-            owner_id = int(d.get("owner_id") or 0)
-            owner = guild.get_member(owner_id)
-            owner_txt = owner.mention if owner else f"<@{owner_id}>"
-
             day_iso = str(d.get("day_date_iso") or "")
             try:
                 day_d = dt.date.fromisoformat(day_iso)
@@ -527,30 +550,21 @@ class Gruppenübersicht(commands.Cog):
             message_id = int(d.get("message_id") or 0)
             jump = _jump_url(guild.id, channel_id, message_id)
 
-            free = max(0, max_players - len(participants))
+            # 3/5 Anzeige
+            count = f"{len(participants)}/{max_players}"
 
-            cat = str(d.get("category") or "")
-            extra = ""
-            if cat == "spots":
-                spot = str(d.get("spot_key") or "")
-                emoji = MIRUMOK_EMOJI if spot == "mirumok" else (GYFIN_EMOJI if spot == "gyfin" else CHEER_EMOJI)
-                extra = f"{emoji} {_spot_name(spot)}"
-            elif cat == "pilafe":
-                amount = d.get("scroll_amount") or "—"
-                extra = f"{PILAFE_EMOJI} Menge: {amount}"
-            else:
-                diff = str(d.get("difficulty") or "normal")
-                diff_label = "Schwer" if diff == "schwer" else "Normal"
-                extra = f"{MUHKUH_EMOJI} {diff_label}"
+            # Warteschlange nur wenn > 0
+            wl = f" | WL: {len(waitlist)}" if len(waitlist) > 0 else ""
 
             return (
-                f"• **{day_str}** | Start: **{start_text}** | Dauer: **{duration_text}**\n"
-                f"  {extra} | Req: **{req}** | {status} | Frei: **{free}** | Warteschlange: **{len(waitlist)}**\n"
-                f"  Suchender: {owner_txt} → {jump}"
+                f"• **{day_str}** | **{start_text}** | {duration_text} | Req: **{req}**\n"
+                f"  {status} | {count}{wl} → {jump}"
             )
 
-        def add_section(title: str, arr: List[dict]):
+
+        def add_section(title: str, arr: List[dict], empty_text: str = "—"):
             if not arr:
+                e.add_field(name=title, value=empty_text, inline=False)
                 return
 
             lines = [fmt_line(x) for x in arr]
