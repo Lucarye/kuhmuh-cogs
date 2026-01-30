@@ -71,9 +71,9 @@ def _default_req_for(data: dict) -> str:
     if cat == "spots":
         spot = data.get("spot_key", "")
         if spot == "mirumok":
-            return "350+ AP / 427+ VK"
+            return "350/427"
         if spot == "gyfin":
-            return "370+ AP / 440+ VK"
+            return "370/440"
         return ""
     return ""
 
@@ -593,8 +593,30 @@ class Gruppenübersicht(commands.Cog):
 
         add_section(f"{MUHKUH_EMOJI} Muhhelfer – Normal ({len(muh_normal)})", muh_normal)
         add_section(f"{MUHKUH_EMOJI} Muhhelfer – Schwer ({len(muh_schwer)})", muh_schwer)
-        add_section(f"{CHEER_EMOJI} Gruppenspots ({len(spots)})", spots)
+
+        # --- Gruppenspots nach Spot aufteilen (Miru -> Gyfin -> Rest) ---
+        spots_miru: List[dict] = []
+        spots_gyfin: List[dict] = []
+        spots_other: List[dict] = []
+
+        for d in spots:
+            sk = str(d.get("spot_key") or "")
+            if sk == "mirumok":
+                spots_miru.append(d)
+            elif sk == "gyfin":
+                spots_gyfin.append(d)
+            else:
+                spots_other.append(d)
+
+        add_section(f"{CHEER_EMOJI} Gruppenspots – Mirumok ({len(spots_miru)})", spots_miru)
+        add_section(f"{CHEER_EMOJI} Gruppenspots – Gyfin ({len(spots_gyfin)})", spots_gyfin)
+
+        # optional: nur anzeigen, wenn es wirklich andere Spots gibt
+        if spots_other:
+            add_section(f"{CHEER_EMOJI} Gruppenspots – Sonstige ({len(spots_other)})", spots_other)
+
         add_section(f"{PILAFE_EMOJI} Pila Fe ({len(pilafe)})", pilafe)
+        
 
         if not items:
             e.add_field(name="Keine Eintraege", value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
