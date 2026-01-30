@@ -1541,7 +1541,7 @@ class ClosedPostView(discord.ui.View):
 # Cog
 # =========================
 
-class GruppensucheTest(commands.Cog):
+class Gruppensuche(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
@@ -3006,4 +3006,5 @@ class GruppensucheTest(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
+
 
