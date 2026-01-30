@@ -15,7 +15,6 @@ from discord import app_commands
 # =========================
 GUILD_ID = 1198649628787212458
 
-
 # Eigene Dashboard-Config (separat)
 DASHBOARD_CONFIG_IDENTIFIER = 935771234124
 
@@ -46,8 +45,6 @@ ROLE_NO_DM_ID_TEST = 1466761625158684817  # Gruppensuche DM-Funktion TEST
 ADMIN_ROLE_ID: Optional[int] = 1452050940952838214
 OFFIZIER_ROLE_ID: Optional[int] = 1198652039312453723
 
-
-# =========================
 
 def _now_local() -> dt.datetime:
     return dt.datetime.now()
@@ -160,14 +157,13 @@ class DashboardDMView(discord.ui.View):
 
 
 class Gruppenübersicht(commands.Cog):
-    """Gruppenübersicht - Dashbord"""
+    """Gruppenübersicht - Dashboard"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
         # Eigene Config fuer Dashboard-Msg/Channel
-        self.config = Config.get_conf(
-            self, identifier=DASHBOARD_CONFIG_IDENTIFIER, force_registration=True)
+        self.config = Config.get_conf(self, identifier=DASHBOARD_CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(
             dashboard_live_channel_id=None,
             dashboard_live_message_id=None,
@@ -187,12 +183,8 @@ class Gruppenübersicht(commands.Cog):
 
         # 2) Commands explizit in den Tree hängen (Red-sicher)
         gobj = discord.Object(id=GUILD_ID)
-
         try:
-            self.bot.tree.add_command(self.dashboard_live_command, guild=gobj)
-            self.bot.tree.add_command(self.dashboard_test_command, guild=gobj)
-            self.bot.tree.add_command(self.dashboard_refresh_live_command, guild=gobj)
-            self.bot.tree.add_command(self.dashboard_refresh_test_command, guild=gobj)
+            self.bot.tree.add_command(self.dashboard_command, guild=gobj)
         except Exception:
             pass
 
@@ -202,25 +194,19 @@ class Gruppenübersicht(commands.Cog):
         except Exception:
             pass
 
-
     def cog_unload(self):
+        # Loop stoppen
         try:
             self._dashboard_refresh_loop.cancel()
         except Exception:
             pass
 
-        # Commands wieder entfernen (wichtig bei reload)
+        # Command entfernen (wichtig bei reload)
         try:
-            self.bot.tree.remove_command("dashboard_live", type=discord.AppCommandType.chat_input)
-            self.bot.tree.remove_command("dashboard_test", type=discord.AppCommandType.chat_input)
-            self.bot.tree.remove_command("dashboard_refresh_live", type=discord.AppCommandType.chat_input)
-            self.bot.tree.remove_command("dashboard_refresh_test", type=discord.AppCommandType.chat_input)
+            self.bot.tree.remove_command("dashboard", type=discord.AppCommandType.chat_input)
         except Exception:
             pass
 
-    
-
-        
     # =========================
     # Datenquelle: direkt aus Gruppensuche-Cog
     # =========================
@@ -232,14 +218,9 @@ class Gruppenübersicht(commands.Cog):
         return self.bot.get_cog("GruppensucheTest")
 
     async def _get_searches_from(self, guild: discord.Guild, source: str) -> Dict[str, dict]:
-        if source == "live":
-            cog = self._get_gruppensuche_cog_live()
-        else:
-            cog = self._get_gruppensuche_cog_test()
-
+        cog = self._get_gruppensuche_cog_live() if source == "live" else self._get_gruppensuche_cog_test()
         if not cog:
             return {}
-
         try:
             data = await cog.config.guild(guild).searches()
             return data or {}
@@ -276,12 +257,27 @@ class Gruppenübersicht(commands.Cog):
             await self.config.guild(guild).dashboard_test_message_id.set(None)
 
     # =========================
-    # Slash Commands (App Commands)
+    # Slash Command: NUR 1 Command mit Optionen
     # =========================
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="dashboard_live", description="Postet/verschiebt das LIVE Dashboard in diesen Channel.")
-    async def dashboard_live_command(self, interaction: discord.Interaction) -> None:
+    @app_commands.command(name="dashboard", description="Dashboard posten/verschieben oder refreshen.")
+    @app_commands.choices(
+        bereich=[
+            app_commands.Choice(name="LIVE", value="live"),
+            app_commands.Choice(name="TEST", value="test"),
+        ],
+        aktion=[
+            app_commands.Choice(name="Posten / Verschieben", value="post"),
+            app_commands.Choice(name="Refresh", value="refresh"),
+        ],
+    )
+    async def dashboard_command(
+        self,
+        interaction: discord.Interaction,
+        bereich: app_commands.Choice[str],
+        aktion: app_commands.Choice[str],
+    ) -> None:
         await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
@@ -289,71 +285,30 @@ class Gruppenübersicht(commands.Cog):
             await interaction.followup.send("Dieser Command ist nur für unsere Guild vorgesehen.", ephemeral=True)
             return
 
-        if not isinstance(interaction.user, discord.Member) or not _can_post_dashboard(interaction.user):
-            await interaction.followup.send("Nur Admins dürfen das Dashboard posten/verschieben.", ephemeral=True)
+        if not isinstance(interaction.user, discord.Member):
             return
 
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send("Bitte in einem Text-Channel ausführen.", ephemeral=True)
+        which = bereich.value  # "live" | "test"
+
+        if aktion.value == "post":
+            if not _can_post_dashboard(interaction.user):
+                await interaction.followup.send("Nur Admins dürfen das Dashboard posten/verschieben.", ephemeral=True)
+                return
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.followup.send("Bitte in einem Text-Channel ausführen.", ephemeral=True)
+                return
+
+            await self._ensure_dashboard_message(guild, interaction.channel, which=which)
+            await interaction.followup.send(f"✅ {which.upper()} Dashboard gesetzt/aktualisiert.", ephemeral=True)
             return
 
-        await self._ensure_dashboard_message(guild, interaction.channel, which="live")
-        await interaction.followup.send("✅ LIVE Dashboard gesetzt/aktualisiert.", ephemeral=True)
-
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="dashboard_test", description="Postet/verschiebt das TEST Dashboard in diesen Channel.")
-    async def dashboard_test_command(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-
-        guild = interaction.guild
-        if not guild or guild.id != GUILD_ID:
-            await interaction.followup.send("Dieser Command ist nur für unsere Guild vorgesehen.", ephemeral=True)
-            return
-
-        if not isinstance(interaction.user, discord.Member) or not _can_post_dashboard(interaction.user):
-            await interaction.followup.send("Nur Admins dürfen das Dashboard posten/verschieben.", ephemeral=True)
-            return
-
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send("Bitte in einem Text-Channel ausführen.", ephemeral=True)
-            return
-
-        await self._ensure_dashboard_message(guild, interaction.channel, which="test")
-        await interaction.followup.send("✅ TEST Dashboard gesetzt/aktualisiert.", ephemeral=True)
-
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="dashboard_refresh_live", description="Refresht das LIVE Dashboard (Admin/Offizier).")
-    async def dashboard_refresh_live_command(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-
-        guild = interaction.guild
-        if not guild or guild.id != GUILD_ID:
-            await interaction.followup.send("Dieser Command ist nur für unsere Guild vorgesehen.", ephemeral=True)
-            return
-
-        if not isinstance(interaction.user, discord.Member) or not _can_refresh_dashboard(interaction.user):
+        # refresh
+        if not _can_refresh_dashboard(interaction.user):
             await interaction.followup.send("Nur Admin/Offizier dürfen refreshen.", ephemeral=True)
             return
 
-        await self._refresh_dashboard(guild, which="live")
-        await interaction.followup.send("🔄 LIVE Dashboard refreshed.", ephemeral=True)
-
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="dashboard_refresh_test", description="Refresht das TEST Dashboard (Admin/Offizier).")
-    async def dashboard_refresh_test_command(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-
-        guild = interaction.guild
-        if not guild or guild.id != GUILD_ID:
-            await interaction.followup.send("Dieser Command ist nur für unsere Guild vorgesehen.", ephemeral=True)
-            return
-
-        if not isinstance(interaction.user, discord.Member) or not _can_refresh_dashboard(interaction.user):
-            await interaction.followup.send("Nur Admin/Offizier dürfen refreshen.", ephemeral=True)
-            return
-
-        await self._refresh_dashboard(guild, which="test")
-        await interaction.followup.send("🔄 TEST Dashboard refreshed.", ephemeral=True)
+        await self._refresh_dashboard(guild, which=which)
+        await interaction.followup.send(f"🔄 {which.upper()} Dashboard refreshed.", ephemeral=True)
 
     async def _ensure_dashboard_message(self, guild: discord.Guild, channel: discord.TextChannel, which: str):
         embed = await self._build_dashboard_embed(guild, which=which)
@@ -454,6 +409,7 @@ class Gruppenübersicht(commands.Cog):
                 day_d = dt.date.fromisoformat(str(day_iso))
                 if day_d < today:
                     continue
+
                 d2 = dict(data)
                 d2["message_id"] = int(d2.get("message_id") or int(mid_str))
                 channel_id = int(data.get("channel_id") or 0)
@@ -474,9 +430,9 @@ class Gruppenübersicht(commands.Cog):
             except Exception:
                 continue
 
+        # stale Einträge löschen (nur in der passenden Quelle!)
         if stale_message_ids:
-            search_cog = self._get_gruppensuche_cog_live(
-            ) if which == "live" else self._get_gruppensuche_cog_test()
+            search_cog = self._get_gruppensuche_cog_live() if which == "live" else self._get_gruppensuche_cog_test()
             if search_cog:
                 try:
                     async with search_cog.config.guild(guild).searches() as s:
@@ -540,8 +496,7 @@ class Gruppenübersicht(commands.Cog):
 
             is_closed = bool(d.get("is_closed", False))
             is_full = len(participants) >= max_players
-            status = "🔴 Geschlossen" if is_closed else (
-                "🔴 Voll" if is_full else "🟢 Offen")
+            status = "🔴 Geschlossen" if is_closed else ("🔴 Voll" if is_full else "🟢 Offen")
 
             req_text = d.get("req_text") or ""
             req_default = _default_req_for(d)
@@ -557,8 +512,7 @@ class Gruppenübersicht(commands.Cog):
             extra = ""
             if cat == "spots":
                 spot = str(d.get("spot_key") or "")
-                emoji = MIRUMOK_EMOJI if spot == "mirumok" else (
-                    GYFIN_EMOJI if spot == "gyfin" else CHEER_EMOJI)
+                emoji = MIRUMOK_EMOJI if spot == "mirumok" else (GYFIN_EMOJI if spot == "gyfin" else CHEER_EMOJI)
                 extra = f"{emoji} {_spot_name(spot)}"
             elif cat == "pilafe":
                 amount = d.get("scroll_amount") or "—"
@@ -595,18 +549,14 @@ class Gruppenübersicht(commands.Cog):
                 field_name = title if idx == 0 else f"{title} (weiter)"
                 e.add_field(name=field_name, value=ch, inline=False)
 
-        add_section(
-            f"{MUHKUH_EMOJI} Muhhelfer – Normal ({len(muh_normal)})", muh_normal)
-        add_section(
-            f"{MUHKUH_EMOJI} Muhhelfer – Schwer ({len(muh_schwer)})", muh_schwer)
+        add_section(f"{MUHKUH_EMOJI} Muhhelfer – Normal ({len(muh_normal)})", muh_normal)
+        add_section(f"{MUHKUH_EMOJI} Muhhelfer – Schwer ({len(muh_schwer)})", muh_schwer)
         add_section(f"{CHEER_EMOJI} Gruppenspots ({len(spots)})", spots)
         add_section(f"{PILAFE_EMOJI} Pila Fe ({len(pilafe)})", pilafe)
 
         if not items:
-            e.add_field(name="Keine Eintraege",
-                        value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
+            e.add_field(name="Keine Eintraege", value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
 
-        e.set_footer(
-            text=f"Aktualisiert: {_now_local().strftime('%d.%m.%Y %H:%M')} Uhr")
+        e.set_footer(text=f"Aktualisiert: {_now_local().strftime('%d.%m.%Y %H:%M')} Uhr")
         e.timestamp = discord.utils.utcnow()
         return e
