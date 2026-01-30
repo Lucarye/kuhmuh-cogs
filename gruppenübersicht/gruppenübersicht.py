@@ -32,6 +32,20 @@ AKVK_SCHWER = "330/401"
 
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
+# =========================
+# DM Opt-Out Rollen (Reverse)
+# =========================
+ROLE_NO_DM_ID_LIVE = 1466752408779751509  # Gruppensuche DM-Funktion (Live)
+ROLE_NO_DM_ID_TEST = 1466761625158684817  # Gruppensuche DM-Funktion TEST
+
+# =========================
+# Rechte (optional: wenn du per Rolle prüfen willst)
+# =========================
+ADMIN_ROLE_ID: Optional[int] = 1452050940952838214
+OFFIZIER_ROLE_ID: Optional[int] = 1198652039312453723
+
+
+# =========================
 
 def _now_local() -> dt.datetime:
     return dt.datetime.now()
@@ -88,6 +102,57 @@ def _extract_time_sort_key(start_text: str) -> Tuple[int, int]:
 
     return (99, 99)
 
+def _has_role(member: discord.Member, role_id: Optional[int]) -> bool:
+    if not role_id:
+        return False
+    return any(r.id == int(role_id) for r in getattr(member, "roles", []))
+
+def _can_post_dashboard(member: discord.Member) -> bool:
+    # Posten nur Admin
+    return _has_role(member, ADMIN_ROLE_ID)
+
+def _can_refresh_dashboard(member: discord.Member) -> bool:
+    # Refresh Admin + Offizier
+    return _has_role(member, ADMIN_ROLE_ID) or _has_role(member, OFFIZIER_ROLE_ID)
+
+
+class DMOptButton(discord.ui.Button):
+    def __init__(self, which: str):
+        super().__init__(
+            label="DM Reminders: An/Aus",
+            emoji="✉️",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"gsdash:dmopt:{which}",
+        )
+        self.which = which
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return
+
+        member: discord.Member = interaction.user
+        role_id = ROLE_NO_DM_ID_LIVE if self.which == "live" else ROLE_NO_DM_ID_TEST
+        role = interaction.guild.get_role(int(role_id))
+        if not role:
+            await interaction.response.send_message("Rolle nicht gefunden.", ephemeral=True)
+            return
+
+        try:
+            if role in member.roles:
+                await member.remove_roles(role, reason="DM Opt-Out deaktiviert (wieder DMs)")
+                await interaction.response.send_message("✅ Du bekommst wieder **DM-Reminders**.", ephemeral=True)
+            else:
+                await member.add_roles(role, reason="DM Opt-Out aktiviert (keine DMs)")
+                await interaction.response.send_message("✅ Du bekommst **keine DM-Reminders** mehr.", ephemeral=True)
+        except Exception:
+            await interaction.response.send_message("❌ Konnte Rolle nicht ändern (Rechte?).", ephemeral=True)
+
+
+class DashboardDMView(discord.ui.View):
+    def __init__(self, which: str):
+        super().__init__(timeout=None)
+        self.add_item(DMOptButton(which))
+
 
 class Gruppenübersicht(commands.Cog):
     """Gruppenübersicht - Dashbord"""
@@ -98,11 +163,17 @@ class Gruppenübersicht(commands.Cog):
         # Eigene Config fuer Dashboard-Msg/Channel
         self.config = Config.get_conf(self, identifier=DASHBOARD_CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(
-            dashboard_channel_id=None,
-            dashboard_message_id=None,
+            dashboard_live_channel_id=None,
+            dashboard_live_message_id=None,
+            dashboard_test_channel_id=None,
+            dashboard_test_message_id=None,
         )
 
+
         self._dashboard_refresh_loop.start()
+        self.bot.add_view(DashboardDMView("live"))
+        self.bot.add_view(DashboardDMView("test"))
+
 
     def cog_unload(self):
         self._dashboard_refresh_loop.cancel()
@@ -111,97 +182,158 @@ class Gruppenübersicht(commands.Cog):
     # Datenquelle: direkt aus Gruppensuche-Cog
     # =========================
 
-    def _get_gruppensuche_cog(self):
-        """
-        Holt den Cog, der die searches besitzt.
-        Passe hier nur an, falls du den Klassennamen aenderst.
-        """
-        # Erst Test-Cog
-        c = self.bot.get_cog("GruppensucheTest")
-        if c:
-            return c
+    def _get_gruppensuche_cog_live(self):
+        return self.bot.get_cog("Gruppensuche")
 
-        # Falls spaeter der Main Cog anders heisst
-        c = self.bot.get_cog("Gruppensuche")
-        if c:
-            return c
+    def _get_gruppensuche_cog_test(self):
+        return self.bot.get_cog("GruppensucheTest")
 
-        return None
+    async def _get_searches_from(self, guild: discord.Guild, source: str) -> Dict[str, dict]:
+        if source == "live":
+            cog = self._get_gruppensuche_cog_live()
+        else:
+            cog = self._get_gruppensuche_cog_test()
 
-    async def _get_searches(self, guild: discord.Guild) -> Dict[str, dict]:
-        search_cog = self._get_gruppensuche_cog()
-        if not search_cog:
+        if not cog:
             return {}
 
-        # Erwartet: search_cog.config.register_guild(searches={})
         try:
-            data = await search_cog.config.guild(guild).searches()
+            data = await cog.config.guild(guild).searches()
             return data or {}
         except Exception:
             return {}
 
-    async def _get_dashboard_target(self, guild: discord.Guild) -> Tuple[Optional[int], Optional[int]]:
-        ch_id = await self.config.guild(guild).dashboard_channel_id()
-        msg_id = await self.config.guild(guild).dashboard_message_id()
+
+    async def _get_dashboard_target(self, guild: discord.Guild, which: str) -> Tuple[Optional[int], Optional[int]]:
+        if which == "live":
+            ch_id = await self.config.guild(guild).dashboard_live_channel_id()
+            msg_id = await self.config.guild(guild).dashboard_live_message_id()
+        else:
+            ch_id = await self.config.guild(guild).dashboard_test_channel_id()
+            msg_id = await self.config.guild(guild).dashboard_test_message_id()
+
         try:
             return (int(ch_id) if ch_id else None, int(msg_id) if msg_id else None)
         except Exception:
             return (None, None)
 
-    async def _set_dashboard_target(self, guild: discord.Guild, channel_id: int, message_id: int):
-        await self.config.guild(guild).dashboard_channel_id.set(int(channel_id))
-        await self.config.guild(guild).dashboard_message_id.set(int(message_id))
+    async def _set_dashboard_target(self, guild: discord.Guild, which: str, channel_id: int, message_id: int):
+        if which == "live":
+            await self.config.guild(guild).dashboard_live_channel_id.set(int(channel_id))
+            await self.config.guild(guild).dashboard_live_message_id.set(int(message_id))
+        else:
+            await self.config.guild(guild).dashboard_test_channel_id.set(int(channel_id))
+            await self.config.guild(guild).dashboard_test_message_id.set(int(message_id))
 
-    async def _clear_dashboard_target(self, guild: discord.Guild):
-        await self.config.guild(guild).dashboard_channel_id.set(None)
-        await self.config.guild(guild).dashboard_message_id.set(None)
+    async def _clear_dashboard_target(self, guild: discord.Guild, which: str):
+        if which == "live":
+            await self.config.guild(guild).dashboard_live_channel_id.set(None)
+            await self.config.guild(guild).dashboard_live_message_id.set(None)
+        else:
+            await self.config.guild(guild).dashboard_test_channel_id.set(None)
+            await self.config.guild(guild).dashboard_test_message_id.set(None)
 
     # =========================
     # Prefix Command
     # =========================
 
     @commands.guild_only()
-    @commands.command(name="gruppenübersicht", aliases=["gübersicht", "dashboard"])
-    async def gruppenuebersicht_prefix(self, ctx: commands.Context):
-        """
-        Erstellt oder aktualisiert das Dashboard im aktuellen Channel.
-        Aufruf: °gruppenübersicht
-        """
+    @commands.command(name="dashboard_live")
+    async def dashboard_live(self, ctx: commands.Context):
         guild = ctx.guild
-        if guild is None:
+        if not guild:
             return
-
         if guild.id != GUILD_ID:
             await ctx.send("Dieser Cog ist nur fuer unsere Guild vorgesehen.")
             return
-
+        if not isinstance(ctx.author, discord.Member) or not _can_post_dashboard(ctx.author):
+            await ctx.send("Nur Admins dürfen das Dashboard posten/verschieben.")
+            return
         if not isinstance(ctx.channel, discord.TextChannel):
             await ctx.send("Bitte in einem Text-Channel ausfuehren.")
             return
 
-        await self._ensure_dashboard_message(guild, ctx.channel)
-
+        await self._ensure_dashboard_message(guild, ctx.channel, which="live")
         try:
             await ctx.message.add_reaction("✅")
         except Exception:
             pass
 
-    async def _ensure_dashboard_message(self, guild: discord.Guild, channel: discord.TextChannel):
-        embed = await self._build_dashboard_embed(guild)
 
-        ch_id, msg_id = await self._get_dashboard_target(guild)
+    @commands.guild_only()
+    @commands.command(name="dashboard_test")
+    async def dashboard_test(self, ctx: commands.Context):
+        guild = ctx.guild
+        if not guild:
+            return
+        if guild.id != GUILD_ID:
+            await ctx.send("Dieser Cog ist nur fuer unsere Guild vorgesehen.")
+            return
+        if not isinstance(ctx.author, discord.Member) or not _can_post_dashboard(ctx.author):
+            await ctx.send("Nur Admins dürfen das Dashboard posten/verschieben.")
+            return
+        if not isinstance(ctx.channel, discord.TextChannel):
+            await ctx.send("Bitte in einem Text-Channel ausfuehren.")
+            return
+
+        await self._ensure_dashboard_message(guild, ctx.channel, which="test")
+        try:
+            await ctx.message.add_reaction("✅")
+        except Exception:
+            pass
+
+
+    @commands.guild_only()
+    @commands.command(name="dashboard_refresh_live")
+    async def dashboard_refresh_live(self, ctx: commands.Context):
+        guild = ctx.guild
+        if not guild:
+            return
+        if not isinstance(ctx.author, discord.Member) or not _can_refresh_dashboard(ctx.author):
+            await ctx.send("Nur Admin/Offizier dürfen refreshen.")
+            return
+        await self._refresh_dashboard(guild, which="live")
+        try:
+            await ctx.message.add_reaction("🔄")
+        except Exception:
+            pass
+
+
+    @commands.guild_only()
+    @commands.command(name="dashboard_refresh_test")
+    async def dashboard_refresh_test(self, ctx: commands.Context):
+        guild = ctx.guild
+        if not guild:
+            return
+        if not isinstance(ctx.author, discord.Member) or not _can_refresh_dashboard(ctx.author):
+            await ctx.send("Nur Admin/Offizier dürfen refreshen.")
+            return
+        await self._refresh_dashboard(guild, which="test")
+        try:
+            await ctx.message.add_reaction("🔄")
+        except Exception:
+            pass
+
+
+    async def _ensure_dashboard_message(self, guild: discord.Guild, channel: discord.TextChannel, which: str):
+        embed = await self._build_dashboard_embed(guild, which=which)
+        view = DashboardDMView(which)
+
+        ch_id, msg_id = await self._get_dashboard_target(guild, which)
         if ch_id and msg_id:
             ch = guild.get_channel(int(ch_id))
             if isinstance(ch, discord.TextChannel):
                 try:
                     msg = await ch.fetch_message(int(msg_id))
-                    await msg.edit(embed=embed, view=None)
+                    await msg.edit(embed=embed, view=view)
                     return
                 except Exception:
                     pass
 
-        msg = await channel.send(embed=embed)
-        await self._set_dashboard_target(guild, channel.id, msg.id)
+        msg = await channel.send(embed=embed, view=view)
+        await self._set_dashboard_target(guild, which, channel.id, msg.id)
+
+
 
     # =========================
     # Sofort-Refresh via Event aus Gruppensuche
@@ -216,10 +348,12 @@ class Gruppenübersicht(commands.Cog):
         if not guild:
             return
 
-        await self._refresh_dashboard(guild)
+        await self._refresh_dashboard(guild, which="live")
+        await self._refresh_dashboard(guild, which="test")
 
-    async def _refresh_dashboard(self, guild: discord.Guild):
-        ch_id, msg_id = await self._get_dashboard_target(guild)
+
+    async def _refresh_dashboard(self, guild: discord.Guild, which: str):
+        ch_id, msg_id = await self._get_dashboard_target(guild, which)
         if not ch_id or not msg_id:
             return
 
@@ -231,16 +365,18 @@ class Gruppenübersicht(commands.Cog):
             msg = await ch.fetch_message(int(msg_id))
         except Exception:
             try:
-                await self._clear_dashboard_target(guild)
+                await self._clear_dashboard_target(guild, which)
             except Exception:
                 pass
             return
 
         try:
-            embed = await self._build_dashboard_embed(guild)
-            await msg.edit(embed=embed, view=None)
+            embed = await self._build_dashboard_embed(guild, which=which)
+            view = DashboardDMView(which)
+            await msg.edit(embed=embed, view=view)
         except Exception:
             return
+
 
     # =========================
     # Auto Refresh Loop (15 min)
@@ -255,7 +391,9 @@ class Gruppenübersicht(commands.Cog):
         if not guild:
             return
 
-        await self._refresh_dashboard(guild)
+        await self._refresh_dashboard(guild, which="live")
+        await self._refresh_dashboard(guild, which="test")
+
 
     @_dashboard_refresh_loop.before_loop
     async def _before_dashboard_refresh_loop(self):
@@ -266,8 +404,8 @@ class Gruppenübersicht(commands.Cog):
     # Build Dashboard
     # =========================
 
-    async def _build_dashboard_embed(self, guild: discord.Guild) -> discord.Embed:
-        searches = await self._get_searches(guild)
+    async def _build_dashboard_embed(self, guild: discord.Guild, which: str) -> discord.Embed:
+        searches = await self._get_searches_from(guild, source=which)
         today = _now_local().date()
 
         items: List[dict] = []
@@ -302,7 +440,7 @@ class Gruppenübersicht(commands.Cog):
                 continue
             
         if stale_message_ids:
-            search_cog = self._get_gruppensuche_cog()
+            search_cog = self._get_gruppensuche_cog_live() if which == "live" else self._get_gruppensuche_cog_test()
             if search_cog:
                 try:
                     async with search_cog.config.guild(guild).searches() as s:
@@ -310,7 +448,6 @@ class Gruppenübersicht(commands.Cog):
                             s.pop(str(mid), None)
                 except Exception:
                     pass
-
 
         def _sort_key(d: dict):
             day_iso = str(d.get("day_date_iso") or "")
@@ -339,13 +476,14 @@ class Gruppenübersicht(commands.Cog):
             elif cat == "pilafe":
                 pilafe.append(d)
 
+        title = "Gruppenübersicht - LIVE" if which == "live" else "Gruppenübersicht - TEST"
+
         e = discord.Embed(
-            title="Gruppenübersicht - Dashbord",
-            description=(
-                "Hier siehst du alle aktiven Gruppensuchen **ab heute**.\n"
-                "Auto-Update laeuft alle 15 Minuten (und sofort bei Updates der Suche, sobald das Dashboard einmal gesetzt wurde)."
-            ),
+            title=title,
+            description="Hier siehst du alle aktiven Gruppensuchen.\n✉️ Button: DM Reminders an/aus.",
         )
+
+
 
         def fmt_line(d: dict) -> str:
             owner_id = int(d.get("owner_id") or 0)
