@@ -178,17 +178,47 @@ class Gruppenübersicht(commands.Cog):
         self._dashboard_refresh_loop.start()
 
     async def cog_load(self):
-        try:
-            await self.bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        except Exception:
-            pass
-
-        # Persistent Views registrieren (Buttons funktionieren dann auch nach Neustart)
+        # 1) Persistent Views registrieren
         try:
             self.bot.add_view(DashboardDMView("live"))
             self.bot.add_view(DashboardDMView("test"))
         except Exception:
             pass
+
+        # 2) Commands explizit in den Tree hängen (Red-sicher)
+        gobj = discord.Object(id=GUILD_ID)
+
+        try:
+            self.bot.tree.add_command(self.dashboard_live_command, guild=gobj)
+            self.bot.tree.add_command(self.dashboard_test_command, guild=gobj)
+            self.bot.tree.add_command(self.dashboard_refresh_live_command, guild=gobj)
+            self.bot.tree.add_command(self.dashboard_refresh_test_command, guild=gobj)
+        except Exception:
+            pass
+
+        # 3) Danach syncen
+        try:
+            await self.bot.tree.sync(guild=gobj)
+        except Exception:
+            pass
+
+
+    def cog_unload(self):
+        try:
+            self._dashboard_refresh_loop.cancel()
+        except Exception:
+            pass
+
+        # Commands wieder entfernen (wichtig bei reload)
+        try:
+            self.bot.tree.remove_command("dashboard_live", type=discord.AppCommandType.chat_input)
+            self.bot.tree.remove_command("dashboard_test", type=discord.AppCommandType.chat_input)
+            self.bot.tree.remove_command("dashboard_refresh_live", type=discord.AppCommandType.chat_input)
+            self.bot.tree.remove_command("dashboard_refresh_test", type=discord.AppCommandType.chat_input)
+        except Exception:
+            pass
+
+    
 
         
     # =========================
