@@ -70,8 +70,8 @@ SPOTS: List[Tuple[str, str]] = [
 ]
 
 SPOT_REQ: Dict[str, str] = {
-    "mirumok": "350+ AP / 427+ VK",
-    "gyfin": "370+ AP / 440+ VK",
+    "mirumok": "350/ 427VK",
+    "gyfin": "370AP / 440VK",
 }
 
 SPOT_TOTAL_AP: Dict[str, str] = {
@@ -2102,11 +2102,19 @@ class GruppensucheTest(commands.Cog):
                 del searches[str(message_id)]
 
     def _dispatch_dashboard_update(self, guild_id: int):
-        # Trigger für Gruppenübersicht Cog (sofortiges Refresh).
         try:
             self.bot.dispatch("gruppensuche_updated", int(guild_id))
         except Exception:
             pass
+
+        # Hard fallback: direkt refresh anstoßen, falls Listener mal nicht greift
+        dash = self.bot.get_cog("Gruppenübersicht")
+        if dash:
+            try:
+                self.bot.loop.create_task(dash.force_refresh_all(int(guild_id)))
+            except Exception:
+                pass
+            
 
     async def _save_refresh_dispatch(self, data: dict, *, refresh_public: bool = True):
 
