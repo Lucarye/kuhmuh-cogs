@@ -518,7 +518,7 @@ class CustomDateModal(discord.ui.Modal):
 
 
 class DetailsModal(discord.ui.Modal):
-    def __init__(self, cog: "gruppensuche", session: WizardSession, defaults: Optional[dict] = None):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession, defaults: Optional[dict] = None):
         super().__init__(title="Details zur Gruppensuche")
         self.cog = cog
         self.session = session
@@ -665,7 +665,7 @@ class JoinApModal(discord.ui.Modal):
 # =========================
 
 class WizardBaseView(discord.ui.View):
-    def __init__(self, cog: "gruppensuche", session: WizardSession, timeout_seconds: int = WIZARD_TIMEOUT_SECONDS):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession, timeout_seconds: int = WIZARD_TIMEOUT_SECONDS):
         super().__init__(timeout=timeout_seconds)
         self.cog = cog
         self.session = session
@@ -749,7 +749,7 @@ class StartSelect(discord.ui.Select):
 
 
 class StartView(WizardBaseView):
-    def __init__(self, cog: "gruppensuche", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
         self.add_item(StartSelect(self))
 
@@ -801,7 +801,7 @@ class StartView(WizardBaseView):
 
 
 class DaySelectView(WizardBaseView):
-    def __init__(self, cog: "gruppensuche", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         # ✅ BackTarget wird IMMER zentral berechnet
@@ -896,7 +896,7 @@ class DaySelectView(WizardBaseView):
 
 
 class DifficultyView(WizardBaseView):
-    def __init__(self, cog: "gruppensuche", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         normal_btn = discord.ui.Button(
@@ -937,7 +937,7 @@ class DifficultyView(WizardBaseView):
 
 
 class BossSelectView(WizardBaseView):
-    def __init__(self, cog: "gruppensuche", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         self._boss_buttons: Dict[str, discord.ui.Button] = {}
@@ -1040,7 +1040,7 @@ class BossSelectView(WizardBaseView):
 
 
 class DoubleRunView(WizardBaseView):
-    def __init__(self, cog: "gruppensuche", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         self._dr_buttons: Dict[str, discord.ui.Button] = {}
@@ -1149,7 +1149,7 @@ class DoubleRunView(WizardBaseView):
 
 
 class SpotSelectView(WizardBaseView):
-    def __init__(self, cog: "gruppensuche", session: WizardSession):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
         super().__init__(cog, session)
 
         # Wenn nur genau ein Spot aktiv ist, auto-auswählen und direkt weiter
@@ -1256,7 +1256,7 @@ class PartySizeSelect(discord.ui.Select):
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
 
 class PartySizeView(WizardBaseView):
-    def __init__(self, cog: "gruppensuche", session: WizardSession, current: Optional[int] = None):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession, current: Optional[int] = None):
         super().__init__(cog, session)
 
         mn, mx = _allowed_party_range(session.category or "")
@@ -1308,7 +1308,7 @@ class PartySizeView(WizardBaseView):
 
 
 class EditMenuView(WizardBaseView):
-    def __init__(self, cog: "gruppensuche", session: WizardSession, post_data: dict):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession, post_data: dict):
         super().__init__(cog, session)
         self.post_data = post_data
 
@@ -1390,7 +1390,7 @@ class EditMenuView(WizardBaseView):
 
 
 class ConfirmView(discord.ui.View):
-    def __init__(self, cog: "gruppensuche", message_id: int, action: str, user_id: int):
+    def __init__(self, cog: "Gruppensuche", message_id: int, action: str, user_id: int):
         super().__init__(timeout=30)
         self.cog = cog
         self.message_id = message_id
@@ -1441,7 +1441,7 @@ class ConfirmView(discord.ui.View):
 
 
 class PublicPostView(discord.ui.View):
-    def __init__(self, cog: "gruppensuche", message_id: int):
+    def __init__(self, cog: "Gruppensuche", message_id: int):
         super().__init__(timeout=None)
         self.cog = cog
         self.message_id = message_id
@@ -1593,7 +1593,7 @@ class PublicPostView(discord.ui.View):
 
 
 class ClosedPostView(discord.ui.View):
-    def __init__(self, cog: "gruppensuche", message_id: int):
+    def __init__(self, cog: "Gruppensuche", message_id: int):
         super().__init__(timeout=None)
         self.cog = cog
         self.message_id = message_id
@@ -2619,6 +2619,81 @@ class Gruppensuche(commands.Cog):
             except Exception:
                 continue
 
+    async def _send_start_30m_reminder(self, guild: discord.Guild, message_id: int, data: dict):
+        if not FEATURE_DM_REMINDERS:
+            return
+
+        channel = guild.get_channel(int(data.get("channel_id", 0)))
+        jump = f"https://discord.com/channels/{guild.id}/{int(data.get('channel_id', 0))}/{message_id}"
+
+        max_players = int(data.get("max_players", 2))
+        participants = list(data.get("participants") or [])
+
+        owner_id = int(data.get("owner_id", 0))
+        free = max(0, max_players - len(participants))
+
+        def _member_has_no_dm_role(member: discord.Member) -> bool:
+            return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
+
+        # Owner NICHT in Teilnehmer-DM aufnehmen (sonst 2x DM)
+        participants_dm = [uid for uid in participants if int(uid) != owner_id]
+
+        day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
+        try:
+            day_str = _format_day(dt.date.fromisoformat(day_iso))
+        except Exception:
+            day_str = str(day_iso)
+
+        start_text = data.get("start_text") or "—"
+
+        # 1) DM an Teilnehmer (opt-out respektieren)
+        failed: list[int] = []
+        for uid in participants_dm:
+            m = guild.get_member(int(uid))
+            if not m:
+                continue
+
+            if _member_has_no_dm_role(m):
+                continue
+
+            try:
+                await m.send(
+                    f"⏰ **Reminder:** In ~30 Minuten geht’s los.\n"
+                    f"**Tag:** {day_str}\n"
+                    f"**Start:** {start_text}\n"
+                    f"{jump}"
+                )
+            except Exception:
+                failed.append(int(uid))
+
+        # Fallback: wer DMs zu hat -> Ping im Channel
+        if failed and isinstance(channel, discord.TextChannel):
+            mentions = " ".join(f"<@{uid}>" for uid in failed)
+            try:
+                await channel.send(
+                    f"⏰ Reminder (DM fehlgeschlagen): {mentions}\n"
+                    f"**Start:** {start_text} | {day_str}\n{jump}",
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                )
+            except Exception:
+                pass
+
+        # 2) Extra DM an Ersteller (Host) – opt-out respektieren
+        owner = guild.get_member(owner_id)
+        if owner and not _member_has_no_dm_role(owner):
+            try:
+                extra = f"\n⚠️ Es fehlen noch **{free}** Teilnehmer." if free > 0 else "\n✅ Gruppe ist voll."
+                await owner.send(
+                    f"⏰ **Reminder (Host):** In ~30 Minuten.\n"
+                    f"**Tag:** {day_str}\n"
+                    f"**Start:** {start_text}"
+                    f"{extra}\n{jump}"
+                )
+            except Exception:
+                pass
+
+
+
     async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
 
         data = await self._get_search(message_id)
@@ -3111,8 +3186,3 @@ class Gruppensuche(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
-
-
-
-
-
