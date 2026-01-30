@@ -315,18 +315,39 @@ class Gruppenübersicht(commands.Cog):
         view = DashboardDMView(which)
 
         ch_id, msg_id = await self._get_dashboard_target(guild, which)
+
+        # Wenn es ein altes Dashboard gibt:
         if ch_id and msg_id:
-            ch = guild.get_channel(int(ch_id))
-            if isinstance(ch, discord.TextChannel):
+            old_ch = guild.get_channel(int(ch_id))
+
+            # ✅ Wenn der Command in einem ANDEREN Channel ausgeführt wird -> wirklich "verschieben"
+            if isinstance(old_ch, discord.TextChannel) and old_ch.id != channel.id:
+                # optional: altes Dashboard löschen
                 try:
-                    msg = await ch.fetch_message(int(msg_id))
-                    await msg.edit(embed=embed, view=view)
-                    return
+                    old_msg = await old_ch.fetch_message(int(msg_id))
+                    await old_msg.delete()
                 except Exception:
                     pass
 
-        msg = await channel.send(embed=embed, view=view)
-        await self._set_dashboard_target(guild, which, channel.id, msg.id)
+                # neues Dashboard im aktuellen Channel posten
+                new_msg = await channel.send(embed=embed, view=view)
+                await self._set_dashboard_target(guild, which, channel.id, new_msg.id)
+                return
+
+            # ✅ gleicher Channel -> editieren
+            if isinstance(old_ch, discord.TextChannel):
+                try:
+                    msg = await old_ch.fetch_message(int(msg_id))
+                    await msg.edit(embed=embed, view=view)
+                    return
+                except Exception:
+                    # Wenn fetch/edit fehlschlägt: fallback -> neu posten
+                    pass
+
+        # Kein gültiges Target -> neu posten
+        new_msg = await channel.send(embed=embed, view=view)
+        await self._set_dashboard_target(guild, which, channel.id, new_msg.id)
+
 
     # =========================
     # Sofort-Refresh via Event aus Gruppensuche
