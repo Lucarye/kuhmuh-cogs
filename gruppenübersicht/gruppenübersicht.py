@@ -204,7 +204,7 @@ class Gruppenübersicht(commands.Cog):
         except Exception:
             pass
         if not self._dashboard_refresh_loop.is_running():
-        self._dashboard_refresh_loop.start()
+            self._dashboard_refresh_loop.start()
 
 
     def cog_unload(self):
