@@ -39,6 +39,8 @@ PARTICIPANT_PING_COOLDOWN_SECONDS = 60
 WIZARD_TIMEOUT_SECONDS = 300  # 5 Minuten (oder 600 = 10 Minuten)
 
 ROLE_NO_DM_ID = 1466752408779751509  # "Gruppensuche DM-Funktion" (Reverse: hat Rolle => KEINE DM)
+#ROLE_NO_DM_ID LIVE = 1466752408779751509
+#ROLE_NO_DM_ID TEST = 1466761625158684817
 
 
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
@@ -3183,6 +3185,7 @@ class Gruppensuche(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
+
 
 
 
