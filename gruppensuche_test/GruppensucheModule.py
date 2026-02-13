@@ -13,6 +13,7 @@ from discord import PartialEmoji  # pyright: ignore[reportMissingImports]
 import discord  # pyright: ignore[reportMissingImports]
 # pyright: ignore[reportMissingImports]
 from redbot.core import commands, Config
+import random
 
 
 # =========================
@@ -58,6 +59,15 @@ OLUN_EMOJI = "<:olun:1471826612394655857>"
 
 EASTER_EGG_AP = 396
 EASTER_EGG_MARK = " ✨"  # oder f" {MUHKUH_EMOJI}" wenn du es cow-themed willst
+
+# ✅ Textpool (rein kosmetisch)
+EASTER_EGG_TEXT_POOL = [
+    "hat wohl heimlich +AP im Stall gefunden",
+    "ist offiziell overcapped 🐮",
+    "bringt Kuhkraft auf Maximum",
+    "hat den Black Spirit überredet",
+    "AP ist nicht alles… außer heute 😄",
+]
 
 
 GUILD_ID = 1198649628787212458
@@ -372,33 +382,55 @@ def _parse_date_input(text: str) -> Optional[dt.date]:
 _TIME_RE = re.compile(
     r"(?P<h>\d{1,2})(?:[:\.,](?P<m>\d{2}))?\s*(?:uhr)?", re.IGNORECASE)
 
+
 _AP_NUM_RE = re.compile(r"(\d+)")
 
 
-def _ap_has_easter_egg(ap_val: Optional[str]) -> bool:
+def _ap_triggers_easter_egg(ap_val: Optional[str]) -> bool:
+    """Trigger: AP > 396 (weil 396 max ist)."""
     if not ap_val:
         return False
     m = _AP_NUM_RE.search(str(ap_val))
     if not m:
         return False
     try:
-        return int(m.group(1)) == EASTER_EGG_AP
+        return int(m.group(1)) > EASTER_EGG_AP
     except Exception:
         return False
 
 
-def _fmt_player_with_ap(mention: str, ap_val: Optional[str]) -> str:
+def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> Optional[str]:
     """
-    Formatiert Spieler wie bisher: "<@id> (305 AP)"
-    + Easteregg direkt dahinter, wenn AP == 396.
+    Würfelt EINMALIG einen Text, wenn AP triggern.
+    Speichert pro Post pro User in data['easter_egg_texts'].
     """
-    if ap_val:
-        base = f"{mention} ({ap_val} AP)"
-    else:
-        base = mention
-    if _ap_has_easter_egg(ap_val):
-        return base + EASTER_EGG_MARK
+    if not _ap_triggers_easter_egg(ap_val):
+        return None
+
+    egg_map = data.get("easter_egg_texts")
+    if not isinstance(egg_map, dict):
+        egg_map = {}
+
+    key = str(int(user_id))
+    if key in egg_map and str(egg_map[key]).strip():
+        return str(egg_map[key])
+
+    # einmalig würfeln
+    txt = random.choice(EASTER_EGG_TEXT_POOL) if EASTER_EGG_TEXT_POOL else "✨"
+    egg_map[key] = txt
+    data["easter_egg_texts"] = egg_map
+    return txt
+
+
+def _fmt_player_with_ap_and_egg(mention: str, ap_val: Optional[str], egg_text: Optional[str]) -> str:
+    base = f"{mention} ({ap_val} AP)" if ap_val else mention
+    if egg_text:
+        return f"{base} ✨ {egg_text}"
     return base
+
+
+def _fmt_player_with_ap(mention: str, ap_val: Optional[str]) -> str:
+    return f"{mention} ({ap_val} AP)" if ap_val else mention
 
 
 def _parse_time_token(token: str) -> Optional[tuple[int, int]]:
@@ -640,13 +672,20 @@ class DetailsModal(discord.ui.Modal):
             max_length=60,
             default=str(current_start) if current_start else None,
         )
+        req_default_value = None
+        if session.mode == "edit":
+            existing_req = str(self.defaults.get("req_text") or "").strip()
+            if existing_req:
+                req_default_value = existing_req
+
         self.req_text = discord.ui.TextInput(
             label="Gewünschte AK/VK (optional)",
             placeholder=f"Empfohlen: {current_req}" if current_req else "z.B. 370+ AP / 440+ VK",
             required=False,
             max_length=60,
-            default=None,   # wichtig!
+            default=req_default_value,
         )
+
         self.notes = discord.ui.TextInput(
             label="Optionale Notizen",
             placeholder="Gear, Anforderungen, Sonstiges",
@@ -698,11 +737,26 @@ class DetailsModal(discord.ui.Modal):
             self.session.scroll_amount = val if val else (
                 self.defaults.get("scroll_amount") or None)
 
-        self.session.duration_text = str(
-            self.duration_text.value).strip() or None
-        self.session.start_text = str(self.start_text.value).strip() or None
-        self.session.req_text = str(self.req_text.value).strip() or None
-        self.session.notes = str(self.notes.value).strip() or None
+        duration_val = str(self.duration_text.value).strip()
+        start_val = str(self.start_text.value).strip()
+        req_val = str(self.req_text.value).strip()
+        notes_val = str(self.notes.value).strip()
+
+        if self.session.mode == "create":
+            self.session.duration_text = duration_val or None
+            self.session.start_text = start_val or None
+            self.session.req_text = req_val or None
+            self.session.notes = notes_val or None
+        else:
+            # Edit: Nur überschreiben, wenn User etwas eingibt
+            if duration_val != "":
+                self.session.duration_text = duration_val
+            if start_val != "":
+                self.session.start_text = start_val
+            if req_val != "":
+                self.session.req_text = req_val
+            if notes_val != "":
+                self.session.notes = notes_val
 
         # Ab hier NICHT die Modal-Interaction verwenden,
         # sondern die Interaction, die das Wizard-Ephemeral besitzt.
@@ -1327,29 +1381,57 @@ class OlunTierView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
 
-        btn_normal = discord.ui.Button(
-            label="Normal", style=discord.ButtonStyle.primary, row=0)
-        btn_d1 = discord.ui.Button(
-            label="Dehkia 1", style=discord.ButtonStyle.danger, row=0)
-        btn_d2 = discord.ui.Button(
-            label="Dehkia 2", style=discord.ButtonStyle.danger, row=0)
+        self.btn_normal = discord.ui.Button(
+            label="Normal", style=discord.ButtonStyle.secondary, row=0
+        )
+        self.btn_d1 = discord.ui.Button(
+            label="Dehkia 1", style=discord.ButtonStyle.secondary, row=0
+        )
+        self.btn_d2 = discord.ui.Button(
+            label="Dehkia 2", style=discord.ButtonStyle.secondary, row=0
+        )
 
-        btn_normal.callback = self._pick("normal")
-        btn_d1.callback = self._pick("dehkia1")
-        btn_d2.callback = self._pick("dehkia2")
+        self.btn_normal.callback = self._pick("normal")
+        self.btn_d1.callback = self._pick("dehkia1")
+        self.btn_d2.callback = self._pick("dehkia2")
 
-        self.add_item(btn_normal)
-        self.add_item(btn_d1)
-        self.add_item(btn_d2)
+        self.add_item(self.btn_normal)
+        self.add_item(self.btn_d1)
+        self.add_item(self.btn_d2)
 
         self.add_item(build_back_button("Spot", BackTarget.SPOT, self, row=1))
+
+        self._refresh_styles()
+
+    def _refresh_styles(self):
+        chosen = (self.session.olun_tier or "").lower()
+
+        # default: alles neutral
+        self.btn_normal.style = discord.ButtonStyle.secondary
+        self.btn_d1.style = discord.ButtonStyle.secondary
+        self.btn_d2.style = discord.ButtonStyle.secondary
+
+        # selected: grün
+        if chosen == "normal":
+            self.btn_normal.style = discord.ButtonStyle.success
+        elif chosen == "dehkia1":
+            self.btn_d1.style = discord.ButtonStyle.success
+        elif chosen == "dehkia2":
+            self.btn_d2.style = discord.ButtonStyle.success
 
     def _pick(self, tier: str):
         async def _cb(interaction: discord.Interaction):
             if interaction.user.id != self.session.user_id:
                 await interaction.response.defer()
                 return
+
             self.session.olun_tier = tier
+            self._refresh_styles()
+
+            # ✅ kurzes visuelles Feedback (optional, aber nice UX)
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+
+            # danach normal weiter
             await self.cog._goto_next(interaction, self.session, Step.OLUN_TIER)
         return _cb
 
@@ -2404,6 +2486,25 @@ class GruppensucheTest(commands.Cog):
 
         req_text = data.get("req_text") or ""
 
+        egg_map = data.get("easter_egg_texts")
+        if not isinstance(egg_map, dict):
+            egg_map = {}
+
+        def _egg_for(uid: int) -> Optional[str]:
+            txt = str(egg_map.get(str(uid)) or "").strip()
+            return txt or None
+
+        def _build_user_lines(user_ids: list[int], ap_dict: dict) -> list[str]:
+            lines: list[str] = []
+            for uid in user_ids:
+                uid_int = int(uid)
+                m = guild.get_member(uid_int)
+                mention = (m.mention if m else f"<@{uid_int}>")
+                ap = ap_dict.get(str(uid_int))
+                lines.append(_fmt_player_with_ap_and_egg(
+                    mention, ap, _egg_for(uid_int)))
+            return lines
+
         # Titel
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal"))
@@ -2435,7 +2536,8 @@ class GruppensucheTest(commands.Cog):
         # Kopfblock (wie rechts)
         owner_txt = owner.mention if owner else f"<@{owner_id}>"
         owner_ap = data.get("owner_ap")
-        owner_display = _fmt_player_with_ap(owner_txt, owner_ap)
+        owner_display = _fmt_player_with_ap_and_egg(
+            owner_txt, owner_ap, _egg_for(owner_id))
 
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal"))
@@ -2470,14 +2572,9 @@ class GruppensucheTest(commands.Cog):
 
             status_block = f"**Status**\n{status_line}\n\n"
 
-            part_lines = []
-            for uid in participants:
-                m = guild.get_member(int(uid))
-                ap_map = data.get("participant_ap") or {}
-
-                mention = (m.mention if m else f"<@{uid}>")
-                ap = ap_map.get(str(uid))
-                part_lines.append(_fmt_player_with_ap(mention, ap))
+            # --- Teilnehmer-Liste korrekt bauen ---
+            part_lines = _build_user_lines(
+                participants, data.get("participant_ap") or {})
 
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
@@ -2486,13 +2583,9 @@ class GruppensucheTest(commands.Cog):
                 + "\n\n"
             )
 
-            wait_lines = []
-            wl_map = data.get("waitlist_ap") or {}
-            for uid in waitlist:
-                m = guild.get_member(int(uid))
-                mention = (m.mention if m else f"<@{uid}>")
-                ap = wl_map.get(str(uid))
-                wait_lines.append(f"{mention} ({ap} AP)" if ap else mention)
+            # --- Warteschlange korrekt bauen ---
+            wait_lines = _build_user_lines(
+                waitlist, data.get("waitlist_ap") or {})
 
             wait_block = (
                 f"**Warteschlange ({len(waitlist)})**\n"
@@ -2539,14 +2632,10 @@ class GruppensucheTest(commands.Cog):
 
             status_block = f"**Status**\n{status_line}\n\n"
 
-            part_lines = []
-            for uid in participants:
-                m = guild.get_member(int(uid))
-                ap_map = data.get("participant_ap") or {}
+            # --- Teilnehmer-Liste korrekt bauen ---
+            part_lines = _build_user_lines(
+                participants, data.get("participant_ap") or {})
 
-                mention = (m.mention if m else f"<@{uid}>")
-                ap = ap_map.get(str(uid))
-                part_lines.append(_fmt_player_with_ap(mention, ap))
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
                 + ("\n".join([f"• {x}" for x in part_lines])
@@ -2554,13 +2643,10 @@ class GruppensucheTest(commands.Cog):
                 + "\n\n"
             )
 
-            wait_lines = []
-            wl_map = data.get("waitlist_ap") or {}
-            for uid in waitlist:
-                m = guild.get_member(int(uid))
-                mention = (m.mention if m else f"<@{uid}>")
-                ap = wl_map.get(str(uid))
-                wait_lines.append(f"{mention} ({ap} AP)" if ap else mention)
+            # --- Warteschlange korrekt bauen ---
+            wait_lines = _build_user_lines(
+                waitlist, data.get("waitlist_ap") or {})
+
             wait_block = (
                 f"**Warteschlange ({len(waitlist)})**\n"
                 + ("\n".join([f"• {x}" for x in wait_lines])
@@ -2581,14 +2667,10 @@ class GruppensucheTest(commands.Cog):
 
             status_block = f"**Status**\n{status_line}\n\n"
 
-            part_lines = []
-            for uid in participants:
-                m = guild.get_member(int(uid))
-                ap_map = data.get("participant_ap") or {}
+            # --- Teilnehmer-Liste korrekt bauen ---
+            part_lines = _build_user_lines(
+                participants, data.get("participant_ap") or {})
 
-                mention = (m.mention if m else f"<@{uid}>")
-                ap = ap_map.get(str(uid))
-                part_lines.append(_fmt_player_with_ap(mention, ap))
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
                 + ("\n".join([f"• {x}" for x in part_lines])
@@ -2596,18 +2678,9 @@ class GruppensucheTest(commands.Cog):
                 + "\n\n"
             )
 
-            wait_lines = []
-            wl_map = data.get("waitlist_ap") or {}
-            for uid in waitlist:
-                m = guild.get_member(int(uid))
-                mention = (m.mention if m else f"<@{uid}>")
-                ap = wl_map.get(str(uid))
-                wait_lines.append(f"{mention} ({ap} AP)" if ap else mention)
-            wait_block = (
-                f"**Warteschlange ({len(waitlist)})**\n"
-                + ("\n".join([f"• {x}" for x in wait_lines])
-                   if wait_lines else "—")
-            )
+            # --- Warteschlange korrekt bauen ---
+            wait_lines = _build_user_lines(
+                waitlist, data.get("waitlist_ap") or {})
 
             e.description = header + times_block + notes_block + \
                 status_block + participants_block + wait_block
@@ -2781,6 +2854,8 @@ class GruppensucheTest(commands.Cog):
             "participant_ap": {str(owner_id): session.own_ap or ""},
             "waitlist_ap": {},
         }
+        # ✅ Easteregg beim Ersteller (nur wenn AP > 396)
+        _ensure_easter_egg_text(data, owner_id, session.own_ap)
 
         if session.category == "muhhelfer":
             data["difficulty"] = session.difficulty or "normal"
@@ -2992,6 +3067,8 @@ class GruppensucheTest(commands.Cog):
             ap_map = data.get("participant_ap") or {}
             ap_map[str(uid)] = ap_val
             data["participant_ap"] = ap_map
+            # ✅ Easteregg einmalig würfeln & speichern
+            _ensure_easter_egg_text(data, uid, ap_val)
 
             await self._save_refresh_dispatch(data)
             await interaction.response.send_message("✅ Du bist jetzt Teilnehmer.", ephemeral=True)
@@ -3003,6 +3080,10 @@ class GruppensucheTest(commands.Cog):
         wl_map = data.get("waitlist_ap") or {}
         wl_map[str(uid)] = ap_val
         data["waitlist_ap"] = wl_map
+
+        # ✅ Easteregg auch für Warteschlange
+        _ensure_easter_egg_text(data, uid, ap_val)
+
         await self._save_refresh_dispatch(data)
         await interaction.response.send_message("ℹ️ Gruppe ist voll. Du bist in der Warteschlange.", ephemeral=True)
 
@@ -3428,10 +3509,17 @@ class GruppensucheTest(commands.Cog):
         old_start = data.get("start_text")
         old_day = data.get("day_date_iso")  # optional
 
-        data["duration_text"] = session.duration_text
-        data["start_text"] = session.start_text
-        data["req_text"] = session.req_text
-        data["notes"] = session.notes
+        if session.duration_text is not None:
+            data["duration_text"] = session.duration_text
+
+        if session.start_text is not None:
+            data["start_text"] = session.start_text
+
+        if session.req_text is not None:
+            data["req_text"] = session.req_text
+
+        if session.notes is not None:
+            data["notes"] = session.notes
 
         # ✅ Reminder reset, wenn Startzeit (oder optional Tag) geändert wurde
         if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day):
