@@ -787,7 +787,15 @@ class JoinApModal(discord.ui.Modal):
         if not val:
             await interaction.response.send_message("AP ist Pflicht.", ephemeral=True)
             return
+
+        # ✅ wichtig: Interaction sofort "acknowledgen", sonst 404 möglich
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
         await self.on_done(interaction, val)
+
 
 
 # =========================
@@ -1382,14 +1390,15 @@ class OlunTierView(WizardBaseView):
         super().__init__(cog, session)
 
         self.btn_normal = discord.ui.Button(
-            label="Normal", style=discord.ButtonStyle.secondary, row=0
+            label="Normal", style=discord.ButtonStyle.primary, row=0
         )
         self.btn_d1 = discord.ui.Button(
-            label="Dehkia 1", style=discord.ButtonStyle.secondary, row=0
+            label="Dehkia 1", style=discord.ButtonStyle.primary, row=0
         )
         self.btn_d2 = discord.ui.Button(
-            label="Dehkia 2", style=discord.ButtonStyle.secondary, row=0
+            label="Dehkia 2", style=discord.ButtonStyle.primary, row=0
         )
+
 
         self.btn_normal.callback = self._pick("normal")
         self.btn_d1.callback = self._pick("dehkia1")
@@ -1406,10 +1415,12 @@ class OlunTierView(WizardBaseView):
     def _refresh_styles(self):
         chosen = (self.session.olun_tier or "").lower()
 
-        # default: alles neutral
-        self.btn_normal.style = discord.ButtonStyle.secondary
-        self.btn_d1.style = discord.ButtonStyle.secondary
-        self.btn_d2.style = discord.ButtonStyle.secondary
+
+        # default: alles blau (damit es sich vom Zurück-Button unterscheidet)
+        self.btn_normal.style = discord.ButtonStyle.primary
+        self.btn_d1.style = discord.ButtonStyle.primary
+        self.btn_d2.style = discord.ButtonStyle.primary
+
 
         # selected: grün
         if chosen == "normal":
@@ -1436,28 +1447,32 @@ class OlunTierView(WizardBaseView):
         return _cb
 
     def embed(self) -> discord.Embed:
-        chosen = self.session.olun_tier or "—"
         tier = (self.session.olun_tier or "").lower()
 
-        if tier in ("normal", "dehkia1", "dehkia2"):
-            req = OLUN_REQ.get(tier, "—")
-            total = OLUN_TOTAL_AP.get(tier, "—")
-            hint = f"Empfohlen: {req} | {total}"
-        else:
-            hint = (
-                f"Normal: {OLUN_REQ['normal']} | {OLUN_TOTAL_AP['normal']}\n"
-                f"Dehkia 1: {OLUN_REQ['dehkia1']} | {OLUN_TOTAL_AP['dehkia1']}\n"
-                f"Dehkia 2: {OLUN_REQ['dehkia2']} | {OLUN_TOTAL_AP['dehkia2']}"
-            )
+        def _line(key: str, label: str) -> str:
+            req = OLUN_REQ.get(key, "—")
+            total = OLUN_TOTAL_AP.get(key, "—")
+            picked = (tier == key)
+            mark = "✅ " if picked else "• "
+            return f"{mark}**{label}:** {req} | {total}"
+
+        chosen_label = _olun_tier_label(tier) if tier else "—"
+
+        info_block = "\n".join([
+            _line("normal", "Normal"),
+            _line("dehkia1", "Dehkia 1"),
+            _line("dehkia2", "Dehkia 2"),
+        ])
 
         return discord.Embed(
             title=f"{OLUN_EMOJI} Olun – Stufe",
             description=(
                 "Wähle die Stufe für **Olun**.\n\n"
-                f"**Auswahl:** {chosen}\n"
-                f"**Hinweis:** {hint}\n"
+                f"**Auswahl:** {chosen_label}\n\n"
+                f"{info_block}\n"
             ),
         )
+
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -3077,7 +3092,10 @@ class GruppensucheTest(commands.Cog):
             _ensure_easter_egg_text(data, uid, ap_val)
 
             await self._save_refresh_dispatch(data)
-            await interaction.response.send_message("✅ Du bist jetzt Teilnehmer.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send("✅ Du bist jetzt Teilnehmer.", ephemeral=True)
+            else:
+                await interaction.response.send_message("✅ Du bist jetzt Teilnehmer.", ephemeral=True)
             return
 
         waitlist.append(uid)
