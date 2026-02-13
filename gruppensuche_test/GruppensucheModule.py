@@ -2,16 +2,17 @@ from __future__ import annotations
 import re
 from typing import Callable, Union, Any
 from zoneinfo import ZoneInfo
-from discord import app_commands # pyright: ignore[reportMissingImports]
+from discord import app_commands  # pyright: ignore[reportMissingImports]
 
 import asyncio
 import datetime as dt
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-from discord import PartialEmoji # pyright: ignore[reportMissingImports]
+from discord import PartialEmoji  # pyright: ignore[reportMissingImports]
 
-import discord # pyright: ignore[reportMissingImports]
-from redbot.core import commands, Config # pyright: ignore[reportMissingImports]
+import discord  # pyright: ignore[reportMissingImports]
+# pyright: ignore[reportMissingImports]
+from redbot.core import commands, Config
 
 
 # =========================
@@ -42,9 +43,10 @@ PING_COOLDOWN_SECONDS = 600
 PARTICIPANT_PING_COOLDOWN_SECONDS = 60
 WIZARD_TIMEOUT_SECONDS = 300  # 5 Minuten (oder 600 = 10 Minuten)
 
-ROLE_NO_DM_ID = 1466761625158684817  # "Gruppensuche DM-Funktion" (Reverse: hat Rolle => KEINE DM)
-#ROLE_NO_DM_ID LIVE = 1466752408779751509
-#ROLE_NO_DM_ID TEST = 1466761625158684817
+# "Gruppensuche DM-Funktion" (Reverse: hat Rolle => KEINE DM)
+ROLE_NO_DM_ID = 1466761625158684817
+# ROLE_NO_DM_ID LIVE = 1466752408779751509
+# ROLE_NO_DM_ID TEST = 1466761625158684817
 
 
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
@@ -53,6 +55,10 @@ MIRUMOK_EMOJI = "<:Mirumok:1461101498954940428>"
 GYFIN_EMOJI = "<:Gyfin:1461102103266066502>"
 CHEER_EMOJI = "<:blackspiritcheer:1199730129476268183>"
 OLUN_EMOJI = "<:olun:1471826612394655857>"
+
+EASTER_EGG_AP = 396
+EASTER_EGG_MARK = " ✨"  # oder f" {MUHKUH_EMOJI}" wenn du es cow-themed willst
+
 
 GUILD_ID = 1198649628787212458
 
@@ -79,15 +85,30 @@ SPOTS: List[Tuple[str, str]] = [
 SPOT_REQ: Dict[str, str] = {
     "mirumok": "350 / 427",
     "gyfin": "370 / 440",
-    "olun": "",  # vorerst leer (Wartung / Werte später)
+    "olun": "",  # bleibt leer, weil tier-basiert (siehe OLUN_REQ)
 }
 
+OLUN_REQ: Dict[str, str] = {
+    "normal": "290 / 380",
+    "dehkia1": "325 / 400",
+    "dehkia2": "340 / 430",
+}
 
 SPOT_TOTAL_AP: Dict[str, str] = {
     "mirumok": "Total AP 1565 - 1595",
     "gyfin": "Total AP 1650 - 1680",
-    "olun": "Normal: Total AP 1030\nDehkia1: Total AP 1350\nDehkia2: Total AP 1490",
+    "olun": "",  # bleibt leer, weil tier-basiert (siehe OLUN_TOTAL_AP)
 }
+
+OLUN_TOTAL_AP: Dict[str, str] = {
+    "normal": "Total AP 1000 - 1030",
+    "dehkia1": "Total AP 1320 - 1350",
+    "dehkia2": "Total AP 1460 - 1490",
+}
+
+
+def _olun_tier_label(tier: str) -> str:
+    return {"normal": "Normal", "dehkia1": "Dehkia 1", "dehkia2": "Dehkia 2"}.get(tier, tier)
 
 
 SPOT_PING_ROLE: Dict[str, int] = {
@@ -100,8 +121,9 @@ SPOT_PING_ROLE: Dict[str, int] = {
 # =========================
 FEATURE_MUHHILFER = True
 
-FEATURE_SPOTS = True 
-FEATURE_SPOTS_GYFIN = True          # (falls du mal einzelne Spots togglen willst)
+FEATURE_SPOTS = True
+# (falls du mal einzelne Spots togglen willst)
+FEATURE_SPOTS_GYFIN = True
 FEATURE_SPOTS_MIRUMOK = True
 FEATURE_SPOTS_OLUN = True
 
@@ -112,10 +134,7 @@ FEATURE_ATORAXXION = False         # <- vorbereitet, aber nicht im Menü
 FEATURE_POST_IN_CURRENT_CHANNEL = True  # statt TEST_CHANNEL_ID
 FEATURE_DM_REMINDERS = True
 
-
-
-  # Master für Spots (zusätzlich zu MIRU/GYFIN)
-
+# Master für Spots (zusätzlich zu MIRU/GYFIN)
 
 
 # =========================
@@ -243,7 +262,6 @@ class Step:
     OLUN_TIER = "olun_tier"
 
 
-
 def _now_utc() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -353,6 +371,34 @@ def _parse_date_input(text: str) -> Optional[dt.date]:
 
 _TIME_RE = re.compile(
     r"(?P<h>\d{1,2})(?:[:\.,](?P<m>\d{2}))?\s*(?:uhr)?", re.IGNORECASE)
+
+_AP_NUM_RE = re.compile(r"(\d+)")
+
+
+def _ap_has_easter_egg(ap_val: Optional[str]) -> bool:
+    if not ap_val:
+        return False
+    m = _AP_NUM_RE.search(str(ap_val))
+    if not m:
+        return False
+    try:
+        return int(m.group(1)) == EASTER_EGG_AP
+    except Exception:
+        return False
+
+
+def _fmt_player_with_ap(mention: str, ap_val: Optional[str]) -> str:
+    """
+    Formatiert Spieler wie bisher: "<@id> (305 AP)"
+    + Easteregg direkt dahinter, wenn AP == 396.
+    """
+    if ap_val:
+        base = f"{mention} ({ap_val} AP)"
+    else:
+        base = mention
+    if _ap_has_easter_egg(ap_val):
+        return base + EASTER_EGG_MARK
+    return base
 
 
 def _parse_time_token(token: str) -> Optional[tuple[int, int]]:
@@ -469,15 +515,19 @@ def _allowed_party_range(category: str, spot_key: Optional[str] = None) -> Tuple
     return (int(ui["party_min"]), int(ui["party_max"]))
 
 
-
 def _default_req_for(data: dict) -> str:
     cat = data.get("category")
     if cat == "muhhelfer":
         diff = data.get("difficulty", "normal")
         return AKVK_SCHWER if diff == "schwer" else AKVK_NORMAL
+
     if cat == "spots":
         spot = data.get("spot_key", "")
+        if spot == "olun":
+            tier = str(data.get("olun_tier") or "normal").lower()
+            return OLUN_REQ.get(tier, "")
         return SPOT_REQ.get(spot, "")
+
     return ""
 
 
@@ -774,7 +824,6 @@ class StartSelect(discord.ui.Select):
         await self.host_view.cog._goto_next(interaction, self.host_view.session, Step.START)
 
 
-
 class StartView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
@@ -790,13 +839,13 @@ class StartView(WizardBaseView):
             lines.append("• ~~Muhhelfer (LoML Bosse)~~ *(Wartung)*")
 
         # Gruppenspots (Master + mindestens ein Spot aktiv)
-        spots_enabled = FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN)
+        spots_enabled = FEATURE_SPOTS and (
+            FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN)
         if spots_enabled:
             lines.append("• **Gruppenspots (Mirumok / Gyfin / Olun)**")
         else:
-            lines.append("• ~~Gruppenspots (Mirumok / Gyfin / Olun)~~ *(Wartung)*")
-
-            
+            lines.append(
+                "• ~~Gruppenspots (Mirumok / Gyfin / Olun)~~ *(Wartung)*")
 
         # Pila Fe
         if FEATURE_PILAFE:
@@ -828,7 +877,6 @@ class StartView(WizardBaseView):
         )
 
 
-
 class DaySelectView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
@@ -848,7 +896,6 @@ class DaySelectView(WizardBaseView):
         }
         back_label = label_map.get(self.back_target, "Zurück")
         self.add_item(build_back_button(back_label, self.back_target, self))
-
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
@@ -908,7 +955,6 @@ class DaySelectView(WizardBaseView):
                 # create-mode: sofort visuell updaten, dann weiter
                 await interaction.response.edit_message(embed=self.embed(), view=self)
                 await self.cog._goto_next(interaction, self.session, Step.DAY)
-
 
             btn.callback = _cb
             self._day_buttons[iso] = btn
@@ -979,7 +1025,8 @@ class BossSelectView(WizardBaseView):
             self._boss_buttons[key] = btn
             self.add_item(btn)
 
-        self.add_item(build_back_button("Schwierigkeit", BackTarget.DIFFICULTY, self, row=2))
+        self.add_item(build_back_button("Schwierigkeit",
+                      BackTarget.DIFFICULTY, self, row=2))
 
         next_btn = discord.ui.Button(
             label="Weiter", style=discord.ButtonStyle.success, row=2)
@@ -1050,7 +1097,6 @@ class BossSelectView(WizardBaseView):
         # ✅ CREATE-MODE: ab hier nur noch Router
         await self.cog._goto_next(interaction, self.session, Step.BOSSES)
 
-
     def embed(self) -> discord.Embed:
         diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
         req = AKVK_SCHWER if self.session.difficulty == "schwer" else AKVK_NORMAL
@@ -1089,10 +1135,12 @@ class DoubleRunView(WizardBaseView):
             self._dr_buttons[key] = btn
             self.add_item(btn)
 
-        self.add_item(build_back_button("Bosse", BackTarget.BOSSES, self, row=2))
+        self.add_item(build_back_button(
+            "Bosse", BackTarget.BOSSES, self, row=2))
 
         next_label = "Speichern" if session.mode == "edit" else "Weiter"
-        next_btn = discord.ui.Button(label=next_label, style=discord.ButtonStyle.success, row=2)
+        next_btn = discord.ui.Button(
+            label=next_label, style=discord.ButtonStyle.success, row=2)
         next_btn.callback = self._next
         self.add_item(next_btn)
 
@@ -1144,7 +1192,6 @@ class DoubleRunView(WizardBaseView):
         # ✅ Create: zentraler Flow
         await self.cog._goto_next(interaction, self.session, Step.DOUBLE)
 
-
     def embed(self) -> discord.Embed:
         diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
         req = AKVK_SCHWER if self.session.difficulty == "schwer" else AKVK_NORMAL
@@ -1176,7 +1223,6 @@ class DoubleRunView(WizardBaseView):
         )
 
 
-
 class SpotSelectView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
@@ -1188,7 +1234,7 @@ class SpotSelectView(WizardBaseView):
         if FEATURE_SPOTS_GYFIN:
             active_spots.append("gyfin")
         if FEATURE_SPOTS_OLUN:
-            active_spots.append("olun")            
+            active_spots.append("olun")
 
         # Keine Spots aktiv -> zurück ins Start-Menü
         if not active_spots:
@@ -1201,21 +1247,25 @@ class SpotSelectView(WizardBaseView):
 
         # Buttons nur für aktive Spots
         if FEATURE_SPOTS_MIRUMOK:
-            miru_btn = discord.ui.Button(label="Mirumok", style=discord.ButtonStyle.primary, row=0)
+            miru_btn = discord.ui.Button(
+                label="Mirumok", style=discord.ButtonStyle.primary, row=0)
             miru_btn.callback = self._pick_miru
             self.add_item(miru_btn)
 
         if FEATURE_SPOTS_GYFIN:
-            gyfin_btn = discord.ui.Button(label="Gyfin", style=discord.ButtonStyle.primary, row=0)
+            gyfin_btn = discord.ui.Button(
+                label="Gyfin", style=discord.ButtonStyle.primary, row=0)
             gyfin_btn.callback = self._pick_gyfin
             self.add_item(gyfin_btn)
 
         if FEATURE_SPOTS_OLUN:
-            olun_btn = discord.ui.Button(label="Olun", style=discord.ButtonStyle.primary, row=0)
+            olun_btn = discord.ui.Button(
+                label="Olun", style=discord.ButtonStyle.primary, row=0)
             olun_btn.callback = self._pick_olun
             self.add_item(olun_btn)
-    
-        self.add_item(build_back_button("Kategorie", BackTarget.START, self, row=1))
+
+        self.add_item(build_back_button(
+            "Kategorie", BackTarget.START, self, row=1))
 
     async def _pick_miru(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -1250,9 +1300,11 @@ class SpotSelectView(WizardBaseView):
             )
         if FEATURE_SPOTS_OLUN:
             lines.append(
-                f"**Olun**\n• Empfohlen mind. {SPOT_REQ.get('olun','') or '—'}\n• {SPOT_TOTAL_AP.get('olun','')}\n"
+                "**Olun**\n"
+                f"• Normal → Empfohlen mind. {OLUN_REQ['normal']} | {OLUN_TOTAL_AP['normal']}\n"
+                f"• Dehkia 1 → Empfohlen mind. {OLUN_REQ['dehkia1']} | {OLUN_TOTAL_AP['dehkia1']}\n"
+                f"• Dehkia 2 → Empfohlen mind. {OLUN_REQ['dehkia2']} | {OLUN_TOTAL_AP['dehkia2']}\n"
             )
-
 
         # Wenn nur einer aktiv ist, Text sauber halten
         desc = "\n".join(lines).strip()
@@ -1270,13 +1322,17 @@ class SpotSelectView(WizardBaseView):
         self.session.olun_tier = None  # wichtig: Stufe danach wählen
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
+
 class OlunTierView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
 
-        btn_normal = discord.ui.Button(label="Normal", style=discord.ButtonStyle.primary, row=0)
-        btn_d1 = discord.ui.Button(label="Dehkia 1", style=discord.ButtonStyle.danger, row=0)
-        btn_d2 = discord.ui.Button(label="Dehkia 2", style=discord.ButtonStyle.danger, row=0)
+        btn_normal = discord.ui.Button(
+            label="Normal", style=discord.ButtonStyle.primary, row=0)
+        btn_d1 = discord.ui.Button(
+            label="Dehkia 1", style=discord.ButtonStyle.danger, row=0)
+        btn_d2 = discord.ui.Button(
+            label="Dehkia 2", style=discord.ButtonStyle.danger, row=0)
 
         btn_normal.callback = self._pick("normal")
         btn_d1.callback = self._pick("dehkia1")
@@ -1299,23 +1355,27 @@ class OlunTierView(WizardBaseView):
 
     def embed(self) -> discord.Embed:
         chosen = self.session.olun_tier or "—"
-        total_map = {
-            "normal": "Total AP 1030",
-            "dehkia1": "Total AP 1350",
-            "dehkia2": "Total AP 1490",
-        }
-        total = total_map.get(self.session.olun_tier or "", "Normal 1030 | Dehkia1 1350 | Dehkia2 1490")
+        tier = (self.session.olun_tier or "").lower()
+
+        if tier in ("normal", "dehkia1", "dehkia2"):
+            req = OLUN_REQ.get(tier, "—")
+            total = OLUN_TOTAL_AP.get(tier, "—")
+            hint = f"Empfohlen: {req} | {total}"
+        else:
+            hint = (
+                f"Normal: {OLUN_REQ['normal']} | {OLUN_TOTAL_AP['normal']}\n"
+                f"Dehkia 1: {OLUN_REQ['dehkia1']} | {OLUN_TOTAL_AP['dehkia1']}\n"
+                f"Dehkia 2: {OLUN_REQ['dehkia2']} | {OLUN_TOTAL_AP['dehkia2']}"
+            )
 
         return discord.Embed(
             title=f"{OLUN_EMOJI} Olun – Stufe",
             description=(
                 "Wähle die Stufe für **Olun**.\n\n"
                 f"**Auswahl:** {chosen}\n"
-                f"**Hinweis:** {total}\n"
+                f"**Hinweis:** {hint}\n"
             ),
         )
-
-
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -1349,6 +1409,7 @@ class PartySizeSelect(discord.ui.Select):
         # Edit: bleibt speichern
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
 
+
 class PartySizeView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession, current: Optional[int] = None):
         super().__init__(cog, session)
@@ -1359,10 +1420,9 @@ class PartySizeView(WizardBaseView):
         # Zurück-Ziel hängt an der Kategorie / dem Flow
         self.add_item(build_back_button("Tag", BackTarget.DAY, self, row=1))
 
-
-
     def embed(self) -> discord.Embed:
-        mn, mx = _allowed_party_range(self.session.category or "", self.session.spot_key)
+        mn, mx = _allowed_party_range(
+            self.session.category or "", self.session.spot_key)
 
         if self.session.category == "muhhelfer":
             diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
@@ -1386,6 +1446,21 @@ class PartySizeView(WizardBaseView):
                 emoji = OLUN_EMOJI
             else:
                 emoji = CHEER_EMOJI
+
+            if spot == "olun":
+                tier = (self.session.olun_tier or "normal").lower()
+                req = OLUN_REQ.get(tier, "")
+                total = OLUN_TOTAL_AP.get(tier, "")
+                tier_label = _olun_tier_label(tier)
+
+                return discord.Embed(
+                    title=f"{emoji} Olun ({tier_label}) – Gruppengröße",
+                    description=(
+                        f"• Empfohlen mind. {req}\n"
+                        f"• {total}\n\n"
+                        f"{_party_size_help_text(mn, mx)}"
+                    ),
+                )
 
             return discord.Embed(
                 title=f"{emoji} {_spot_name(spot)} – Gruppengröße",
@@ -1809,8 +1884,6 @@ class GruppensucheTest(commands.Cog):
         if target == BackTarget.OLUN_TIER:
             await self._send_step(interaction, session, Step.OLUN_TIER)
             return
-        
-
 
     # =========================
     # Command (Test)
@@ -1873,10 +1946,10 @@ class GruppensucheTest(commands.Cog):
         if step == Step.DETAILS:
             await self._send_final_form(interaction, session)
             return
-        
+
         if step == Step.OLUN_TIER:
             await self._send_olun_tier(interaction, session)
-            return        
+            return
 
         if step == Step.EDIT_MENU:
             await self._send_edit_menu(interaction, session)
@@ -1897,11 +1970,10 @@ class GruppensucheTest(commands.Cog):
             # Olun hat Zwischenschritt (Tier)
             if (session.spot_key or "") == "olun":
                 return BackTarget.OLUN_TIER
-            return BackTarget.SPOT        
+            return BackTarget.SPOT
 
         if session.category == "pilafe":
             return BackTarget.START
-        
 
         # muhhelfer:
         total = _sum_runs(session.boss_runs)
@@ -1943,7 +2015,6 @@ class GruppensucheTest(commands.Cog):
                 session.spot_key = None
                 return Step.SPOT
 
-
         if cat == "altar" and not FEATURE_ALTAR:
             session.category = None
             return Step.START
@@ -1970,7 +2041,6 @@ class GruppensucheTest(commands.Cog):
             if current_step == Step.BOSSES:
                 total = _sum_runs(session.boss_runs)
                 return Step.DAY if total >= 5 else Step.DOUBLE
-
 
             if current_step == Step.DOUBLE:
                 # Create: danach DAY; Edit: danach speichern (macht _apply_edit_bosses im View)
@@ -2012,7 +2082,6 @@ class GruppensucheTest(commands.Cog):
         next_step = self._resolve_next_step(session, current_step)
         await self._send_step(interaction, session, next_step)
 
-
     async def _send_start(self, interaction: discord.Interaction, session: WizardSession):
         view = StartView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
@@ -2020,7 +2089,6 @@ class GruppensucheTest(commands.Cog):
     async def _send_day_selection(self, interaction: discord.Interaction, session: WizardSession):
         view = DaySelectView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
-
 
     async def _send_category_specific(self, interaction: discord.Interaction, session: WizardSession):
         if session.category == "muhhelfer":
@@ -2032,7 +2100,6 @@ class GruppensucheTest(commands.Cog):
         if session.category == "pilafe":
             await self._send_day_selection(interaction, session)
             return
-
 
         await interaction.response.edit_message(
             content="Ungültige Auswahl. Bitte neu starten.",
@@ -2053,7 +2120,6 @@ class GruppensucheTest(commands.Cog):
         view = DoubleRunView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
-
     async def _send_spot_select(self, interaction: discord.Interaction, session: WizardSession):
         # Auto-pick wenn nur ein Spot aktiv ist
         active = []
@@ -2063,7 +2129,6 @@ class GruppensucheTest(commands.Cog):
             active.append("gyfin")
         if FEATURE_SPOTS_OLUN:
             active.append("olun")
-    
 
         if len(active) == 1 and session.mode == "create":
             session.spot_key = active[0]
@@ -2084,9 +2149,11 @@ class GruppensucheTest(commands.Cog):
                     "category": session.category,
                     "difficulty": session.difficulty,
                     "spot_key": session.spot_key,
+                    "olun_tier": session.olun_tier,  # ✅ wichtig für Olun
                 }
             )
         }
+
         try:
             await interaction.response.send_modal(DetailsModal(self, session, defaults=defaults))
         except discord.InteractionResponded:
@@ -2095,7 +2162,6 @@ class GruppensucheTest(commands.Cog):
     async def _send_olun_tier(self, interaction: discord.Interaction, session: WizardSession):
         view = OlunTierView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
-
 
     async def _edit_or_send_ephemeral(
         self,
@@ -2136,7 +2202,6 @@ class GruppensucheTest(commands.Cog):
                 await interaction.response.send_message(text, ephemeral=True)
         except Exception:
             pass
-    
 
     async def _send_ephemeral_new(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
         # Sendet IMMER eine neue ephemeral Nachricht (niemals edit_message auf einem öffentlichen Post).
@@ -2267,8 +2332,6 @@ class GruppensucheTest(commands.Cog):
         task = self.bot.loop.create_task(_debounced())
         self._dashboard_refresh_tasks[guild_id] = task
 
-            
-
     async def _save_refresh_dispatch(
         self,
         data: dict,
@@ -2294,7 +2357,6 @@ class GruppensucheTest(commands.Cog):
 
         except Exception:
             pass
-
 
     # =========================
     # Public Post Build/Refresh
@@ -2351,8 +2413,9 @@ class GruppensucheTest(commands.Cog):
             spot = str(data.get("spot_key", ""))
             if spot == "olun":
                 tier = str(data.get("olun_tier", "normal"))
-                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1", "dehkia2": "Dehkia2"}.get(tier, tier)
+                tier_label = _olun_tier_label(tier)
                 title = f"{OLUN_EMOJI} Gruppensuche – Olun ({tier_label})"
+
             else:
                 if spot == "mirumok":
                     emoji = MIRUMOK_EMOJI
@@ -2372,7 +2435,7 @@ class GruppensucheTest(commands.Cog):
         # Kopfblock (wie rechts)
         owner_txt = owner.mention if owner else f"<@{owner_id}>"
         owner_ap = data.get("owner_ap")
-        owner_display = owner_txt if not owner_ap else f"{owner_txt} ({owner_ap} AP)"
+        owner_display = _fmt_player_with_ap(owner_txt, owner_ap)
 
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal"))
@@ -2383,7 +2446,7 @@ class GruppensucheTest(commands.Cog):
 
             header = (
                 f"**Suchender:** {owner_display}\n"
-                f"**Kategorie:** Muhhelfer (LoML Bosse)\n"                
+                f"**Kategorie:** Muhhelfer (LoML Bosse)\n"
                 f"**Schwierigkeit:** {diff_icon} {diff_label}\n"
                 f"**Anforderung AK/VK:** {req}\n"
                 f"**Max. Teilnehmer:** {max_players}\n\n"
@@ -2414,7 +2477,7 @@ class GruppensucheTest(commands.Cog):
 
                 mention = (m.mention if m else f"<@{uid}>")
                 ap = ap_map.get(str(uid))
-                part_lines.append(f"{mention} ({ap} AP)" if ap else mention)
+                part_lines.append(_fmt_player_with_ap(mention, ap))
 
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
@@ -2442,7 +2505,11 @@ class GruppensucheTest(commands.Cog):
 
         elif cat == "spots":
             spot = str(data.get("spot_key", ""))
-            req_default = SPOT_REQ.get(spot, "")
+            if spot == "olun":
+                tier = str(data.get("olun_tier", "normal")).lower()
+                req_default = OLUN_REQ.get(tier, "")
+            else:
+                req_default = SPOT_REQ.get(spot, "")
             req = req_text or req_default
 
             header = (
@@ -2454,15 +2521,15 @@ class GruppensucheTest(commands.Cog):
 
             spot_block = ""
             if spot == "olun":
-                tier = str(data.get("olun_tier", "normal"))
-                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1", "dehkia2": "Dehkia2"}.get(tier, tier)
-                total_map = {"normal": "Total AP 1030", "dehkia1": "Total AP 1350", "dehkia2": "Total AP 1490"}
+                tier = str(data.get("olun_tier", "normal")).lower()
+                tier_label = _olun_tier_label(tier)
 
                 spot_block += (
                     f"**Spot:** Olun\n"
                     f"**Stufe:** {tier_label}\n"
-                    f"{total_map.get(tier, '')}\n\n"
+                    f"{OLUN_TOTAL_AP.get(tier, '')}\n\n"
                 )
+
             else:
                 total_ap = SPOT_TOTAL_AP.get(spot, "")
                 if total_ap:
@@ -2472,7 +2539,6 @@ class GruppensucheTest(commands.Cog):
 
             status_block = f"**Status**\n{status_line}\n\n"
 
-
             part_lines = []
             for uid in participants:
                 m = guild.get_member(int(uid))
@@ -2480,7 +2546,7 @@ class GruppensucheTest(commands.Cog):
 
                 mention = (m.mention if m else f"<@{uid}>")
                 ap = ap_map.get(str(uid))
-                part_lines.append(f"{mention} ({ap} AP)" if ap else mention)
+                part_lines.append(_fmt_player_with_ap(mention, ap))
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
                 + ("\n".join([f"• {x}" for x in part_lines])
@@ -2522,7 +2588,7 @@ class GruppensucheTest(commands.Cog):
 
                 mention = (m.mention if m else f"<@{uid}>")
                 ap = ap_map.get(str(uid))
-                part_lines.append(f"{mention} ({ap} AP)" if ap else mention)
+                part_lines.append(_fmt_player_with_ap(mention, ap))
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
                 + ("\n".join([f"• {x}" for x in part_lines])
@@ -2591,7 +2657,8 @@ class GruppensucheTest(commands.Cog):
             spot = str(data.get("spot_key", ""))
             if spot == "olun":
                 tier = str(data.get("olun_tier", "normal"))
-                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1", "dehkia2": "Dehkia2"}.get(tier, tier)
+                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1",
+                              "dehkia2": "Dehkia2"}.get(tier, tier)
                 label = f"Rollen-Ping (Olun {tier_label})"
             else:
                 label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping"
@@ -2644,7 +2711,6 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "Atoraxxion ist aktuell deaktiviert.")
             return
 
-
         channel: Optional[discord.TextChannel] = None
 
         if FEATURE_POST_IN_CURRENT_CHANNEL:
@@ -2669,8 +2735,6 @@ class GruppensucheTest(commands.Cog):
             )
             return
 
-
-
         day_iso = session.day_date_iso or _now_local().date().isoformat()
         max_players = int(session.max_players or 2)
         owner_id = interaction.user.id
@@ -2687,7 +2751,8 @@ class GruppensucheTest(commands.Cog):
                 else:
                     ping_role_id = ROLE_OLUN_NORMAL_ID
             else:
-                ping_role_id = SPOT_PING_ROLE.get(session.spot_key or "", TEST_ROLE_ID)
+                ping_role_id = SPOT_PING_ROLE.get(
+                    session.spot_key or "", TEST_ROLE_ID)
         else:
             ping_role_id = ROLE_PILAFE_ID
 
@@ -2878,7 +2943,8 @@ class GruppensucheTest(commands.Cog):
                 await channel.send(
                     f"⏰ Reminder (DM fehlgeschlagen): {mentions}\n"
                     f"**Start:** {start_text} | {day_str}\n{jump}",
-                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                    allowed_mentions=discord.AllowedMentions(
+                        users=True, roles=False, everyone=False),
                 )
             except Exception:
                 pass
@@ -2896,8 +2962,6 @@ class GruppensucheTest(commands.Cog):
                 )
             except Exception:
                 pass
-
-
 
     async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
 
@@ -3101,7 +3165,6 @@ class GruppensucheTest(commands.Cog):
             refresh_dashboard=False,
         )
 
-
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message("Nur auf Servern nutzbar.", ephemeral=True)
@@ -3166,7 +3229,6 @@ class GruppensucheTest(commands.Cog):
             refresh_public=False,
             refresh_dashboard=False,
         )
-
 
         guild = interaction.guild
         if guild is None:
@@ -3253,7 +3315,8 @@ class GruppensucheTest(commands.Cog):
             start_text=data.get("start_text"),
             req_text=data.get("req_text"),
             notes=data.get("notes"),
-            olun_tier=str(data.get("olun_tier")) if str(data.get("spot_key")) == "olun" else None,
+            olun_tier=str(data.get("olun_tier")) if str(
+                data.get("spot_key")) == "olun" else None,
         )
         session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
@@ -3309,7 +3372,8 @@ class GruppensucheTest(commands.Cog):
             return
 
         new_max = int(session.max_players or int(data.get("max_players", 2)))
-        mn, mx = _allowed_party_range(str(data.get("category", "")), str(data.get("spot_key", "")) if data.get("category") == "spots" else None)
+        mn, mx = _allowed_party_range(str(data.get("category", "")), str(
+            data.get("spot_key", "")) if data.get("category") == "spots" else None)
         # ✅ Admin-only Absicherung: 1 Teilnehmer nur für Admin-Testzwecke
         member = interaction.user if isinstance(
             interaction.user, discord.Member) else None
