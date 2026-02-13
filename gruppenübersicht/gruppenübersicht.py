@@ -83,6 +83,8 @@ def _default_req_for(data: dict) -> str:
         return ""
     return ""
 
+def _norm_spot_key(val: object) -> str:
+    return str(val or "").strip().lower()
 
 def _jump_url(guild_id: int, channel_id: int, message_id: int) -> str:
     return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
@@ -618,24 +620,40 @@ class Gruppenübersicht(commands.Cog):
         add_section(
             f"{MUHKUH_EMOJI} Muhhelfer – Schwer ({len(muh_schwer)})", muh_schwer)
 
-        # --- Gruppenspots nach Spot aufteilen (Miru -> Gyfin -> Rest) ---
+        # --- Gruppenspots nach Spot aufteilen ---
         spots_miru: List[dict] = []
         spots_gyfin: List[dict] = []
+        spots_olun: List[dict] = []
         spots_other: List[dict] = []
 
         for d in spots:
-            sk = str(d.get("spot_key") or "")
+            sk = _norm_spot_key(d.get("spot_key"))
+
             if sk == "mirumok":
                 spots_miru.append(d)
             elif sk == "gyfin":
                 spots_gyfin.append(d)
+            elif sk == "olun":
+                spots_olun.append(d)
             else:
                 spots_other.append(d)
 
+
         add_section(
-            f"{CHEER_EMOJI} Gruppenspots – Mirumok ({len(spots_miru)})", spots_miru)
+            f"{CHEER_EMOJI} Gruppenspots – Mirumok ({len(spots_miru)})",
+            spots_miru
+        )
+
         add_section(
-            f"{CHEER_EMOJI} Gruppenspots – Gyfin ({len(spots_gyfin)})", spots_gyfin)
+            f"{CHEER_EMOJI} Gruppenspots – Gyfin ({len(spots_gyfin)})",
+            spots_gyfin
+        )
+
+        add_section(
+            f"{CHEER_EMOJI} Gruppenspots – Olun ({len(spots_olun)})",
+            spots_olun
+        )
+
 
         # optional: nur anzeigen, wenn es wirklich andere Spots gibt
         if spots_other:
