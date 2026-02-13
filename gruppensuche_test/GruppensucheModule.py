@@ -614,12 +614,12 @@ class CustomDateModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         d = _parse_date_input(str(self.date_input.value))
         if d is None:
-            await interaction.response.send_message("Ungültiges Datum. Bitte versuche es erneut.", ephemeral=True)
+            await self.on_done.__self__._ephemeral_notice(interaction, "Ungültiges Datum. Bitte versuche es erneut.")
             return
 
         today = _now_local().date()
         if d < today:
-            await interaction.response.send_message("Das Datum darf nicht in der Vergangenheit liegen.", ephemeral=True)
+            await self.on_done.__self__._ephemeral_notice(interaction, "Das Datum darf nicht in der Vergangenheit liegen.")
             return
 
         await self.on_done(interaction, d)
@@ -784,15 +784,16 @@ class JoinApModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         val = str(self.ap.value).strip()
-        if not val:
-            await interaction.response.send_message("AP ist Pflicht.", ephemeral=True)
-            return
 
-        # ✅ wichtig: Interaction sofort "acknowledgen", sonst 404 möglich
+        # ✅ immer sofort acknowledgen (Modal zuverlässig schließen)
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
+
+        if not val:
+            await interaction.followup.send("AP ist Pflicht.", ephemeral=True)
+            return
 
         await self.on_done(interaction, val)
 
@@ -866,7 +867,7 @@ class StartSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         # nur der Ersteller darf bedienen
         if interaction.user.id != self.host_view.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await self.host_view.cog._ephemeral_notice(interaction, "Das kannst nur du bedienen.")
             return
 
         picked = str(self.values[0])
@@ -1488,7 +1489,7 @@ class PartySizeSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.host_view.session.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await self.host_view.cog._ephemeral_notice(interaction, "Das kannst nur du bedienen.")
             return
 
         self.host_view.session.max_players = int(self.values[0])
@@ -1692,21 +1693,46 @@ class ConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Das kannst nur du bedienen.", ephemeral=True)
+            await self.cog._ephemeral_notice(interaction, "Das kannst nur du bedienen.")
             return False
         return True
 
     async def _cancel(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(content="Abgebrochen.", view=None)
+        # ✅ ack-sicher
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        # ✅ Message selbst editieren (nicht response.edit_message)
+        try:
+            if interaction.message:
+                await interaction.message.edit(content="Abgebrochen.", view=None)
+        except Exception:
+            pass
 
     async def _confirm(self, interaction: discord.Interaction):
+        # ✅ ack-sicher (wichtig bei Delete -> fetch/delete kann dauern)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
         if self.action == "delete":
             await self.cog._delete_search(interaction, self.message_id)
-            await interaction.response.edit_message(content="Suche wurde gelöscht.", view=None)
+            try:
+                if interaction.message:
+                    await interaction.message.edit(content="Suche wurde gelöscht.", view=None)
+            except Exception:
+                pass
             return
 
         await self.cog._close_search(interaction, self.message_id)
-        await interaction.response.edit_message(content="Suche wurde geschlossen.", view=None)
+        try:
+            if interaction.message:
+                await interaction.message.edit(content="Suche wurde geschlossen.", view=None)
+        except Exception:
+            pass
 
 
 class PublicPostView(discord.ui.View):
@@ -1799,14 +1825,14 @@ class PublicPostView(discord.ui.View):
     async def _ensure_owner_or_mod(self, interaction: discord.Interaction) -> Optional[dict]:
         data = await self.cog._get_search(self.message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self.cog._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return None
 
         owner_id = int(data.get("owner_id", 0))
         member = interaction.user if isinstance(
             interaction.user, discord.Member) else None
         if interaction.user.id != owner_id and not (member and _has_mod_rights(member)):
-            await interaction.response.send_message("Das darf nur der Ersteller (oder Admin/Offizier).", ephemeral=True)
+            await self.cog._ephemeral_notice(interaction, "Das darf nur der Ersteller (oder Admin/Offizier).")
             return None
 
         return data
@@ -1850,7 +1876,7 @@ class PublicPostView(discord.ui.View):
             return
         v = ConfirmView(self.cog, self.message_id,
                         "close", interaction.user.id)
-        await interaction.response.send_message(v.text, ephemeral=True, view=v)
+        await self.cog._ephemeral_notice(interaction, v.text, view=v)
 
     async def _on_delete(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
@@ -1858,7 +1884,7 @@ class PublicPostView(discord.ui.View):
             return
         v = ConfirmView(self.cog, self.message_id,
                         "delete", interaction.user.id)
-        await interaction.response.send_message(v.text, ephemeral=True, view=v)
+        await self.cog._ephemeral_notice(interaction, v.text, view=v)
 
 
 class ClosedPostView(discord.ui.View):
@@ -1879,14 +1905,14 @@ class ClosedPostView(discord.ui.View):
     async def _on_open(self, interaction: discord.Interaction):
         data = await self.cog._get_search(self.message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self.cog._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
         owner_id = int(data.get("owner_id", 0))
         member = interaction.user if isinstance(
             interaction.user, discord.Member) else None
         if interaction.user.id != owner_id and not (member and _has_mod_rights(member)):
-            await interaction.response.send_message("Das darf nur der Ersteller (oder Admin/Offizier).", ephemeral=True)
+            await self.cog._ephemeral_notice(interaction, "Das darf nur der Ersteller (oder Admin/Offizier).")
             return
 
         await self.cog._open_search(interaction, self.message_id)
@@ -2193,11 +2219,13 @@ class GruppensucheTest(commands.Cog):
             await self._send_day_selection(interaction, session)
             return
 
-        await interaction.response.edit_message(
-            content="Ungültige Auswahl. Bitte neu starten.",
-            embed=None,
-            view=None,
+        await self._ephemeral_notice(
+            interaction,
+            "Ungültige Auswahl. Bitte neu starten.",
+            ephemeral=True,
         )
+        # optional: direkt zurück zum Start-Menü
+        await self._send_start(interaction, session)
 
     async def _send_difficulty(self, interaction: discord.Interaction, session: WizardSession):
         view = DifficultyView(self, session)
@@ -2286,13 +2314,45 @@ class GruppensucheTest(commands.Cog):
             except Exception:
                 return
 
-    async def _ephemeral_notice(self, interaction: discord.Interaction, text: str):
+    async def _ephemeral_notice(
+        self,
+        interaction: discord.Interaction,
+        text: Optional[str] = None,
+        *,
+        embed: Optional[discord.Embed] = None,
+        view: Optional[discord.ui.View] = None,
+        allowed_mentions: Optional[discord.AllowedMentions] = None,
+        ephemeral: bool = True,
+    ):
+        """
+        Ack-sicherer Ephemeral-Responder:
+        - Wenn response bereits done → followup.send(...)
+        - Sonst → response.send_message(...)
+        Unterstützt Text/Embed/View/AllowedMentions.
+        """
         try:
+            payload: dict = {"ephemeral": ephemeral}
+
+            # content darf auch None sein (z.B. nur Embed)
+            if text is not None:
+                payload["content"] = text
+
+            if embed is not None:
+                payload["embed"] = embed
+
+            if view is not None:
+                payload["view"] = view
+
+            if allowed_mentions is not None:
+                payload["allowed_mentions"] = allowed_mentions
+
             if interaction.response.is_done():
-                await interaction.followup.send(text, ephemeral=True)
+                await interaction.followup.send(**payload)
             else:
-                await interaction.response.send_message(text, ephemeral=True)
+                await interaction.response.send_message(**payload)
+
         except Exception:
+            # bewusst still (wie bisher)
             pass
 
     async def _send_ephemeral_new(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
@@ -2306,12 +2366,14 @@ class GruppensucheTest(commands.Cog):
             pass
 
     async def _ping_participants(self, interaction: discord.Interaction, message_id: int, data: dict):
+        # ✅ ack-sicher (wie _ping_type/_ping_wait)
         try:
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
         if bool(data.get("is_closed", False)):
+            await interaction.followup.send("Diese Suche ist geschlossen.", ephemeral=True)
             return
 
         # ========= Cooldown (pro Post) =========
@@ -3059,10 +3121,11 @@ class GruppensucheTest(commands.Cog):
 
         data = await self._get_search(message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
+
         if bool(data.get("is_closed", False)):
-            await interaction.response.send_message("Diese Suche ist geschlossen.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche ist geschlossen.")
             return
 
         uid = interaction.user.id
@@ -3071,10 +3134,11 @@ class GruppensucheTest(commands.Cog):
         max_players = int(data.get("max_players", 2))
 
         if uid in participants:
-            await interaction.response.send_message("Du bist bereits Teilnehmer.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Du bist bereits Teilnehmer.")
             return
+
         if uid in waitlist:
-            await interaction.response.send_message("Du bist bereits in der Warteschlange.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Du bist bereits in der Warteschlange.")
             return
 
         if len(participants) < max_players:
@@ -3084,19 +3148,19 @@ class GruppensucheTest(commands.Cog):
             ap_map = data.get("participant_ap") or {}
             ap_map[str(uid)] = ap_val
             data["participant_ap"] = ap_map
+
             # ✅ Easteregg einmalig würfeln & speichern
             _ensure_easter_egg_text(data, uid, ap_val)
 
             await self._save_refresh_dispatch(data)
-            if interaction.response.is_done():
-                await interaction.followup.send("✅ Du bist jetzt Teilnehmer.", ephemeral=True)
-            else:
-                await interaction.response.send_message("✅ Du bist jetzt Teilnehmer.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
             return
 
+        # sonst Warteschlange
         waitlist.append(uid)
         data["waitlist"] = waitlist
         data["updated_at"] = int(_now_local().timestamp())
+
         wl_map = data.get("waitlist_ap") or {}
         wl_map[str(uid)] = ap_val
         data["waitlist_ap"] = wl_map
@@ -3105,12 +3169,12 @@ class GruppensucheTest(commands.Cog):
         _ensure_easter_egg_text(data, uid, ap_val)
 
         await self._save_refresh_dispatch(data)
-        await interaction.response.send_message("ℹ️ Gruppe ist voll. Du bist in der Warteschlange.", ephemeral=True)
+        await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
 
     async def _leave(self, interaction: discord.Interaction, message_id: int):
         data = await self._get_search(message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
         # ✅ HIER rein (direkt nach dem data-Check)
@@ -3179,7 +3243,6 @@ class GruppensucheTest(commands.Cog):
         if promoted_id:
             await self._notify_promotion(data, promoted_id)
 
-
     async def _notify_promotion(self, data: dict, promoted_id: int):
         guild = self.bot.get_guild(int(data.get("guild_id", 0)))
         if guild is None:
@@ -3245,14 +3308,15 @@ class GruppensucheTest(commands.Cog):
             return
 
     async def _ping_type(self, interaction: discord.Interaction, message_id: int, data: dict):
-        if bool(data.get("is_closed", False)):
-            await interaction.response.send_message("Diese Suche ist geschlossen.", ephemeral=True)
-            return
-
+        # ✅ ack-sicher: erst defer, dann nur followup (und öffentliche Channel-Nachricht separat)
         try:
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
+
+        if bool(data.get("is_closed", False)):
+            await interaction.followup.send("Diese Suche ist geschlossen.", ephemeral=True)
+            return
 
         cd = data.get("ping_cd") or {}
         now_ts = int(_now_local().timestamp())
@@ -3283,12 +3347,12 @@ class GruppensucheTest(commands.Cog):
 
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Nur auf Servern nutzbar.", ephemeral=True)
+            await interaction.followup.send("Nur auf Servern nutzbar.", ephemeral=True)
             return
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         if not isinstance(channel, discord.TextChannel):
-            await interaction.response.send_message("Channel nicht gefunden.", ephemeral=True)
+            await interaction.followup.send("Channel nicht gefunden.", ephemeral=True)
             return
 
         ping_role_id = int(data.get("ping_role_id", TEST_ROLE_ID))
@@ -3307,17 +3371,22 @@ class GruppensucheTest(commands.Cog):
         jump = f"https://discord.com/channels/{guild.id}/{channel.id}/{message_id}"
 
         txt = f"<@&{ping_role_id}> | {day_str} | Start: {start_text} | Frei: {free}\n{jump}"
-        await channel.send(txt, allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False))
+        await channel.send(
+            txt,
+            allowed_mentions=discord.AllowedMentions(
+                roles=True, users=False, everyone=False),
+        )
 
     async def _ping_wait(self, interaction: discord.Interaction, message_id: int, data: dict):
-        if bool(data.get("is_closed", False)):
-            await interaction.response.send_message("Diese Suche ist geschlossen.", ephemeral=True)
-            return
-
+        # ✅ ack-sicher: erst defer, dann nur followup
         try:
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
+
+        if bool(data.get("is_closed", False)):
+            await interaction.followup.send("Diese Suche ist geschlossen.", ephemeral=True)
+            return
 
         cd = data.get("ping_cd") or {}
         now_ts = int(_now_local().timestamp())
@@ -3348,12 +3417,12 @@ class GruppensucheTest(commands.Cog):
 
         guild = interaction.guild
         if guild is None:
-            await interaction.response.send_message("Nur auf Servern nutzbar.", ephemeral=True)
+            await interaction.followup.send("Nur auf Servern nutzbar.", ephemeral=True)
             return
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         if not isinstance(channel, discord.TextChannel):
-            await interaction.response.send_message("Channel nicht gefunden.", ephemeral=True)
+            await interaction.followup.send("Channel nicht gefunden.", ephemeral=True)
             return
 
         day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
@@ -3379,12 +3448,12 @@ class GruppensucheTest(commands.Cog):
     async def _open_search(self, interaction: discord.Interaction, message_id: int):
         data = await self._get_search(message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
         data["is_closed"] = False
         await self._save_refresh_dispatch(data)
 
-        await interaction.response.send_message("✅ Suche wieder geöffnet.", ephemeral=True)
+        await self._ephemeral_notice(interaction, "✅ Suche wieder geöffnet.")
 
     async def _delete_search(self, interaction: discord.Interaction, message_id: int):
         data = await self._get_search(message_id)
@@ -3452,7 +3521,7 @@ class GruppensucheTest(commands.Cog):
 
         data = await self._get_search(session.edit_message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
         view = EditMenuView(self, session, data)
@@ -3463,7 +3532,7 @@ class GruppensucheTest(commands.Cog):
             return
         data = await self._get_search(session.edit_message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
         data["day_date_iso"] = session.day_date_iso
@@ -3484,7 +3553,7 @@ class GruppensucheTest(commands.Cog):
             return
         data = await self._get_search(session.edit_message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
         new_max = int(session.max_players or int(data.get("max_players", 2)))
@@ -3494,14 +3563,14 @@ class GruppensucheTest(commands.Cog):
         member = interaction.user if isinstance(
             interaction.user, discord.Member) else None
         if new_max == 1 and not (member and _is_admin_only(member)):
-            await interaction.response.send_message(
+            await self._ephemeral_notice(
+                interaction,
                 "1 Teilnehmer ist nur für Admin-Testzwecke erlaubt.",
                 ephemeral=True,
             )
-            return
 
         if new_max < mn or new_max > mx:
-            await interaction.response.send_message("Ungültige Teilnehmerzahl.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.")
             return
 
         data["max_players"] = new_max
@@ -3534,7 +3603,7 @@ class GruppensucheTest(commands.Cog):
             return
         data = await self._get_search(session.edit_message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
         if data.get("category") == "pilafe":
@@ -3573,15 +3642,15 @@ class GruppensucheTest(commands.Cog):
             return
         data = await self._get_search(session.edit_message_id)
         if data is None:
-            await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
         if data.get("category") != "muhhelfer":
-            await interaction.response.send_message("Bossbearbeitung ist nur für Muhhelfer.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Bossbearbeitung ist nur für Muhhelfer.", ephemeral=True)
             return
 
         if not session.boss_runs:
-            await interaction.response.send_message("Bitte mindestens 1 Boss auswählen.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Bitte mindestens 1 Boss auswählen.", ephemeral=True)
             return
 
         data["boss_runs"] = dict(session.boss_runs)
