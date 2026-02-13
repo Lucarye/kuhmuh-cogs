@@ -3113,6 +3113,12 @@ class GruppensucheTest(commands.Cog):
             await interaction.response.send_message("Diese Suche existiert nicht mehr.", ephemeral=True)
             return
 
+        # ✅ HIER rein (direkt nach dem data-Check)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
         uid = interaction.user.id
         participants: List[int] = list(data.get("participants") or [])
         waitlist: List[int] = list(data.get("waitlist") or [])
@@ -3122,7 +3128,8 @@ class GruppensucheTest(commands.Cog):
         was_wait = uid in waitlist
 
         if not was_participant and not was_wait:
-            await interaction.response.send_message("Du bist nicht eingetragen.", ephemeral=True)
+            # ✅ HIER ändern: response -> followup
+            await interaction.followup.send("Du bist nicht eingetragen.", ephemeral=True)
             return
 
         if was_participant:
@@ -3166,10 +3173,12 @@ class GruppensucheTest(commands.Cog):
         data["waitlist"] = waitlist
         await self._save_refresh_dispatch(data)
 
-        await interaction.response.send_message("✅ Du wurdest abgemeldet.", ephemeral=True)
+        # ✅ HIER ändern: response -> followup
+        await interaction.followup.send("✅ Du wurdest abgemeldet.", ephemeral=True)
 
         if promoted_id:
             await self._notify_promotion(data, promoted_id)
+
 
     async def _notify_promotion(self, data: dict, promoted_id: int):
         guild = self.bot.get_guild(int(data.get("guild_id", 0)))
