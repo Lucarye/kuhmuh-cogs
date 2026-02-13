@@ -608,7 +608,7 @@ class Gruppenübersicht(commands.Cog):
 
             prefix = f"{spot_icon} " if spot_icon else ""
             return (
-                f"• {prefix}**{day_str}** | **{start_text}** | {duration_text} | Req: **{req}**\n"
+                f"• **{day_str}** | **{start_text}** | {duration_text} | Req: **{req}**\n"
                 f"  {status} | {count}{wl} → {jump}"
             )
 
@@ -678,12 +678,12 @@ class Gruppenübersicht(commands.Cog):
                 spots_other.append(d)
 
         add_section(
-            f"{CHEER_EMOJI} Gruppenspots – Mirumok ({len(spots_miru)})",
+            f"{MIRUMOK_EMOJI} Gruppenspots – Mirumok ({len(spots_miru)})",
             spots_miru
         )
 
         add_section(
-            f"{CHEER_EMOJI} Gruppenspots – Gyfin ({len(spots_gyfin)})",
+            f"{GYFIN_EMOJI} Gruppenspots – Gyfin ({len(spots_gyfin)})",
             spots_gyfin
         )
 
