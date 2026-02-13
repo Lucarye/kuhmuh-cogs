@@ -797,7 +797,6 @@ class JoinApModal(discord.ui.Modal):
         await self.on_done(interaction, val)
 
 
-
 # =========================
 # Base View
 # =========================
@@ -1399,7 +1398,6 @@ class OlunTierView(WizardBaseView):
             label="Dehkia 2", style=discord.ButtonStyle.primary, row=0
         )
 
-
         self.btn_normal.callback = self._pick("normal")
         self.btn_d1.callback = self._pick("dehkia1")
         self.btn_d2.callback = self._pick("dehkia2")
@@ -1415,12 +1413,10 @@ class OlunTierView(WizardBaseView):
     def _refresh_styles(self):
         chosen = (self.session.olun_tier or "").lower()
 
-
         # default: alles blau (damit es sich vom Zurück-Button unterscheidet)
         self.btn_normal.style = discord.ButtonStyle.primary
         self.btn_d1.style = discord.ButtonStyle.primary
         self.btn_d2.style = discord.ButtonStyle.primary
-
 
         # selected: grün
         if chosen == "normal":
@@ -1472,7 +1468,6 @@ class OlunTierView(WizardBaseView):
                 f"{info_block}\n"
             ),
         )
-
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -2551,8 +2546,9 @@ class GruppensucheTest(commands.Cog):
         # Kopfblock (wie rechts)
         owner_txt = owner.mention if owner else f"<@{owner_id}>"
         owner_ap = data.get("owner_ap")
-        owner_display = _fmt_player_with_ap_and_egg(
-            owner_txt, owner_ap, _egg_for(owner_id))
+
+        # ✅ Suchender oben OHNE Easter-Egg anzeigen
+        owner_display = _fmt_player_with_ap(owner_txt, owner_ap)
 
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal"))
@@ -3145,6 +3141,12 @@ class GruppensucheTest(commands.Cog):
 
         data["participant_ap"] = ap_map
         data["waitlist_ap"] = wl_map
+
+        # ✅ Easter-Egg: beim Abmelden löschen -> bei erneuter Anmeldung neu würfeln
+        egg_map = data.get("easter_egg_texts")
+        if isinstance(egg_map, dict):
+            egg_map.pop(str(uid), None)
+            data["easter_egg_texts"] = egg_map
 
         promoted_id: Optional[int] = None
         if was_participant and len(participants) < max_players and waitlist:
