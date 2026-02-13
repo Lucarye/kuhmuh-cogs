@@ -30,6 +30,7 @@ MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
 PILAFE_EMOJI = "<:pilafe:1450051653297504368>"
 MIRUMOK_EMOJI = "<:Mirumok:1461101498954940428>"
 GYFIN_EMOJI = "<:Gyfin:1461102103266066502>"
+OLUN_EMOJI = "<:olun:1471826612394655857>"
 CHEER_EMOJI = "<:blackspiritcheer:1199730129476268183>"
 
 AKVK_NORMAL = "301/385"
@@ -83,8 +84,10 @@ def _default_req_for(data: dict) -> str:
         return ""
     return ""
 
+
 def _norm_spot_key(val: object) -> str:
     return str(val or "").strip().lower()
+
 
 def _jump_url(guild_id: int, channel_id: int, message_id: int) -> str:
     return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
@@ -124,6 +127,21 @@ def _can_post_dashboard(member: discord.Member) -> bool:
 def _can_refresh_dashboard(member: discord.Member) -> bool:
     # Refresh Admin + Offizier
     return _has_role(member, ADMIN_ROLE_ID) or _has_role(member, OFFIZIER_ROLE_ID)
+
+
+def _spot_emoji(spot_key: str, *, olun_tier: str = "") -> str:
+    sk = str(spot_key or "").strip().lower()
+    tier = str(olun_tier or "").strip().lower()
+
+    if sk == "mirumok":
+        return MIRUMOK_EMOJI
+    if sk == "gyfin":
+        return GYFIN_EMOJI
+    if sk == "olun":
+        # Optional: Dehkia optisch gleich lassen oder später eigenes Emoji je Tier
+        return OLUN_EMOJI
+
+    return CHEER_EMOJI
 
 
 class DMOptButton(discord.ui.Button):
@@ -414,7 +432,8 @@ class Gruppenübersicht(commands.Cog):
                     "embed": embed.to_dict(),
                     # view bleibt konstant (ein Button), reicht i.d.R. embed-sig
                 }
-                raw = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                raw = json.dumps(payload, sort_keys=True,
+                                 ensure_ascii=False).encode("utf-8")
                 sig = hashlib.sha256(raw).hexdigest()
 
                 if self._last_sig.get(which) == sig:
@@ -581,8 +600,15 @@ class Gruppenübersicht(commands.Cog):
             # Warteschlange nur wenn > 0
             wl = f" | WL: {len(waitlist)}" if len(waitlist) > 0 else ""
 
+            cat = str(d.get("category") or "")
+            spot_key = str(d.get("spot_key") or "")
+            olun_tier = str(d.get("olun_tier") or "")
+            spot_icon = _spot_emoji(
+                spot_key, olun_tier=olun_tier) if cat == "spots" else ""
+
+            prefix = f"{spot_icon} " if spot_icon else ""
             return (
-                f"• **{day_str}** | **{start_text}** | {duration_text} | Req: **{req}**\n"
+                f"• {prefix}**{day_str}** | **{start_text}** | {duration_text} | Req: **{req}**\n"
                 f"  {status} | {count}{wl} → {jump}"
             )
 
@@ -623,7 +649,11 @@ class Gruppenübersicht(commands.Cog):
         # --- Gruppenspots nach Spot aufteilen ---
         spots_miru: List[dict] = []
         spots_gyfin: List[dict] = []
-        spots_olun: List[dict] = []
+
+        spots_olun_normal: List[dict] = []
+        spots_olun_d1: List[dict] = []
+        spots_olun_d2: List[dict] = []
+
         spots_other: List[dict] = []
 
         for d in spots:
@@ -631,13 +661,21 @@ class Gruppenübersicht(commands.Cog):
 
             if sk == "mirumok":
                 spots_miru.append(d)
+
             elif sk == "gyfin":
                 spots_gyfin.append(d)
+
             elif sk == "olun":
-                spots_olun.append(d)
+                tier = str(d.get("olun_tier") or "normal").strip().lower()
+                if tier == "dehkia2":
+                    spots_olun_d2.append(d)
+                elif tier == "dehkia1":
+                    spots_olun_d1.append(d)
+                else:
+                    spots_olun_normal.append(d)
+
             else:
                 spots_other.append(d)
-
 
         add_section(
             f"{CHEER_EMOJI} Gruppenspots – Mirumok ({len(spots_miru)})",
@@ -650,15 +688,25 @@ class Gruppenübersicht(commands.Cog):
         )
 
         add_section(
-            f"{CHEER_EMOJI} Gruppenspots – Olun ({len(spots_olun)})",
-            spots_olun
+            f"{OLUN_EMOJI} Gruppenspots – Olun Normal ({len(spots_olun_normal)})",
+            spots_olun_normal
         )
 
+        add_section(
+            f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 1 ({len(spots_olun_d1)})",
+            spots_olun_d1
+        )
 
-        # optional: nur anzeigen, wenn es wirklich andere Spots gibt
+        add_section(
+            f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 2 ({len(spots_olun_d2)})",
+            spots_olun_d2
+        )
+
         if spots_other:
             add_section(
-                f"{CHEER_EMOJI} Gruppenspots – Sonstige ({len(spots_other)})", spots_other)
+                f"{CHEER_EMOJI} Gruppenspots – Sonstige ({len(spots_other)})",
+                spots_other
+            )
 
         add_section(f"{PILAFE_EMOJI} Pila Fe ({len(pilafe)})", pilafe)
 
