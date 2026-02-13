@@ -1738,6 +1738,9 @@ class GruppensucheTest(commands.Cog):
         self.config.register_guild(searches={})
 
         self._sessions: Dict[int, WizardSession] = {}
+        # --- Dashboard Debounce ---
+        self._dashboard_refresh_tasks: Dict[int, asyncio.Task] = {}
+        self._dashboard_refresh_delay = 2  # Sekunden
         self._startup_task: Optional[asyncio.Task] = self.bot.loop.create_task(
             self._startup_register_views())
         self._reminder_task: Optional[asyncio.Task] = self.bot.loop.create_task(
@@ -2240,23 +2243,39 @@ class GruppensucheTest(commands.Cog):
         except Exception:
             pass
 
-        # Hard fallback: direkt refresh anstoßen, falls Listener mal nicht greift
-        dash = self.bot.get_cog("Gruppenübersicht")
-        if dash:
+        # Debounced Refresh starten
+        self._schedule_dashboard_refresh(int(guild_id))
+
+    def _schedule_dashboard_refresh(self, guild_id: int):
+        # Wenn schon ein Task läuft → abbrechen
+        old_task = self._dashboard_refresh_tasks.get(guild_id)
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        async def _debounced():
             try:
-                self.bot.loop.create_task(dash.force_refresh_all(int(guild_id)))
+                await asyncio.sleep(self._dashboard_refresh_delay)
+
+                dash = self.bot.get_cog("Gruppenübersicht")
+                if dash:
+                    await dash.force_refresh_all(int(guild_id))
+            except asyncio.CancelledError:
+                return
             except Exception:
                 pass
+
+        task = self.bot.loop.create_task(_debounced())
+        self._dashboard_refresh_tasks[guild_id] = task
+
             
 
-    async def _save_refresh_dispatch(self, data: dict, *, refresh_public: bool = True):
-
-        # Zentraler Helper:
-        # - updated_at setzen
-        # - in Config speichern
-        # - public message refreshen (optional)
-        # - Dashboard-Refresh dispatchen
-
+    async def _save_refresh_dispatch(
+        self,
+        data: dict,
+        *,
+        refresh_public: bool = True,
+        refresh_dashboard: bool = True,
+    ):
         try:
             now_ts = int(_now_local().timestamp())
             data["updated_at"] = now_ts
@@ -2268,11 +2287,14 @@ class GruppensucheTest(commands.Cog):
             if refresh_public and mid:
                 await self._refresh_public_message(data)
 
-            gid = int(data.get("guild_id", 0))
-            if gid:
-                self._dispatch_dashboard_update(gid)
+            if refresh_dashboard:
+                gid = int(data.get("guild_id", 0))
+                if gid:
+                    self._dispatch_dashboard_update(gid)
+
         except Exception:
             pass
+
 
     # =========================
     # Public Post Build/Refresh
@@ -3073,7 +3095,12 @@ class GruppensucheTest(commands.Cog):
         cd["type"] = type_map
         data["ping_cd"] = cd
 
-        await self._save_refresh_dispatch(data, refresh_public=False)
+        await self._save_refresh_dispatch(
+            data,
+            refresh_public=False,
+            refresh_dashboard=False,
+        )
+
 
         guild = interaction.guild
         if guild is None:
@@ -3134,7 +3161,12 @@ class GruppensucheTest(commands.Cog):
         cd["wait"] = wait_map
         data["ping_cd"] = cd
 
-        await self._save_refresh_dispatch(data, refresh_public=False)
+        await self._save_refresh_dispatch(
+            data,
+            refresh_public=False,
+            refresh_dashboard=False,
+        )
+
 
         guild = interaction.guild
         if guild is None:
