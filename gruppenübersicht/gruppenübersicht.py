@@ -238,10 +238,10 @@ class Gruppenübersicht(commands.Cog):
     # =========================
 
     def _get_gruppensuche_cog_live(self):
-        return self.bot.get_cog("gruppensuche")
+        return self.bot.get_cog("Gruppensuche")
 
     def _get_gruppensuche_cog_test(self):
-        return self.bot.get_cog("gruppensuche_test")
+        return self.bot.get_cog("GruppensucheTest")
 
     async def _get_searches_from(self, guild: discord.Guild, source: str) -> Dict[str, dict]:
         cog = self._get_gruppensuche_cog_live(
