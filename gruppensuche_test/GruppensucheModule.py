@@ -24,6 +24,10 @@ TEST_ROLE_ID = 1445018518562017373
 ROLE_NORMAL_ID = 1424768638157852682
 ROLE_SCHWER_ID = 1424769286790054050
 
+ROLE_OLUN_NORMAL_ID = 1471825236357025802
+ROLE_OLUN_DEHKIA1_ID = 1471825732798779422
+ROLE_OLUN_DEHKIA2_ID = 1471825918480875626
+
 ROLE_MIRUMOK_ID = 1459832247405248707
 ROLE_GYFIN_ID = 1459832490603708590
 
@@ -48,11 +52,12 @@ PILAFE_EMOJI = "<:pilafe:1450051653297504368>"
 MIRUMOK_EMOJI = "<:Mirumok:1461101498954940428>"
 GYFIN_EMOJI = "<:Gyfin:1461102103266066502>"
 CHEER_EMOJI = "<:blackspiritcheer:1199730129476268183>"
+OLUN_EMOJI = "<:olun:1471826612394655857>"
 
 GUILD_ID = 1198649628787212458
 
-AKVK_NORMAL = "301/385"
-AKVK_SCHWER = "330/401"
+AKVK_NORMAL = "301 / 385"
+AKVK_SCHWER = "330 / 401"
 
 BOSSES: List[Tuple[str, str]] = [
     ("bulgasal", "Bulgasal"),
@@ -67,17 +72,23 @@ BOSSES: List[Tuple[str, str]] = [
 SPOTS: List[Tuple[str, str]] = [
     ("mirumok", "Mirumok"),
     ("gyfin", "Gyfin"),
+    ("olun", "Olun"),
 ]
 
+
 SPOT_REQ: Dict[str, str] = {
-    "mirumok": "350/ 427VK",
-    "gyfin": "370AP / 440VK",
+    "mirumok": "350 / 427",
+    "gyfin": "370 / 440",
+    "olun": "",  # vorerst leer (Wartung / Werte später)
 }
+
 
 SPOT_TOTAL_AP: Dict[str, str] = {
     "mirumok": "Total AP 1565 - 1595",
     "gyfin": "Total AP 1650 - 1680",
+    "olun": "Normal: Total AP 1030\nDehkia1: Total AP 1350\nDehkia2: Total AP 1490",
 }
+
 
 SPOT_PING_ROLE: Dict[str, int] = {
     "mirumok": ROLE_MIRUMOK_ID,
@@ -92,6 +103,7 @@ FEATURE_MUHHILFER = True
 FEATURE_SPOTS = True 
 FEATURE_SPOTS_GYFIN = True          # (falls du mal einzelne Spots togglen willst)
 FEATURE_SPOTS_MIRUMOK = True
+FEATURE_SPOTS_OLUN = True
 
 FEATURE_PILAFE = True
 FEATURE_ALTAR = False              # <- vorbereitet, aber nicht im Menü
@@ -118,7 +130,15 @@ def _muh_title(session: "WizardSession") -> str:
 
 def _spots_title(session: "WizardSession") -> str:
     spot = session.spot_key or ""
-    emoji = MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
+    if spot == "mirumok":
+        emoji = MIRUMOK_EMOJI
+    elif spot == "gyfin":
+        emoji = GYFIN_EMOJI
+    elif spot == "olun":
+        emoji = OLUN_EMOJI
+    else:
+        emoji = CHEER_EMOJI
+
     return f"{emoji} Gruppensuche – {_spot_name(spot) if spot else 'Gruppenspots'}"
 
 
@@ -207,6 +227,8 @@ class BackTarget:
     DOUBLE = "double"
     DAY = "day"
     EDIT_MENU = "edit_menu"
+    OLUN_TIER = "olun_tier"
+
 
 class Step:
     START = "start"
@@ -218,6 +240,8 @@ class Step:
     PARTY = "party"
     DETAILS = "details"
     EDIT_MENU = "edit_menu"
+    OLUN_TIER = "olun_tier"
+
 
 
 def _now_utc() -> dt.datetime:
@@ -440,9 +464,10 @@ def _sum_runs(boss_runs: Dict[str, int]) -> int:
     return sum(int(v) for v in boss_runs.values())
 
 
-def _allowed_party_range(category: str) -> Tuple[int, int]:
+def _allowed_party_range(category: str, spot_key: Optional[str] = None) -> Tuple[int, int]:
     ui = _ui_for(category)
     return (int(ui["party_min"]), int(ui["party_max"]))
+
 
 
 def _default_req_for(data: dict) -> str:
@@ -475,6 +500,7 @@ class WizardSession:
     boss_runs: Dict[str, int] = field(default_factory=dict)
 
     spot_key: Optional[str] = None  # spots: "mirumok"|"gyfin"
+    olun_tier: Optional[str] = None  # spots/olun: "normal"|"dehkia1"|"dehkia2"
 
     max_players: Optional[int] = None
 
@@ -690,9 +716,9 @@ class StartSelect(discord.ui.Select):
             ))
 
         # Spots nur wenn Master an + mindestens ein Spot an
-        if FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN):
+        if FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN):
             options.append(discord.SelectOption(
-                label="Gruppenspots (Mirumok / Gyfin)",
+                label="Gruppenspots (Mirumok / Gyfin / Olun)",
                 value="spots",
                 emoji=CHEER_EMOJI,
             ))
@@ -742,6 +768,7 @@ class StartSelect(discord.ui.Select):
         self.host_view.session.scroll_amount = None
         self.host_view.session.day_date_iso = None
         self.host_view.session.max_players = None
+        self.host_view.session.olun_tier = None
 
         # und weiter im Flow (zentraler Router)
         await self.host_view.cog._goto_next(interaction, self.host_view.session, Step.START)
@@ -763,11 +790,13 @@ class StartView(WizardBaseView):
             lines.append("• ~~Muhhelfer (LoML Bosse)~~ *(Wartung)*")
 
         # Gruppenspots (Master + mindestens ein Spot aktiv)
-        spots_enabled = FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN)
+        spots_enabled = FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN)
         if spots_enabled:
-            lines.append("• **Gruppenspots (Mirumok / Gyfin)**")
+            lines.append("• **Gruppenspots (Mirumok / Gyfin / Olun)**")
         else:
-            lines.append("• ~~Gruppenspots (Mirumok / Gyfin)~~ *(Wartung)*")
+            lines.append("• ~~Gruppenspots (Mirumok / Gyfin / Olun)~~ *(Wartung)*")
+
+            
 
         # Pila Fe
         if FEATURE_PILAFE:
@@ -1158,6 +1187,8 @@ class SpotSelectView(WizardBaseView):
             active_spots.append("mirumok")
         if FEATURE_SPOTS_GYFIN:
             active_spots.append("gyfin")
+        if FEATURE_SPOTS_OLUN:
+            active_spots.append("olun")            
 
         # Keine Spots aktiv -> zurück ins Start-Menü
         if not active_spots:
@@ -1179,6 +1210,11 @@ class SpotSelectView(WizardBaseView):
             gyfin_btn.callback = self._pick_gyfin
             self.add_item(gyfin_btn)
 
+        if FEATURE_SPOTS_OLUN:
+            olun_btn = discord.ui.Button(label="Olun", style=discord.ButtonStyle.primary, row=0)
+            olun_btn.callback = self._pick_olun
+            self.add_item(olun_btn)
+    
         self.add_item(build_back_button("Kategorie", BackTarget.START, self, row=1))
 
     async def _pick_miru(self, interaction: discord.Interaction):
@@ -1212,6 +1248,11 @@ class SpotSelectView(WizardBaseView):
             lines.append(
                 f"**Gyfin**\n• Empfohlen mind. {SPOT_REQ['gyfin']}\n• {SPOT_TOTAL_AP['gyfin']}\n"
             )
+        if FEATURE_SPOTS_OLUN:
+            lines.append(
+                f"**Olun**\n• Empfohlen mind. {SPOT_REQ.get('olun','') or '—'}\n• {SPOT_TOTAL_AP.get('olun','')}\n"
+            )
+
 
         # Wenn nur einer aktiv ist, Text sauber halten
         desc = "\n".join(lines).strip()
@@ -1219,6 +1260,59 @@ class SpotSelectView(WizardBaseView):
         return discord.Embed(
             title=f"{CHEER_EMOJI} Gruppensuche – Spots",
             description=desc,
+        )
+
+    async def _pick_olun(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+        self.session.spot_key = "olun"
+        self.session.olun_tier = None  # wichtig: Stufe danach wählen
+        await self.cog._goto_next(interaction, self.session, Step.SPOT)
+
+class OlunTierView(WizardBaseView):
+    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+        super().__init__(cog, session)
+
+        btn_normal = discord.ui.Button(label="Normal", style=discord.ButtonStyle.primary, row=0)
+        btn_d1 = discord.ui.Button(label="Dehkia 1", style=discord.ButtonStyle.danger, row=0)
+        btn_d2 = discord.ui.Button(label="Dehkia 2", style=discord.ButtonStyle.danger, row=0)
+
+        btn_normal.callback = self._pick("normal")
+        btn_d1.callback = self._pick("dehkia1")
+        btn_d2.callback = self._pick("dehkia2")
+
+        self.add_item(btn_normal)
+        self.add_item(btn_d1)
+        self.add_item(btn_d2)
+
+        self.add_item(build_back_button("Spot", BackTarget.SPOT, self, row=1))
+
+    def _pick(self, tier: str):
+        async def _cb(interaction: discord.Interaction):
+            if interaction.user.id != self.session.user_id:
+                await interaction.response.defer()
+                return
+            self.session.olun_tier = tier
+            await self.cog._goto_next(interaction, self.session, Step.OLUN_TIER)
+        return _cb
+
+    def embed(self) -> discord.Embed:
+        chosen = self.session.olun_tier or "—"
+        total_map = {
+            "normal": "Total AP 1030",
+            "dehkia1": "Total AP 1350",
+            "dehkia2": "Total AP 1490",
+        }
+        total = total_map.get(self.session.olun_tier or "", "Normal 1030 | Dehkia1 1350 | Dehkia2 1490")
+
+        return discord.Embed(
+            title=f"{OLUN_EMOJI} Olun – Stufe",
+            description=(
+                "Wähle die Stufe für **Olun**.\n\n"
+                f"**Auswahl:** {chosen}\n"
+                f"**Hinweis:** {total}\n"
+            ),
         )
 
 
@@ -1259,7 +1353,7 @@ class PartySizeView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession, current: Optional[int] = None):
         super().__init__(cog, session)
 
-        mn, mx = _allowed_party_range(session.category or "")
+        mn, mx = _allowed_party_range(session.category or "", session.spot_key)
         self.add_item(PartySizeSelect(self, mn, mx, current=current))
 
         # Zurück-Ziel hängt an der Kategorie / dem Flow
@@ -1268,7 +1362,7 @@ class PartySizeView(WizardBaseView):
 
 
     def embed(self) -> discord.Embed:
-        mn, mx = _allowed_party_range(self.session.category or "")
+        mn, mx = _allowed_party_range(self.session.category or "", self.session.spot_key)
 
         if self.session.category == "muhhelfer":
             diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
@@ -1284,7 +1378,15 @@ class PartySizeView(WizardBaseView):
 
         if self.session.category == "spots" and self.session.spot_key:
             spot = self.session.spot_key
-            emoji = MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
+            if spot == "mirumok":
+                emoji = MIRUMOK_EMOJI
+            elif spot == "gyfin":
+                emoji = GYFIN_EMOJI
+            elif spot == "olun":
+                emoji = OLUN_EMOJI
+            else:
+                emoji = CHEER_EMOJI
+
             return discord.Embed(
                 title=f"{emoji} {_spot_name(spot)} – Gruppengröße",
                 description=(
@@ -1701,6 +1803,10 @@ class GruppensucheTest(commands.Cog):
         if target == BackTarget.EDIT_MENU:
             await self._send_step(interaction, session, Step.EDIT_MENU)
             return
+        if target == BackTarget.OLUN_TIER:
+            await self._send_step(interaction, session, Step.OLUN_TIER)
+            return
+        
 
 
     # =========================
@@ -1764,6 +1870,10 @@ class GruppensucheTest(commands.Cog):
         if step == Step.DETAILS:
             await self._send_final_form(interaction, session)
             return
+        
+        if step == Step.OLUN_TIER:
+            await self._send_olun_tier(interaction, session)
+            return        
 
         if step == Step.EDIT_MENU:
             await self._send_edit_menu(interaction, session)
@@ -1781,10 +1891,14 @@ class GruppensucheTest(commands.Cog):
             return BackTarget.EDIT_MENU
 
         if session.category == "spots":
-            return BackTarget.SPOT
+            # Olun hat Zwischenschritt (Tier)
+            if (session.spot_key or "") == "olun":
+                return BackTarget.OLUN_TIER
+            return BackTarget.SPOT        
 
         if session.category == "pilafe":
             return BackTarget.START
+        
 
         # muhhelfer:
         total = _sum_runs(session.boss_runs)
@@ -1812,7 +1926,7 @@ class GruppensucheTest(commands.Cog):
             if not FEATURE_SPOTS:
                 session.category = None
                 return Step.START
-            if not (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN):
+            if not (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN):
                 session.category = None
                 return Step.START
             # falls Spot schon gesetzt, aber Flag ist aus:
@@ -1822,6 +1936,10 @@ class GruppensucheTest(commands.Cog):
             if session.spot_key == "gyfin" and not FEATURE_SPOTS_GYFIN:
                 session.spot_key = None
                 return Step.SPOT
+            if session.spot_key == "olun" and not FEATURE_SPOTS_OLUN:
+                session.spot_key = None
+                return Step.SPOT
+
 
         if cat == "altar" and not FEATURE_ALTAR:
             session.category = None
@@ -1864,7 +1982,14 @@ class GruppensucheTest(commands.Cog):
         # -------- SPOTS --------
         if cat == "spots":
             if current_step == Step.SPOT:
+                # ✅ Olun braucht Stufe
+                if (session.spot_key or "") == "olun":
+                    return Step.OLUN_TIER
                 return Step.DAY
+
+            if current_step == Step.OLUN_TIER:
+                return Step.DAY
+
             if current_step == Step.DAY:
                 return Step.PARTY
             if current_step == Step.PARTY:
@@ -1933,6 +2058,9 @@ class GruppensucheTest(commands.Cog):
             active.append("mirumok")
         if FEATURE_SPOTS_GYFIN:
             active.append("gyfin")
+        if FEATURE_SPOTS_OLUN:
+            active.append("olun")
+    
 
         if len(active) == 1 and session.mode == "create":
             session.spot_key = active[0]
@@ -1960,6 +2088,11 @@ class GruppensucheTest(commands.Cog):
             await interaction.response.send_modal(DetailsModal(self, session, defaults=defaults))
         except discord.InteractionResponded:
             await interaction.followup.send_modal(DetailsModal(self, session, defaults=defaults))
+
+    async def _send_olun_tier(self, interaction: discord.Interaction, session: WizardSession):
+        view = OlunTierView(self, session)
+        await self._edit_or_send_ephemeral(interaction, view.embed(), view)
+
 
     async def _edit_or_send_ephemeral(
         self,
@@ -2194,8 +2327,21 @@ class GruppensucheTest(commands.Cog):
             title = f"{MUHKUH_EMOJI} Gruppensuche – Muhhelfer ({diff_label})"
         elif cat == "spots":
             spot = str(data.get("spot_key", ""))
-            emoji = MIRUMOK_EMOJI if spot == "mirumok" else GYFIN_EMOJI
-            title = f"{emoji} Gruppensuche – {_spot_name(spot)}"
+            if spot == "olun":
+                tier = str(data.get("olun_tier", "normal"))
+                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1", "dehkia2": "Dehkia2"}.get(tier, tier)
+                title = f"{OLUN_EMOJI} Gruppensuche – Olun ({tier_label})"
+            else:
+                if spot == "mirumok":
+                    emoji = MIRUMOK_EMOJI
+                elif spot == "gyfin":
+                    emoji = GYFIN_EMOJI
+                elif spot == "olun":
+                    emoji = OLUN_EMOJI
+                else:
+                    emoji = CHEER_EMOJI
+
+                title = f"{emoji} Gruppensuche – {_spot_name(spot)}"
         else:
             title = f"{PILAFE_EMOJI} Gruppensuche – Pila Fe"
 
@@ -2285,13 +2431,25 @@ class GruppensucheTest(commands.Cog):
             )
 
             spot_block = ""
-            total_ap = SPOT_TOTAL_AP.get(spot, "")
-            if total_ap:
-                spot_block += f"**Spot:** {_spot_name(spot)}\n{total_ap}\n\n"
+            if spot == "olun":
+                tier = str(data.get("olun_tier", "normal"))
+                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1", "dehkia2": "Dehkia2"}.get(tier, tier)
+                total_map = {"normal": "Total AP 1030", "dehkia1": "Total AP 1350", "dehkia2": "Total AP 1490"}
+
+                spot_block += (
+                    f"**Spot:** Olun\n"
+                    f"**Stufe:** {tier_label}\n"
+                    f"{total_map.get(tier, '')}\n\n"
+                )
             else:
-                spot_block += f"**Spot:** {_spot_name(spot)}\n\n"
+                total_ap = SPOT_TOTAL_AP.get(spot, "")
+                if total_ap:
+                    spot_block += f"**Spot:** {_spot_name(spot)}\n{total_ap}\n\n"
+                else:
+                    spot_block += f"**Spot:** {_spot_name(spot)}\n\n"
 
             status_block = f"**Status**\n{status_line}\n\n"
+
 
             part_lines = []
             for uid in participants:
@@ -2409,7 +2567,13 @@ class GruppensucheTest(commands.Cog):
             label = f"Rollen-Ping ({'Schwer' if diff == 'schwer' else 'Normal'})"
         elif cat == "spots":
             spot = str(data.get("spot_key", ""))
-            label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping"
+            if spot == "olun":
+                tier = str(data.get("olun_tier", "normal"))
+                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1", "dehkia2": "Dehkia2"}.get(tier, tier)
+                label = f"Rollen-Ping (Olun {tier_label})"
+            else:
+                label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping"
+
         elif cat == "pilafe":
             label = "Rollen-Ping (Pila Fe)"
 
@@ -2492,8 +2656,16 @@ class GruppensucheTest(commands.Cog):
         if session.category == "muhhelfer":
             ping_role_id = ROLE_SCHWER_ID if session.difficulty == "schwer" else ROLE_NORMAL_ID
         elif session.category == "spots":
-            ping_role_id = SPOT_PING_ROLE.get(
-                session.spot_key or "", TEST_ROLE_ID)
+            if (session.spot_key or "") == "olun":
+                tier = (session.olun_tier or "").lower()
+                if tier == "dehkia1":
+                    ping_role_id = ROLE_OLUN_DEHKIA1_ID
+                elif tier == "dehkia2":
+                    ping_role_id = ROLE_OLUN_DEHKIA2_ID
+                else:
+                    ping_role_id = ROLE_OLUN_NORMAL_ID
+            else:
+                ping_role_id = SPOT_PING_ROLE.get(session.spot_key or "", TEST_ROLE_ID)
         else:
             ping_role_id = ROLE_PILAFE_ID
 
@@ -2528,6 +2700,9 @@ class GruppensucheTest(commands.Cog):
             data["boss_runs"] = dict(session.boss_runs)
         if session.category == "spots":
             data["spot_key"] = session.spot_key
+            if (session.spot_key or "") == "olun":
+                data["olun_tier"] = session.olun_tier or "normal"
+
         if session.category == "pilafe":
             data["scroll_amount"] = session.scroll_amount
 
@@ -3046,6 +3221,7 @@ class GruppensucheTest(commands.Cog):
             start_text=data.get("start_text"),
             req_text=data.get("req_text"),
             notes=data.get("notes"),
+            olun_tier=str(data.get("olun_tier")) if str(data.get("spot_key")) == "olun" else None,
         )
         session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
@@ -3101,7 +3277,7 @@ class GruppensucheTest(commands.Cog):
             return
 
         new_max = int(session.max_players or int(data.get("max_players", 2)))
-        mn, mx = _allowed_party_range(str(data.get("category", "")))
+        mn, mx = _allowed_party_range(str(data.get("category", "")), str(data.get("spot_key", "")) if data.get("category") == "spots" else None)
         # ✅ Admin-only Absicherung: 1 Teilnehmer nur für Admin-Testzwecke
         member = interaction.user if isinstance(
             interaction.user, discord.Member) else None
