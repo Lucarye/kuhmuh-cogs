@@ -2682,6 +2682,12 @@ class GruppensucheTest(commands.Cog):
             wait_lines = _build_user_lines(
                 waitlist, data.get("waitlist_ap") or {})
 
+            wait_block = (
+                f"**Warteschlange ({len(waitlist)})**\n"
+                + ("\n".join([f"• {x}" for x in wait_lines])
+                   if wait_lines else "—")
+            )
+
             e.description = header + times_block + notes_block + \
                 status_block + participants_block + wait_block
 
