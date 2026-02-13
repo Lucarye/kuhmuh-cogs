@@ -3,6 +3,10 @@ from __future__ import annotations
 import datetime as dt
 import re
 from typing import Dict, List, Optional, Tuple
+import asyncio
+import hashlib
+import json
+
 
 import discord
 from discord.ext import tasks
@@ -60,6 +64,8 @@ def _spot_name(key: str) -> str:
         return "Mirumok"
     if key == "gyfin":
         return "Gyfin"
+    if key == "olun":
+        return "Olun"
     return key
 
 
@@ -163,14 +169,23 @@ class Gruppenübersicht(commands.Cog):
         self.bot = bot
 
         # Eigene Config fuer Dashboard-Msg/Channel
-        self.config = Config.get_conf(self, identifier=DASHBOARD_CONFIG_IDENTIFIER, force_registration=True)
+        self.config = Config.get_conf(
+            self, identifier=DASHBOARD_CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(
             dashboard_live_channel_id=None,
             dashboard_live_message_id=None,
             dashboard_test_channel_id=None,
             dashboard_test_message_id=None,
         )
-
+        # --- Anti-RateLimit Schutz ---
+        self._dash_locks: Dict[str, asyncio.Lock] = {
+            "live": asyncio.Lock(),
+            "test": asyncio.Lock(),
+        }
+        self._last_sig: Dict[str, Optional[str]] = {
+            "live": None,
+            "test": None,
+        }
 
     async def force_refresh_all(self, guild_id: int):
         if int(guild_id) != GUILD_ID:
@@ -180,8 +195,6 @@ class Gruppenübersicht(commands.Cog):
             return
         await self._refresh_dashboard(guild, which="live")
         await self._refresh_dashboard(guild, which="test")
-    
-
 
     async def cog_load(self):
         # 1) Persistent Views registrieren
@@ -206,7 +219,6 @@ class Gruppenübersicht(commands.Cog):
         if not self._dashboard_refresh_loop.is_running():
             self._dashboard_refresh_loop.start()
 
-
     def cog_unload(self):
         # Loop stoppen
         try:
@@ -216,10 +228,10 @@ class Gruppenübersicht(commands.Cog):
 
         # Command entfernen (wichtig bei reload)
         try:
-            self.bot.tree.remove_command("dashboard", type=discord.AppCommandType.chat_input)
+            self.bot.tree.remove_command(
+                "dashboard", type=discord.AppCommandType.chat_input)
         except Exception:
             pass
-
 
     # =========================
     # Datenquelle: direkt aus Gruppensuche-Cog
@@ -232,7 +244,8 @@ class Gruppenübersicht(commands.Cog):
         return self.bot.get_cog("GruppensucheTest")
 
     async def _get_searches_from(self, guild: discord.Guild, source: str) -> Dict[str, dict]:
-        cog = self._get_gruppensuche_cog_live() if source == "live" else self._get_gruppensuche_cog_test()
+        cog = self._get_gruppensuche_cog_live(
+        ) if source == "live" else self._get_gruppensuche_cog_test()
         if not cog:
             return {}
         try:
@@ -362,22 +375,9 @@ class Gruppenübersicht(commands.Cog):
         new_msg = await channel.send(embed=embed, view=view)
         await self._set_dashboard_target(guild, which, channel.id, new_msg.id)
 
-
     # =========================
     # Sofort-Refresh via Event aus Gruppensuche
     # =========================
-
-    @commands.Cog.listener()
-    async def on_gruppensuche_updated(self, guild_id: int):
-        if int(guild_id) != GUILD_ID:
-            return
-
-        guild = self.bot.get_guild(int(guild_id))
-        if not guild:
-            return
-
-        await self._refresh_dashboard(guild, which="live")
-        await self._refresh_dashboard(guild, which="test")
 
     async def _refresh_dashboard(self, guild: discord.Guild, which: str):
         ch_id, msg_id = await self._get_dashboard_target(guild, which)
@@ -397,12 +397,32 @@ class Gruppenübersicht(commands.Cog):
                 pass
             return
 
-        try:
-            embed = await self._build_dashboard_embed(guild, which=which)
-            view = DashboardDMView(which)
-            await msg.edit(embed=embed, view=view)
-        except Exception:
-            return
+        lock = self._dash_locks.get(which)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._dash_locks[which] = lock
+
+        async with lock:
+            try:
+                embed = await self._build_dashboard_embed(guild, which=which)
+                view = DashboardDMView(which)
+
+                # --- Signatur: nur patchen wenn wirklich anders ---
+                payload = {
+                    "embed": embed.to_dict(),
+                    # view bleibt konstant (ein Button), reicht i.d.R. embed-sig
+                }
+                raw = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                sig = hashlib.sha256(raw).hexdigest()
+
+                if self._last_sig.get(which) == sig:
+                    return  # kein Edit nötig
+
+                await msg.edit(embed=embed, view=view)
+                self._last_sig[which] = sig
+
+            except Exception:
+                return
 
     # =========================
     # Auto Refresh Loop (15 min)
@@ -467,7 +487,8 @@ class Gruppenübersicht(commands.Cog):
 
         # stale Einträge löschen (nur in der passenden Quelle!)
         if stale_message_ids:
-            search_cog = self._get_gruppensuche_cog_live() if which == "live" else self._get_gruppensuche_cog_test()
+            search_cog = self._get_gruppensuche_cog_live(
+            ) if which == "live" else self._get_gruppensuche_cog_test()
             if search_cog:
                 try:
                     async with search_cog.config.guild(guild).searches() as s:
@@ -476,13 +497,13 @@ class Gruppenübersicht(commands.Cog):
                 except Exception:
                     pass
 
-        SPOT_ORDER = ["mirumok", "gyfin", "newspot"]  # erweitern
+        SPOT_ORDER = ["mirumok", "gyfin", "olun", "newspot"]
+
         def _spot_order_key(spot_key: str) -> int:
             try:
                 return SPOT_ORDER.index(spot_key)
             except ValueError:
                 return 999
-        
 
         def _sort_key(d: dict):
             day_iso = str(d.get("day_date_iso") or "")
@@ -496,7 +517,6 @@ class Gruppenübersicht(commands.Cog):
                 return (day_iso, tkey[0], tkey[1], 0, _spot_order_key(spot))
 
             return (day_iso, tkey[0], tkey[1], 1, cat)
-
 
         items.sort(key=_sort_key)
 
@@ -542,7 +562,8 @@ class Gruppenübersicht(commands.Cog):
 
             is_closed = bool(d.get("is_closed", False))
             is_full = len(participants) >= max_players
-            status = "🔴 Geschlossen" if is_closed else ("🔴 Voll" if is_full else "🟢 Offen")
+            status = "🔴 Geschlossen" if is_closed else (
+                "🔴 Voll" if is_full else "🟢 Offen")
 
             req_text = d.get("req_text") or ""
             req_default = _default_req_for(d)
@@ -562,7 +583,6 @@ class Gruppenübersicht(commands.Cog):
                 f"• **{day_str}** | **{start_text}** | {duration_text} | Req: **{req}**\n"
                 f"  {status} | {count}{wl} → {jump}"
             )
-
 
         def add_section(title: str, arr: List[dict], empty_text: str = "—"):
             if not arr:
@@ -593,8 +613,10 @@ class Gruppenübersicht(commands.Cog):
                     inline=False
                 )
 
-        add_section(f"{MUHKUH_EMOJI} Muhhelfer – Normal ({len(muh_normal)})", muh_normal)
-        add_section(f"{MUHKUH_EMOJI} Muhhelfer – Schwer ({len(muh_schwer)})", muh_schwer)
+        add_section(
+            f"{MUHKUH_EMOJI} Muhhelfer – Normal ({len(muh_normal)})", muh_normal)
+        add_section(
+            f"{MUHKUH_EMOJI} Muhhelfer – Schwer ({len(muh_schwer)})", muh_schwer)
 
         # --- Gruppenspots nach Spot aufteilen (Miru -> Gyfin -> Rest) ---
         spots_miru: List[dict] = []
@@ -610,18 +632,34 @@ class Gruppenübersicht(commands.Cog):
             else:
                 spots_other.append(d)
 
-        add_section(f"{CHEER_EMOJI} Gruppenspots – Mirumok ({len(spots_miru)})", spots_miru)
-        add_section(f"{CHEER_EMOJI} Gruppenspots – Gyfin ({len(spots_gyfin)})", spots_gyfin)
+        add_section(
+            f"{CHEER_EMOJI} Gruppenspots – Mirumok ({len(spots_miru)})", spots_miru)
+        add_section(
+            f"{CHEER_EMOJI} Gruppenspots – Gyfin ({len(spots_gyfin)})", spots_gyfin)
 
         # optional: nur anzeigen, wenn es wirklich andere Spots gibt
         if spots_other:
-            add_section(f"{CHEER_EMOJI} Gruppenspots – Sonstige ({len(spots_other)})", spots_other)
+            add_section(
+                f"{CHEER_EMOJI} Gruppenspots – Sonstige ({len(spots_other)})", spots_other)
 
         add_section(f"{PILAFE_EMOJI} Pila Fe ({len(pilafe)})", pilafe)
 
+        # Letztes echtes Update (datengetrieben) statt "immer jetzt"
+        last_ts = 0
+        for d in items:
+            try:
+                last_ts = max(last_ts, int(d.get("updated_at") or 0))
+            except Exception:
+                pass
 
         if not items:
-            e.add_field(name="Keine Eintraege", value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
+            e.add_field(name="Keine Eintraege",
+                        value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
 
-        e.set_footer(text=f"Aktualisiert: {_now_local().strftime('%d.%m.%Y %H:%M')} Uhr")
+        if last_ts > 0:
+            t = dt.datetime.fromtimestamp(last_ts)
+            e.set_footer(
+                text=f"Aktualisiert: {t.strftime('%d.%m.%Y %H:%M')} Uhr")
+        else:
+            e.set_footer(text="Aktualisiert: —")
         return e
