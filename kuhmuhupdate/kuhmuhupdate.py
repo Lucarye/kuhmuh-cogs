@@ -667,17 +667,12 @@ class KuhmuhUpdate(commands.Cog):
     # -------------------------
 
     async def cog_load(self) -> None:
-        # Register app commands when the cog loads
-        try:
-            self.bot.tree.add_command(self.update_group)
-        except Exception:
-            # already added or tree locked
-            pass
+        # App Commands werden von Red/discord.py automatisch beim Cog-Inject registriert.
+        # Keine manuelle Registrierung, sonst: CommandAlreadyRegistered.
+        return
 
-        # Sync to guild(s) is handled by Red; we keep it global but guild-only at runtime.
-        # If you want explicit guild sync: do it in your bot setup, not here.
 
     async def cog_unload(self) -> None:
-        # Remove command group on unload (best-effort)
-        with contextlib.suppress(Exception):
-            self.bot.tree.remove_command(self.update_group.name, type=self.update_group.type)
+        # Best-effort Cleanup ist hier nicht nötig und kann bei Reloads zu Edge-Cases führen.
+        return
+
