@@ -252,52 +252,70 @@ class KuhmuhUpdate(commands.Cog):
     async def _invoke_command_capture(
         self,
         interaction: discord.Interaction,
-        command: commands.Command,
-        *args: Any,
-        **kwargs: Any,
+        command_line: str,
     ) -> Tuple[bool, str]:
         """
-        Invokes a regular text-command internally but captures output.
-        Returns (success, rendered_output_text).
+        Führt einen Red-Command über echten Text aus (inkl. Converter/Parsing),
+        fängt aber ctx.send-Ausgaben ab.
+        Beispiel command_line: "°cog uninstall mein_cog"
+        Returns (success, rendered_output_text)
         """
-        ctx = await commands.Context.from_interaction(interaction)
-        ctx.prefix = "°"
+
+        class _FakeMessage:
+            __slots__ = ("content", "author", "channel", "guild", "id")
+
+            def __init__(self) -> None:
+                self.content = command_line
+                self.author = interaction.user
+                self.channel = interaction.channel
+                self.guild = interaction.guild
+                self.id = 0
 
         catcher = _CommandOutputCatcher()
 
-        # Patch ctx.send to capture
-        original_send = ctx.send
-        ctx.send = catcher.send  # type: ignore
-
-        # Some commands might use ctx.reply / ctx.tick; patch best-effort
-        original_reply = getattr(ctx, "reply", None)
-        if original_reply is not None:
-            ctx.reply = catcher.send  # type: ignore
-
-        original_tick = getattr(ctx, "tick", None)
-        if original_tick is not None:
-            async def _tick(*_a: Any, **_k: Any) -> _CapturedMessage:
-                # tick usually sends a reaction; we capture as text
-                return await catcher.send("✅")
-            ctx.tick = _tick  # type: ignore
-
         try:
-            # Direkter Callback-Aufruf: verhindert Type-Conversions, die bei bestimmten Red-Commands .name erwarten
-            await command.callback(command.cog, ctx, *args, **kwargs)  # type: ignore
-            output = catcher.render_text()
-            return True, output
-        except Exception as e:
-            output = catcher.render_text()
-            # include exception summary
-            err = f"{type(e).__name__}: {e}".strip()
-            combined = (output + "\n" + err).strip() if output else err
-            return False, combined
-        finally:
-            ctx.send = original_send  # type: ignore
+            msg = _FakeMessage()
+            ctx = await self.bot.get_context(msg)  # type: ignore
+            ctx.prefix = "°"
+
+            # Patch ctx.send to capture
+            original_send = ctx.send
+            ctx.send = catcher.send  # type: ignore
+
+            original_reply = getattr(ctx, "reply", None)
             if original_reply is not None:
-                ctx.reply = original_reply  # type: ignore
+                ctx.reply = catcher.send  # type: ignore
+
+            original_tick = getattr(ctx, "tick", None)
             if original_tick is not None:
-                ctx.tick = original_tick  # type: ignore
+                async def _tick(*_a: Any, **_k: Any) -> _CapturedMessage:
+                    return await catcher.send("✅")
+                ctx.tick = _tick  # type: ignore
+
+            try:
+                await self.bot.invoke(ctx)
+                output = catcher.render_text()
+                # Wenn command nicht gefunden wurde, ctx.command ist None
+                if ctx.command is None:
+                    return False, (output + "\nCommandNotFound").strip() if output else "CommandNotFound"
+                return True, output
+            except Exception as e:
+                output = catcher.render_text()
+                err = f"{type(e).__name__}: {e}".strip()
+                combined = (output + "\n" + err).strip() if output else err
+                return False, combined
+            finally:
+                ctx.send = original_send  # type: ignore
+                if original_reply is not None:
+                    ctx.reply = original_reply  # type: ignore
+                if original_tick is not None:
+                    ctx.tick = original_tick  # type: ignore
+
+        except Exception as e:
+            # Falls get_context/invoke selbst hart scheitert
+            err = f"{type(e).__name__}: {e}".strip()
+            return False, err
+
 
     def _extract_not_installed(self, text: str) -> bool:
         """
@@ -542,19 +560,8 @@ class KuhmuhUpdate(commands.Cog):
             async with self._update_lock:
                 results: List[StepResult] = []
 
-                cog_uninstall = self._get_subcommand("cog", "uninstall")
-                cog_install = self._get_subcommand("cog", "install")
-                repo_update = self._get_subcommand("repo", "update")
-                load_cmd = self.bot.get_command("load")
-
-                if not (cog_uninstall and cog_install and repo_update and load_cmd):
-                    await interaction.edit_original_response(
-                        content="❌ Benötigte Commands wurden nicht gefunden. Stelle sicher, dass Downloader/Repo/Cog/Load verfügbar sind."
-                    )
-                    return
-
                 # Step 1: Uninstall
-                ok1, out1 = await self._invoke_command_capture(interaction, cog_uninstall, cog_name_real)
+                ok1, out1 = await self._invoke_command_capture(interaction, f"°cog uninstall {cog_name_real}")
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Uninstall {cog_name_real}", out1)
 
                 if ok1:
@@ -581,7 +588,7 @@ class KuhmuhUpdate(commands.Cog):
                         return
 
                 # Step 2: Repo Update
-                ok2, out2 = await self._invoke_command_capture(interaction, repo_update, repo_name_real)
+                ok2, out2 = await self._invoke_command_capture(interaction, f"°repo update {repo_name_real}")
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Repo Update {repo_name_real}", out2)
 
                 if ok2:
@@ -604,7 +611,7 @@ class KuhmuhUpdate(commands.Cog):
                     return
 
                 # Step 3: Install
-                ok3, out3 = await self._invoke_command_capture(interaction, cog_install, repo_name_real, cog_name_real)
+                ok3, out3 = await self._invoke_command_capture(interaction, f"°cog install {repo_name_real} {cog_name_real}")
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Install {repo_name_real}/{cog_name_real}", out3)
 
                 if ok3:
@@ -627,7 +634,7 @@ class KuhmuhUpdate(commands.Cog):
                     return
 
                 # Step 4: Load
-                ok4, out4 = await self._invoke_command_capture(interaction, load_cmd, cog_name_real)
+                ok4, out4 = await self._invoke_command_capture(interaction, f"°load {cog_name_real}")
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Load {cog_name_real}", out4)
 
                 if ok4:
