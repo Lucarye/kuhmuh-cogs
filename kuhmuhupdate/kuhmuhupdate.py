@@ -23,7 +23,7 @@ log = logging.getLogger("red.kuhmuh.kuhmuhupdate")
 # ============================
 GUILD_ID = 1198649628787212458
 
-# <- Setze hier eure Admin-Rolle (Role-ID) fix ein:
+# <- Setze hier eure Admin-Rolle fix ein:
 ADMIN_ROLE_ID = 0  # z.B. 123456789012345678
 
 # Optional: Log-Channel fix (0 = aus)
@@ -108,9 +108,24 @@ class _CommandOutputCatcher:
 # -----------------------------
 class KuhmuhUpdate(commands.Cog):
     """
-    /update run    -> Auswahl gespeichertes Cog (Autocomplete), Update läuft, Ergebnis öffentlich
+    /update run    -> Update eines gespeicherten Cogs (public embed)
     /update manage -> add/remove/list
     """
+
+    # /update
+    update_group = app_commands.Group(
+        name="update",
+        description="Admin: Cogs updaten & verwalten.",
+        guild_ids=[GUILD_ID],
+    )
+
+    # /update manage
+    manage_group = app_commands.Group(
+        name="manage",
+        description="Gespeicherte Cogs verwalten (add/remove/list).",
+        parent=update_group,
+        guild_ids=[GUILD_ID],
+    )
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -122,34 +137,20 @@ class KuhmuhUpdate(commands.Cog):
         )
 
         self._update_lock = asyncio.Lock()
-
         self._startup_task: Optional[asyncio.Task] = self.bot.loop.create_task(self._startup_guild_sync())
-
-        # Slash Group
-        self.update = app_commands.Group(
-            name="update",
-            description="Admin: Cogs updaten & verwalten.",
-            guild_ids=[GUILD_ID],
-        )
-
-        # Subcommands registrieren
-        self.update.add_command(self.update_run)
-        self.update.add_command(self.update_manage)
 
     # -------------------------
     # App command registration
     # -------------------------
     async def cog_load(self) -> None:
-        # Group ins Tree hängen
         try:
-            self.bot.tree.add_command(self.update, guild=discord.Object(id=GUILD_ID))
+            self.bot.tree.add_command(self.update_group, guild=discord.Object(id=GUILD_ID))
         except Exception:
-            # falls bereits registriert
             pass
 
     async def cog_unload(self) -> None:
         with contextlib.suppress(Exception):
-            self.bot.tree.remove_command(self.update.name, guild=discord.Object(id=GUILD_ID))
+            self.bot.tree.remove_command(self.update_group.name, guild=discord.Object(id=GUILD_ID))
 
     async def _startup_guild_sync(self) -> None:
         try:
@@ -292,11 +293,6 @@ class KuhmuhUpdate(commands.Cog):
     ) -> Tuple[bool, str]:
         """
         Führt einen Red-Textcommand aus (Converter/Parsing laufen), fängt Output ab.
-        Beispiel:
-          qualified_command="cog uninstall", arg_string="gruppensuche_test"
-          qualified_command="repo update",   arg_string="kuhmuh"
-          qualified_command="cog install",   arg_string="kuhmuh gruppensuche_test"
-          qualified_command="load",          arg_string="gruppensuche_test"
         """
         cmd = self.bot.get_command(qualified_command)
         if cmd is None:
@@ -361,14 +357,13 @@ class KuhmuhUpdate(commands.Cog):
     # ==========================
     # /update run
     # ==========================
+    @update_group.command(name="run", description="Gespeichertes Cog updaten (uninstall → repo update → install → load)")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
-    @app_commands.command(name="run", description="Gespeichertes Cog updaten (uninstall → repo update → install → load)")
     @app_commands.describe(cog="Cog auswählen (gespeichert)")
     @app_commands.autocomplete(cog=_ac_stored_cogs)
     async def update_run(self, interaction: discord.Interaction, cog: str) -> None:
-        # Ephemeral ACK
         await interaction.response.send_message("✅ Update gestartet… Ergebnis wird im Channel gepostet.", ephemeral=True)
 
         ok, err = await self._require_admin(interaction)
@@ -410,7 +405,6 @@ class KuhmuhUpdate(commands.Cog):
         async with self._update_lock:
             results: List[StepResult] = []
 
-            # 1) Uninstall
             ok1, out1 = await self._invoke_command_capture(interaction, "cog uninstall", cog_name_real)
             await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Uninstall {cog_name_real}", out1)
 
@@ -424,7 +418,6 @@ class KuhmuhUpdate(commands.Cog):
                     await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
                     return
 
-            # 2) Repo update
             ok2, out2 = await self._invoke_command_capture(interaction, "repo update", repo_name_real)
             await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Repo Update {repo_name_real}", out2)
 
@@ -435,7 +428,6 @@ class KuhmuhUpdate(commands.Cog):
                 await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
                 return
 
-            # 3) Install
             ok3, out3 = await self._invoke_command_capture(interaction, "cog install", f"{repo_name_real} {cog_name_real}")
             await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Install {repo_name_real}/{cog_name_real}", out3)
 
@@ -446,7 +438,6 @@ class KuhmuhUpdate(commands.Cog):
                 await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
                 return
 
-            # 4) Load
             ok4, out4 = await self._invoke_command_capture(interaction, "load", cog_name_real)
             await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Load {cog_name_real}", out4)
 
@@ -485,22 +476,12 @@ class KuhmuhUpdate(commands.Cog):
             await interaction.followup.send("✅ Update abgeschlossen.", ephemeral=True)
 
     # ==========================
-    # /update manage
+    # /update manage add
     # ==========================
+    @manage_group.command(name="add", description="Cog + Repo speichern")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
-    @app_commands.command(name="manage", description="Gespeicherte Cogs verwalten (add/remove/list)")
-    async def update_manage(self, interaction: discord.Interaction) -> None:
-        # Placeholder command, damit Discord "manage" als Subtree anzeigt.
-        # Wird nie direkt genutzt, weil die Subcommands darunter hängen.
-        await interaction.response.send_message("Nutze `/update manage add|remove|list`.", ephemeral=True)
-
-    # ---- manage add
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.guild_only()
-    @app_commands.default_permissions(administrator=True)
-    @update_manage.subcommand(name="add", description="Cog + Repo speichern")
     @app_commands.describe(cog_name="z.B. gruppensuche_test", repo_name="z.B. kuhmuh")
     async def manage_add(self, interaction: discord.Interaction, cog_name: str, repo_name: str) -> None:
         await interaction.response.defer(ephemeral=True)
@@ -519,11 +500,13 @@ class KuhmuhUpdate(commands.Cog):
         await self._set_stored_cog(cn, rn)
         await interaction.edit_original_response(content=f"✅ Gespeichert: **{cn}** → Repo **{rn}**")
 
-    # ---- manage remove
+    # ==========================
+    # /update manage remove
+    # ==========================
+    @manage_group.command(name="remove", description="Gespeichertes Cog entfernen")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
-    @update_manage.subcommand(name="remove", description="Gespeichertes Cog entfernen")
     @app_commands.describe(cog="Gespeichertes Cog")
     @app_commands.autocomplete(cog=_ac_stored_cogs)
     async def manage_remove(self, interaction: discord.Interaction, cog: str) -> None:
@@ -540,11 +523,13 @@ class KuhmuhUpdate(commands.Cog):
         else:
             await interaction.edit_original_response(content="⚠️ Eintrag nicht gefunden.")
 
-    # ---- manage list
+    # ==========================
+    # /update manage list
+    # ==========================
+    @manage_group.command(name="list", description="Alle gespeicherten Cogs anzeigen")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
-    @update_manage.subcommand(name="list", description="Alle gespeicherten Cogs anzeigen")
     async def manage_list(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
