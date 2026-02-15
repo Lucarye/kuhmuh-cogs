@@ -239,6 +239,56 @@ class KuhmuhUpdate(commands.Cog):
     # -------------------------
     # Command invocation helpers
     # -------------------------
+    
+    def _downloader(self) -> Optional[commands.Cog]:
+        # Downloader cog name in Red is usually "Downloader"
+        return self.bot.get_cog("Downloader")  # type: ignore
+
+    async def _dl_repo_update(self, repo: str) -> Tuple[bool, str]:
+        dl = self._downloader()
+        if dl is None:
+            return False, "Downloader-Cog nicht geladen."
+
+        # Best-effort across versions
+        for meth in ("_repo_update", "repo_update", "update_repo"):
+            fn = getattr(dl, meth, None)
+            if fn:
+                try:
+                    res = await fn(repo)  # type: ignore
+                    return True, str(res) if res is not None else ""
+                except Exception as e:
+                    return False, f"{type(e).__name__}: {e}"
+        return False, "Keine passende Repo-Update Methode im Downloader gefunden."
+
+    async def _dl_cog_install(self, repo: str, cog: str) -> Tuple[bool, str]:
+        dl = self._downloader()
+        if dl is None:
+            return False, "Downloader-Cog nicht geladen."
+
+        for meth in ("_cog_install", "cog_install", "install_cog"):
+            fn = getattr(dl, meth, None)
+            if fn:
+                try:
+                    res = await fn(repo, cog)  # type: ignore
+                    return True, str(res) if res is not None else ""
+                except Exception as e:
+                    return False, f"{type(e).__name__}: {e}"
+        return False, "Keine passende Install-Methode im Downloader gefunden."
+
+    async def _dl_cog_uninstall(self, cog: str) -> Tuple[bool, str]:
+        dl = self._downloader()
+        if dl is None:
+            return False, "Downloader-Cog nicht geladen."
+
+        for meth in ("_cog_uninstall", "cog_uninstall", "uninstall_cog"):
+            fn = getattr(dl, meth, None)
+            if fn:
+                try:
+                    res = await fn(cog)  # type: ignore
+                    return True, str(res) if res is not None else ""
+                except Exception as e:
+                    return False, f"{type(e).__name__}: {e}"
+        return False, "Keine passende Uninstall-Methode im Downloader gefunden."
 
     def _get_subcommand(self, group_name: str, sub_name: str) -> Optional[commands.Command]:
         group = self.bot.get_command(group_name)
@@ -561,7 +611,7 @@ class KuhmuhUpdate(commands.Cog):
                 results: List[StepResult] = []
 
                 # Step 1: Uninstall
-                ok1, out1 = await self._invoke_command_capture(interaction, f"°cog uninstall {cog_name_real}")
+                ok1, out1 = await self._dl_cog_uninstall(cog_name_real)
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Uninstall {cog_name_real}", out1)
 
                 if ok1:
@@ -588,7 +638,7 @@ class KuhmuhUpdate(commands.Cog):
                         return
 
                 # Step 2: Repo Update
-                ok2, out2 = await self._invoke_command_capture(interaction, f"°repo update {repo_name_real}")
+                ok2, out2 = await self._dl_repo_update(repo_name_real)
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Repo Update {repo_name_real}", out2)
 
                 if ok2:
@@ -611,7 +661,7 @@ class KuhmuhUpdate(commands.Cog):
                     return
 
                 # Step 3: Install
-                ok3, out3 = await self._invoke_command_capture(interaction, f"°cog install {repo_name_real} {cog_name_real}")
+                ok3, out3 = await self._dl_cog_install(repo_name_real, cog_name_real)
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Install {repo_name_real}/{cog_name_real}", out3)
 
                 if ok3:
