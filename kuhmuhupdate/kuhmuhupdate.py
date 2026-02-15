@@ -16,6 +16,8 @@ from redbot.core.bot import Red
 
 log = logging.getLogger("red.kuhmuh.kuhmuhupdate")
 
+GUILD_ID = 1198649628787212458
+
 
 # -----------------------------
 # Helpers / Models
@@ -144,9 +146,26 @@ class KuhmuhUpdate(commands.Cog):
 
         self._update_lock = asyncio.Lock()
 
+        # ✅ Startup: guild-scope tree sync (wie in euren anderen Cogs)
+        self._startup_task: Optional[asyncio.Task] = self.bot.loop.create_task(
+            self._startup_guild_sync()
+        )
+
+
     # -------------------------
     # Permission helpers
     # -------------------------
+    
+    async def _startup_guild_sync(self) -> None:
+        try:
+            await self.bot.wait_until_red_ready()
+            await self.bot.wait_until_ready()
+
+            guild_obj = discord.Object(id=GUILD_ID)
+            await self.bot.tree.sync(guild=guild_obj)
+        except Exception:
+            # keine harte Fehlerbehandlung: Sync darf das Cog nicht blockieren
+            pass
 
     async def _admin_role_id(self) -> int:
         rid = await self.config.admin_role_id()
@@ -355,7 +374,7 @@ class KuhmuhUpdate(commands.Cog):
     # -------------------------
 
     @manage_group.command(name="setadminrole", description="Setzt die ADMIN_ROLE für Update-Commands (initial Owner-only).")
-    @app_commands.guild_only()
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
     async def setadminrole_cmd(self, interaction: discord.Interaction, role: discord.Role) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -384,7 +403,7 @@ class KuhmuhUpdate(commands.Cog):
     # -------------------------
 
     @manage_group.command(name="add", description="Speichert ein Cog mit zugehörigem Repository.")
-    @app_commands.guild_only()
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
     async def manage_add_cmd(self, interaction: discord.Interaction, cog_name: str, repo_name: str) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -410,7 +429,7 @@ class KuhmuhUpdate(commands.Cog):
     # -------------------------
 
     @manage_group.command(name="remove", description="Entfernt ein gespeichertes Cog aus der Update-Liste.")
-    @app_commands.guild_only()
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
     async def manage_remove_cmd(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -457,7 +476,7 @@ class KuhmuhUpdate(commands.Cog):
     # -------------------------
 
     @manage_group.command(name="list", description="Zeigt alle gespeicherten Cogs mit Repo-Zuordnung.")
-    @app_commands.guild_only()
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
     async def manage_list_cmd(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -486,7 +505,7 @@ class KuhmuhUpdate(commands.Cog):
     # -------------------------
 
     @update_group.command(name="run", description="Führt Update-Prozess für ein gespeichertes Cog aus.")
-    @app_commands.guild_only()
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
     async def update_run_cmd(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
