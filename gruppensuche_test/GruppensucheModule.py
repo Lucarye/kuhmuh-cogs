@@ -1938,18 +1938,29 @@ class GruppensucheTest(commands.Cog):
             self._startup_register_views())
         self._reminder_task: Optional[asyncio.Task] = self.bot.loop.create_task(
             self._reminder_loop())
+        # --- Edit Notify Debounce (per Post) ---
+        self._edit_notify_tasks: Dict[int, asyncio.Task] = {}
+        self._edit_notify_delay = 45  # Sekunden
 
     def cog_unload(self):
         if self._startup_task and not self._startup_task.done():
             self._startup_task.cancel()
         if self._reminder_task and not self._reminder_task.done():
             self._reminder_task.cancel()
+        for t in list(self._edit_notify_tasks.values()):
+            if t and not t.done():
+                t.cancel()
+        self._edit_notify_tasks.clear()
 
     async def _startup_register_views(self):
         await self.bot.wait_until_red_ready()
         await self.bot.wait_until_ready()
 
         await self._register_all_persistent_views()
+        try:
+            await self._resume_pending_edit_notifications()
+        except Exception:
+            pass
 
         try:
             guild_obj = discord.Object(id=GUILD_ID)
@@ -2464,6 +2475,233 @@ class GruppensucheTest(commands.Cog):
 
         # Debounced Refresh starten
         self._schedule_dashboard_refresh(int(guild_id))
+
+    # =========================
+    # Edit Notifications (DM, debounced)
+    # =========================
+
+    def _member_has_no_dm_role(self, member: discord.Member) -> bool:
+        return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
+
+    def _collect_recipients(self, data: dict) -> list[int]:
+        """Teilnehmer + Warteschlange, ohne Owner, unique, stable order."""
+        owner_id = int(data.get("owner_id", 0))
+        participants = [int(x) for x in (data.get("participants") or [])]
+        waitlist = [int(x) for x in (data.get("waitlist") or [])]
+
+        seen = set()
+        out: list[int] = []
+        for uid in participants + waitlist:
+            if uid == owner_id:
+                continue
+            if uid in seen:
+                continue
+            seen.add(uid)
+            out.append(uid)
+        return out
+
+    def _build_jump(self, guild: discord.Guild, data: dict) -> str:
+        mid = int(data.get("message_id", 0))
+        cid = int(data.get("channel_id", 0))
+        return f"https://discord.com/channels/{guild.id}/{cid}/{mid}"
+
+    def _norm_text(self, v: object) -> str:
+        s = str(v or "").strip()
+        return s if s else "—"
+
+    def _truncate(self, s: str, n: int = 160) -> str:
+        s = (s or "").strip()
+        if len(s) <= n:
+            return s
+        return s[: n - 1].rstrip() + "…"
+
+    def _schedule_edit_notify(self, message_id: int, data: dict, changes: list[dict]):
+        """
+        changes: list of {key, label, old, new}
+        - debounced: sammelt pending und sendet nach self._edit_notify_delay
+        - speichert pending in Config (best effort)
+        """
+        mid = int(message_id)
+        if mid <= 0:
+            return
+
+        en = data.get("edit_notify")
+        if not isinstance(en, dict):
+            en = {}
+
+        pending = en.get("pending")
+        if not isinstance(pending, dict):
+            pending = {}
+
+        # Merge-Regel:
+        # - wenn field schon pending: old bleibt der erste old, new wird überschrieben (letzter Stand)
+        for ch in changes:
+            key = str(ch.get("key") or "").strip()
+            if not key:
+                continue
+
+            label = str(ch.get("label") or key)
+            old = self._norm_text(ch.get("old"))
+            new = self._norm_text(ch.get("new"))
+
+            if key in pending and isinstance(pending.get(key), dict):
+                # old behalten, new aktualisieren
+                pending[key]["new"] = new
+                pending[key]["label"] = label
+            else:
+                pending[key] = {"label": label, "old": old, "new": new}
+
+        en["pending"] = pending
+        en["pending_updated_at"] = int(_now_local().timestamp())
+        data["edit_notify"] = en
+
+        # pending persistieren (ohne Public/Dashboard refresh)
+        try:
+            self.bot.loop.create_task(self._set_search(mid, data))
+        except Exception:
+            pass
+
+        # Debounce-Task neu planen
+        old_task = self._edit_notify_tasks.get(mid)
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        async def _debounced_send():
+            try:
+                await asyncio.sleep(self._edit_notify_delay)
+                await self._send_edit_notify(mid)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                return
+
+        self._edit_notify_tasks[mid] = self.bot.loop.create_task(
+            _debounced_send())
+
+    async def _send_edit_notify(self, message_id: int):
+        """Liest aktuellen Stand, verschickt DM an Teilnehmer+Warteschlange (ohne Owner), cleared pending."""
+        data = await self._get_search(int(message_id))
+        if not data:
+            return
+
+        guild = self.bot.get_guild(int(data.get("guild_id", 0)))
+        if guild is None:
+            return
+
+        en = data.get("edit_notify")
+        if not isinstance(en, dict):
+            return
+
+        pending = en.get("pending")
+        if not isinstance(pending, dict) or not pending:
+            return
+
+        # Empfänger
+        recipient_ids = self._collect_recipients(data)
+        if not recipient_ids:
+            # niemand zum informieren -> pending clear
+            en["pending"] = {}
+            en["last_sent_at"] = int(_now_local().timestamp())
+            data["edit_notify"] = en
+            await self._set_search(int(message_id), data)
+            return
+
+        # Kontext
+        day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
+        try:
+            day_str = _format_day(dt.date.fromisoformat(str(day_iso)))
+        except Exception:
+            day_str = str(day_iso)
+
+        start_text = self._norm_text(data.get("start_text"))
+        max_players = int(data.get("max_players", 2))
+        participants = list(data.get("participants") or [])
+        free = max(0, max_players - len(participants))
+
+        jump = self._build_jump(guild, data)
+
+        # Änderungen als Lines (vorher -> nachher)
+        lines: list[str] = []
+        for _, obj in pending.items():
+            if not isinstance(obj, dict):
+                continue
+            label = str(obj.get("label") or "Änderung")
+            old = self._truncate(self._norm_text(obj.get("old")), 180)
+            new = self._truncate(self._norm_text(obj.get("new")), 180)
+            if old == new:
+                continue
+            lines.append(f"• **{label}:** {old} → {new}")
+
+        if not lines:
+            # nichts wirklich geändert (oder alles zurückgedreht) -> pending clear
+            en["pending"] = {}
+            en["last_sent_at"] = int(_now_local().timestamp())
+            data["edit_notify"] = en
+            await self._set_search(int(message_id), data)
+            return
+
+        # --- Änderungs-Header (einheitlich, wiedererkennbar) ---
+        cat = str(data.get("category", "") or "").lower()
+        change_type = "Gruppensuche"
+        if cat == "muhhelfer":
+            diff = str(data.get("difficulty", "normal")).lower()
+            diff_label = "Schwer" if diff == "schwer" else "Normal"
+            change_type = f"Muhhelfer ({diff_label})"
+        elif cat == "spots":
+            spot = str(data.get("spot_key", "") or "")
+            if spot == "olun":
+                tier = str(data.get("olun_tier", "normal")).lower()
+                tier_label = _olun_tier_label(tier)
+                change_type = f"Spots – Olun ({tier_label})"
+            else:
+                change_type = f"Spots – {_spot_name(spot) if spot else '—'}"
+        elif cat == "pilafe":
+            change_type = "Pila Fe"
+
+        header = (
+            "✏️ **Änderungs-Header**\n"
+            f"**Typ:** {change_type}\n"
+            f"**Tag:** {day_str}\n"
+            f"**Start:** {start_text}\n"
+            f"**Frei:** {free}\n"
+            f"**Link:** {jump}\n"
+        )
+
+        text = header + "\n" + "\n".join(lines)
+
+
+        channel = guild.get_channel(int(data.get("channel_id", 0)))
+        failed: list[int] = []
+
+        for uid in recipient_ids:
+            m = guild.get_member(int(uid))
+            if not m:
+                continue
+            if self._member_has_no_dm_role(m):
+                failed.append(int(uid))
+                continue
+            try:
+                await m.send(text)
+            except Exception:
+                failed.append(int(uid))
+
+        # Fallback: Ping im Channel, aber nur die, bei denen DM nicht ging / Opt-out
+        if failed and isinstance(channel, discord.TextChannel):
+            mentions = " ".join(f"<@{uid}>" for uid in failed)
+            try:
+                await channel.send(
+                    f"✏️ Änderung (DM nicht möglich/opt-out): {mentions}\n{jump}",
+                    allowed_mentions=discord.AllowedMentions(
+                        users=True, roles=False, everyone=False),
+                )
+            except Exception:
+                pass
+
+        # pending clear + markieren
+        en["pending"] = {}
+        en["last_sent_at"] = int(_now_local().timestamp())
+        data["edit_notify"] = en
+        await self._set_search(int(message_id), data)
 
     def _schedule_dashboard_refresh(self, guild_id: int):
         # Wenn schon ein Task läuft → abbrechen
@@ -3547,7 +3785,10 @@ class GruppensucheTest(commands.Cog):
         if data is None:
             await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
+        # --- alten Wert sichern (WICHTIG für "old -> new") ---
+        old_day_iso = str(data.get("day_date_iso") or "")
 
+        # --- neuen Wert setzen ---
         data["day_date_iso"] = session.day_date_iso
 
         # ✅ Reminder reset, weil Tag geändert wurde
@@ -3557,6 +3798,26 @@ class GruppensucheTest(commands.Cog):
         rem.pop("start_30m", None)
         data["reminders"] = rem
 
+        # --- Edit Notify (debounced) ---
+        try:
+            old_fmt = _format_day(dt.date.fromisoformat(
+                old_day_iso)) if old_day_iso else "—"
+        except Exception:
+            old_fmt = old_day_iso or "—"
+
+        try:
+            new_fmt = _format_day(dt.date.fromisoformat(
+                str(session.day_date_iso or ""))) if session.day_date_iso else "—"
+        except Exception:
+            new_fmt = str(session.day_date_iso or "—")
+
+        self._schedule_edit_notify(
+            int(session.edit_message_id),
+            data,
+            changes=[{"key": "day", "label": "Tag",
+                      "old": old_fmt, "new": new_fmt}],
+        )
+
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
@@ -3564,28 +3825,17 @@ class GruppensucheTest(commands.Cog):
     async def _apply_edit_max_players(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
-        data = await self._get_search(session.edit_message_id)
-        lock = self._lock_for(int(session.edit_message_id))
-        async with lock:
-            data = await self._get_search(session.edit_message_id)
-            if data is None:
-                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-                return
 
-            # ... ab hier bleibt deine bestehende Logik unverändert ...
-            # ... bis inkl. await self._save_refresh_dispatch(data)
+        message_id = int(session.edit_message_id)
+        lock = self._lock_for(message_id)
 
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
+        # Zielwert früh bestimmen (Session kommt aus Select)
+        desired_max = int(session.max_players or 0)
 
-        new_max = int(session.max_players or int(data.get("max_players", 2)))
-        mn, mx = _allowed_party_range(str(data.get("category", "")), str(
-            data.get("spot_key", "")) if data.get("category") == "spots" else None)
         # ✅ Admin-only Absicherung: 1 Teilnehmer nur für Admin-Testzwecke
         member = interaction.user if isinstance(
             interaction.user, discord.Member) else None
-        if new_max == 1 and not (member and _is_admin_only(member)):
+        if desired_max == 1 and not (member and _is_admin_only(member)):
             await self._ephemeral_notice(
                 interaction,
                 "1 Teilnehmer ist nur für Admin-Testzwecke erlaubt.",
@@ -3593,62 +3843,105 @@ class GruppensucheTest(commands.Cog):
             )
             return
 
-        if new_max < mn or new_max > mx:
-            await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.", ephemeral=True)
-            return
+        async with lock:
+            data = await self._get_search(message_id)
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        data["max_players"] = new_max
+            # --- alte Werte sichern (für "old -> new") ---
+            old_max = int(data.get("max_players", 2))
+            old_part_count = len(list(data.get("participants") or []))
+            old_wait_count = len(list(data.get("waitlist") or []))
 
-        participants = list(data.get("participants") or [])
-        waitlist = list(data.get("waitlist") or [])
+            # Range prüfen (abhängig von Kategorie/Spot)
+            mn, mx = _allowed_party_range(
+                str(data.get("category", "")),
+                str(data.get("spot_key", "")) if data.get(
+                    "category") == "spots" else None
+            )
 
-        ap_map = data.get("participant_ap") or {}
-        wl_map = data.get("waitlist_ap") or {}
+            if desired_max < mn or desired_max > mx:
+                await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.", ephemeral=True)
+                return
 
-        # 1) Wenn new_max kleiner ist: "zu viele Teilnehmer" -> in Warteschlange schieben
-        #    (wir nehmen die letzten Einträge, damit Host/erste Teilnehmer eher stabil bleiben)
-        while len(participants) > new_max:
-            demoted_id = int(participants.pop())
-            # AP umhängen
-            demoted_ap = ap_map.pop(str(demoted_id), None)
-            if demoted_ap is not None:
-                wl_map[str(demoted_id)] = demoted_ap
-            # in Warteschlange vorne rein (damit sie als erstes wieder nachrücken)
-            waitlist.insert(0, demoted_id)
+            # --- neue max setzen ---
+            data["max_players"] = int(desired_max)
 
-        # 2) Wenn new_max größer ist: aus Warteschlange auffüllen
-        while len(participants) < new_max and waitlist:
-            pid = int(waitlist.pop(0))
-            participants.append(pid)
+            participants = list(data.get("participants") or [])
+            waitlist = list(data.get("waitlist") or [])
 
-            promoted_ap = wl_map.pop(str(pid), None)
-            if promoted_ap is not None:
-                ap_map[str(pid)] = promoted_ap
+            ap_map = data.get("participant_ap") or {}
+            wl_map = data.get("waitlist_ap") or {}
 
-        data["participant_ap"] = ap_map
-        data["waitlist_ap"] = wl_map
+            # 1) Wenn new_max kleiner ist: zu viele Teilnehmer -> in Warteschlange schieben (letzte zuerst)
+            while len(participants) > desired_max:
+                demoted_id = int(participants.pop())
+                demoted_ap = ap_map.pop(str(demoted_id), None)
+                if demoted_ap is not None:
+                    wl_map[str(demoted_id)] = demoted_ap
+                waitlist.insert(0, demoted_id)
 
-        data["participants"] = participants
-        data["waitlist"] = waitlist
+            # 2) Wenn new_max größer ist: aus Warteschlange auffüllen
+            while len(participants) < desired_max and waitlist:
+                pid = int(waitlist.pop(0))
+                participants.append(pid)
 
-        await self._save_refresh_dispatch(data)
+                promoted_ap = wl_map.pop(str(pid), None)
+                if promoted_ap is not None:
+                    ap_map[str(pid)] = promoted_ap
+
+            data["participants"] = participants
+            data["waitlist"] = waitlist
+            data["participant_ap"] = ap_map
+            data["waitlist_ap"] = wl_map
+
+            await self._save_refresh_dispatch(data)
+
+            # --- neue Werte ---
+            new_max = int(data.get("max_players", 2))
+            new_part_count = len(list(data.get("participants") or []))
+            new_wait_count = len(list(data.get("waitlist") or []))
+
+            changes = [
+                {"key": "max_players", "label": "Max. Teilnehmer",
+                    "old": str(old_max), "new": str(new_max)},
+            ]
+
+            if (old_part_count, old_wait_count) != (new_part_count, new_wait_count):
+                changes.append({
+                    "key": "lists",
+                    "label": "Teilnehmer/Warteschlange",
+                    "old": f"{old_part_count} / {old_wait_count}",
+                    "new": f"{new_part_count} / {new_wait_count}",
+                })
+
+            self._schedule_edit_notify(message_id, data, changes=changes)
 
         await self._send_edit_menu(interaction, session)
 
     async def _apply_edit_details(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
+
         data = await self._get_search(session.edit_message_id)
         if data is None:
             await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
+        # --- alte Werte sauber sichern (für "old -> new") ---
+        old_duration = data.get("duration_text")
+        old_start = data.get("start_text")
+        old_req = data.get("req_text")
+        old_notes = data.get("notes")
+        old_day_iso = data.get("day_date_iso")
+        old_amount = data.get("scroll_amount") if data.get(
+            "category") == "pilafe" else None
+
+        # --- Änderungen anwenden (Edit: nur überschreiben, wenn session-Feld gesetzt ist) ---
         if data.get("category") == "pilafe":
             if session.scroll_amount is not None:
                 data["scroll_amount"] = session.scroll_amount
-
-        old_start = data.get("start_text")
-        old_day = data.get("day_date_iso")  # optional
 
         if session.duration_text is not None:
             data["duration_text"] = session.duration_text
@@ -3662,8 +3955,8 @@ class GruppensucheTest(commands.Cog):
         if session.notes is not None:
             data["notes"] = session.notes
 
-        # ✅ Reminder reset, wenn Startzeit (oder optional Tag) geändert wurde
-        if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day):
+        # ✅ Reminder reset, wenn Startzeit (oder Tag) geändert wurde
+        if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day_iso):
             rem = data.get("reminders")
             if not isinstance(rem, dict):
                 rem = {}
@@ -3671,6 +3964,55 @@ class GruppensucheTest(commands.Cog):
             data["reminders"] = rem
 
         await self._save_refresh_dispatch(data)
+
+        # --- Change-Liste bauen (old -> new) ---
+        changes: list[dict] = []
+
+        if data.get("category") == "pilafe":
+            new_amount = data.get("scroll_amount")
+            if old_amount != new_amount:
+                changes.append({
+                    "key": "scroll_amount",
+                    "label": "Menge",
+                    "old": old_amount,
+                    "new": new_amount
+                })
+
+        if old_duration != data.get("duration_text"):
+            changes.append({
+                "key": "duration",
+                "label": "Geplante Dauer",
+                "old": old_duration,
+                "new": data.get("duration_text")
+            })
+
+        if old_start != data.get("start_text"):
+            changes.append({
+                "key": "start",
+                "label": "Startzeit",
+                "old": old_start,
+                "new": data.get("start_text")
+            })
+
+        if old_req != data.get("req_text"):
+            changes.append({
+                "key": "req",
+                "label": "Anforderung AK/VK",
+                "old": old_req,
+                "new": data.get("req_text")
+            })
+
+        if old_notes != data.get("notes"):
+            changes.append({
+                "key": "notes",
+                "label": "Notiz",
+                "old": old_notes,
+                "new": data.get("notes")
+            })
+
+        if changes:
+            self._schedule_edit_notify(
+                int(session.edit_message_id), data, changes=changes)
 
         await self._send_edit_menu(interaction, session)
 
@@ -3690,8 +4032,26 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "Bitte mindestens 1 Boss auswählen.", ephemeral=True)
             return
 
+        def _fmt_boss_runs(br: dict) -> str:
+            if not isinstance(br, dict) or not br:
+                return "—"
+            parts = []
+            for k, v in br.items():
+                name = _boss_name(str(k))
+                runs = int(v or 1)
+                parts.append(f"{name}{' (2x)' if runs >= 2 else ''}")
+            return ", ".join(parts)
+
+        old_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
         data["boss_runs"] = dict(session.boss_runs)
         data["updated_at"] = int(_now_local().timestamp())
         await self._save_refresh_dispatch(data)
+        new_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
+        self._schedule_edit_notify(
+            int(session.edit_message_id),
+            data,
+            changes=[{"key": "bosses", "label": "Bosse",
+                      "old": old_bosses, "new": new_bosses}],
+        )
 
         await self._send_edit_menu(interaction, session)
