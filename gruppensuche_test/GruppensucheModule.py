@@ -1497,8 +1497,14 @@ class PartySizeSelect(discord.ui.Select):
             await self.host_view.cog._goto_next(interaction, self.host_view.session, Step.PARTY)
             return
 
-        # Edit: bleibt speichern
+        # ✅ Edit: ACK-sicher, damit Discord kein "Interaktion fehlgeschlagen" zeigt
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
+
 
 
 class PartySizeView(WizardBaseView):
@@ -3825,6 +3831,11 @@ class GruppensucheTest(commands.Cog):
     async def _apply_edit_max_players(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
+        # ✅ ACK-safe (falls der Caller nicht deferred hat)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
 
         message_id = int(session.edit_message_id)
         lock = self._lock_for(message_id)
