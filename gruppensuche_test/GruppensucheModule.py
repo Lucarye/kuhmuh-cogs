@@ -718,7 +718,7 @@ class DetailsModal(discord.ui.Modal):
         ) if hasattr(self, "own_ap") else ""
         if self.session.mode == "create":
             if not own_ap_val:
-                await interaction.followup.send("AP ist Pflicht.", ephemeral=True)
+                await self.cog._ephemeral_notice(interaction, "AP ist Pflicht.", ephemeral=True)
                 return
             self.session.own_ap = own_ap_val
         else:
@@ -729,7 +729,7 @@ class DetailsModal(discord.ui.Modal):
         # Session-Felder setzen
         if self.session.category == "pilafe" and self.session.mode == "create":
             if not str(self.scroll_amount.value).strip():
-                await interaction.followup.send("Bei Pila Fe ist die Menge Pflicht.", ephemeral=True)
+                await self.cog._ephemeral_notice(interaction, "Bei Pila Fe ist die Menge Pflicht.", ephemeral=True)
                 return
             self.session.scroll_amount = str(self.scroll_amount.value).strip()
         elif self.session.category == "pilafe":
@@ -770,8 +770,9 @@ class DetailsModal(discord.ui.Modal):
 
 
 class JoinApModal(discord.ui.Modal):
-    def __init__(self, on_done):
+    def __init__(self, cog, on_done):
         super().__init__(title="AP bei Anmeldung")
+        self.cog = cog
         self.on_done = on_done
 
         self.ap = discord.ui.TextInput(
@@ -792,7 +793,7 @@ class JoinApModal(discord.ui.Modal):
             pass
 
         if not val:
-            await interaction.followup.send("AP ist Pflicht.", ephemeral=True)
+            await self.cog._ephemeral_notice(interaction, "AP ist Pflicht.", ephemeral=True)
             return
 
         await self.on_done(interaction, val)
@@ -1119,7 +1120,7 @@ class BossSelectView(WizardBaseView):
                 del self.session.boss_runs[key]
             else:
                 if _sum_runs(self.session.boss_runs) >= 5:
-                    await interaction.response.send_message("Maximal 5 Runs insgesamt möglich.", ephemeral=True)
+                    await self.cog._ephemeral_notice(interaction, "Maximal 5 Runs insgesamt möglich.", ephemeral=True)
                     return
                 self.session.boss_runs[key] = 1
 
@@ -1134,7 +1135,7 @@ class BossSelectView(WizardBaseView):
             return
 
         if not self.session.boss_runs:
-            await interaction.response.send_message("Bitte wähle mindestens 1 Boss.", ephemeral=True)
+            await self.cog._ephemeral_notice(interaction, "Bitte wähle mindestens 1 Boss.", ephemeral=True)
             return
 
         total = _sum_runs(self.session.boss_runs)
@@ -1229,10 +1230,7 @@ class DoubleRunView(WizardBaseView):
                 self.session.boss_runs[key] = 1
             else:
                 if self._free_runs() <= 0:
-                    await interaction.response.send_message(
-                        "Keine freien Runs mehr. Maximal 5 Runs insgesamt.",
-                        ephemeral=True,
-                    )
+                    await self.cog._ephemeral_notice(interaction, "Keine freien Runs mehr. Maximal 5 Runs insgesamt.", ephemeral=True)
                     return
                 self.session.boss_runs[key] = 2
 
@@ -1334,7 +1332,7 @@ class SpotSelectView(WizardBaseView):
             await interaction.response.defer()
             return
         if not FEATURE_SPOTS_MIRUMOK:
-            await interaction.response.send_message("Mirumok ist aktuell deaktiviert.", ephemeral=True)
+            await self.cog._ephemeral_notice(interaction, "Mirumok ist aktuell deaktiviert.", ephemeral=True)
             return
         self.session.spot_key = "mirumok"
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
@@ -1344,7 +1342,7 @@ class SpotSelectView(WizardBaseView):
             await interaction.response.defer()
             return
         if not FEATURE_SPOTS_GYFIN:
-            await interaction.response.send_message("Gyfin ist aktuell deaktiviert.", ephemeral=True)
+            await self.cog._ephemeral_notice(interaction, "Gyfin ist aktuell deaktiviert.", ephemeral=True)
             return
         self.session.spot_key = "gyfin"
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
@@ -1841,7 +1839,7 @@ class PublicPostView(discord.ui.View):
         async def _done(i: discord.Interaction, ap_val: str):
             await self.cog._join(i, self.message_id, ap_val)
 
-        await interaction.response.send_modal(JoinApModal(_done))
+        await interaction.response.send_modal(JoinApModal(self.cog, _done))
 
     async def _on_leave(self, interaction: discord.Interaction):
         await self.cog._leave(interaction, self.message_id)
@@ -2073,8 +2071,8 @@ class GruppensucheTest(commands.Cog):
             await self._send_edit_menu(interaction, session)
             return
 
-        # Fallback
-        await interaction.followup.send("Unbekannter Step.", ephemeral=True)
+        # Fallback (ACK-safe)
+        await self._ephemeral_notice(interaction, "Unbekannter Step.")
 
     def _resolve_back_target_for_day(self, session: WizardSession) -> str:
         """
@@ -2296,7 +2294,7 @@ class GruppensucheTest(commands.Cog):
                 try:
                     await interaction.edit_original_response(embed=embed, view=view)
                 except Exception:
-                    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                    await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
                 return
 
             # 2) Wenn es eine Message gibt (typisch bei Button/Select auf einer Ephemeral-Message)
@@ -2305,12 +2303,12 @@ class GruppensucheTest(commands.Cog):
                 return
 
             # 3) Erstes Slash-Command: neue Ephemeral senden
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
             return
 
         except Exception:
             try:
-                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
             except Exception:
                 return
 
@@ -2325,24 +2323,20 @@ class GruppensucheTest(commands.Cog):
         ephemeral: bool = True,
     ):
         """
-        Ack-sicherer Ephemeral-Responder:
-        - Wenn response bereits done → followup.send(...)
-        - Sonst → response.send_message(...)
-        Unterstützt Text/Embed/View/AllowedMentions.
+        Ack-sicherer Responder (ephemeral + nicht-ephemeral):
+        - Wenn noch NICHT geantwortet: interaction.response.send_message(...)
+        - Wenn schon geantwortet: interaction.followup.send(...)
+        Unterstützt content / embed / view / allowed_mentions.
         """
         try:
             payload: dict = {"ephemeral": ephemeral}
 
-            # content darf auch None sein (z.B. nur Embed)
             if text is not None:
                 payload["content"] = text
-
             if embed is not None:
                 payload["embed"] = embed
-
             if view is not None:
                 payload["view"] = view
-
             if allowed_mentions is not None:
                 payload["allowed_mentions"] = allowed_mentions
 
@@ -2352,16 +2346,13 @@ class GruppensucheTest(commands.Cog):
                 await interaction.response.send_message(**payload)
 
         except Exception:
-            # bewusst still (wie bisher)
+            # bewusst still
             pass
 
     async def _send_ephemeral_new(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
         # Sendet IMMER eine neue ephemeral Nachricht (niemals edit_message auf einem öffentlichen Post).
         try:
-            if interaction.response.is_done():
-                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-            else:
-                await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
         except Exception:
             pass
 
@@ -2373,7 +2364,7 @@ class GruppensucheTest(commands.Cog):
             pass
 
         if bool(data.get("is_closed", False)):
-            await interaction.followup.send("Diese Suche ist geschlossen.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche ist geschlossen.", ephemeral=True)
             return
 
         # ========= Cooldown (pro Post) =========
@@ -2383,8 +2374,8 @@ class GruppensucheTest(commands.Cog):
 
         remaining = PARTICIPANT_PING_COOLDOWN_SECONDS - (now_ts - last)
         if remaining > 0:
-            await interaction.followup.send(
-                f"📣 Teilnehmer-Ping ist noch im Cooldown. Bitte warte **{remaining}s**.",
+            await self._ephemeral_notice(
+                interaction, f"📣 Teilnehmer-Ping ist noch im Cooldown. Bitte warte **{remaining}s**.",
                 ephemeral=True,
             )
             return
@@ -3193,7 +3184,7 @@ class GruppensucheTest(commands.Cog):
 
         if not was_participant and not was_wait:
             # ✅ HIER ändern: response -> followup
-            await interaction.followup.send("Du bist nicht eingetragen.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Du bist nicht eingetragen.", ephemeral=True)
             return
 
         if was_participant:
@@ -3238,7 +3229,7 @@ class GruppensucheTest(commands.Cog):
         await self._save_refresh_dispatch(data)
 
         # ✅ HIER ändern: response -> followup
-        await interaction.followup.send("✅ Du wurdest abgemeldet.", ephemeral=True)
+        await self._ephemeral_notice(interaction, "✅ Du wurdest abgemeldet.", ephemeral=True)
 
         if promoted_id:
             await self._notify_promotion(data, promoted_id)
@@ -3315,7 +3306,7 @@ class GruppensucheTest(commands.Cog):
             pass
 
         if bool(data.get("is_closed", False)):
-            await interaction.followup.send("Diese Suche ist geschlossen.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche ist geschlossen.", ephemeral=True)
             return
 
         cd = data.get("ping_cd") or {}
@@ -3329,7 +3320,8 @@ class GruppensucheTest(commands.Cog):
         diff = now_ts - last
         if diff < PING_COOLDOWN_SECONDS:
             remaining = PING_COOLDOWN_SECONDS - diff
-            await interaction.followup.send(
+            await self._ephemeral_notice(
+                interaction,
                 f"⏳ Ping-Cooldown aktiv. Du kannst das wieder {_format_remaining(remaining)} benutzen.",
                 ephemeral=True,
             )
@@ -3347,12 +3339,13 @@ class GruppensucheTest(commands.Cog):
 
         guild = interaction.guild
         if guild is None:
-            await interaction.followup.send("Nur auf Servern nutzbar.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Nur auf Servern nutzbar.", ephemeral=True)
             return
+
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         if not isinstance(channel, discord.TextChannel):
-            await interaction.followup.send("Channel nicht gefunden.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Channel nicht gefunden.", ephemeral=True)
             return
 
         ping_role_id = int(data.get("ping_role_id", TEST_ROLE_ID))
@@ -3385,7 +3378,7 @@ class GruppensucheTest(commands.Cog):
             pass
 
         if bool(data.get("is_closed", False)):
-            await interaction.followup.send("Diese Suche ist geschlossen.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Diese Suche ist geschlossen.", ephemeral=True)
             return
 
         cd = data.get("ping_cd") or {}
@@ -3399,7 +3392,8 @@ class GruppensucheTest(commands.Cog):
         diff = now_ts - last
         if diff < PING_COOLDOWN_SECONDS:
             remaining = PING_COOLDOWN_SECONDS - diff
-            await interaction.followup.send(
+            await self._ephemeral_notice(
+                interaction,
                 f"⏳ Ping-Cooldown aktiv. Du kannst das wieder {_format_remaining(remaining)} benutzen.",
                 ephemeral=True,
             )
@@ -3417,12 +3411,12 @@ class GruppensucheTest(commands.Cog):
 
         guild = interaction.guild
         if guild is None:
-            await interaction.followup.send("Nur auf Servern nutzbar.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Nur auf Servern nutzbar.", ephemeral=True)
             return
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         if not isinstance(channel, discord.TextChannel):
-            await interaction.followup.send("Channel nicht gefunden.", ephemeral=True)
+            await self._ephemeral_notice(interaction, "Channel nicht gefunden.", ephemeral=True)
             return
 
         day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
@@ -3439,17 +3433,31 @@ class GruppensucheTest(commands.Cog):
         await channel.send(txt, allowed_mentions=discord.AllowedMentions.none())
 
     async def _close_search(self, interaction: discord.Interaction, message_id: int):
+        # ✅ ACK-safe
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
         data = await self._get_search(message_id)
         if data is None:
             return
+
         data["is_closed"] = True
         await self._save_refresh_dispatch(data)
 
     async def _open_search(self, interaction: discord.Interaction, message_id: int):
+        # ✅ ACK-safe
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
         data = await self._get_search(message_id)
         if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
             return
+
         data["is_closed"] = False
         await self._save_refresh_dispatch(data)
 
@@ -3512,11 +3520,7 @@ class GruppensucheTest(commands.Cog):
 
     async def _send_edit_menu(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
-            await interaction.response.edit_message(
-                content="Edit-Session ungültig.",
-                embed=None,
-                view=None,
-            )
+            await self._ephemeral_notice(interaction, "Edit-Session ungültig.", ephemeral=True)
             return
 
         data = await self._get_search(session.edit_message_id)
@@ -3568,9 +3572,10 @@ class GruppensucheTest(commands.Cog):
                 "1 Teilnehmer ist nur für Admin-Testzwecke erlaubt.",
                 ephemeral=True,
             )
+            return
 
         if new_max < mn or new_max > mx:
-            await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.")
+            await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.", ephemeral=True)
             return
 
         data["max_players"] = new_max
@@ -3581,12 +3586,24 @@ class GruppensucheTest(commands.Cog):
         ap_map = data.get("participant_ap") or {}
         wl_map = data.get("waitlist_ap") or {}
 
+        # 1) Wenn new_max kleiner ist: "zu viele Teilnehmer" -> in Warteschlange schieben
+        #    (wir nehmen die letzten Einträge, damit Host/erste Teilnehmer eher stabil bleiben)
+        while len(participants) > new_max:
+            demoted_id = int(participants.pop())
+            # AP umhängen
+            demoted_ap = ap_map.pop(str(demoted_id), None)
+            if demoted_ap is not None:
+                wl_map[str(demoted_id)] = demoted_ap
+            # in Warteschlange vorne rein (damit sie als erstes wieder nachrücken)
+            waitlist.insert(0, demoted_id)
+
+        # 2) Wenn new_max größer ist: aus Warteschlange auffüllen
         while len(participants) < new_max and waitlist:
             pid = int(waitlist.pop(0))
             participants.append(pid)
 
             promoted_ap = wl_map.pop(str(pid), None)
-            if promoted_ap:
+            if promoted_ap is not None:
                 ap_map[str(pid)] = promoted_ap
 
         data["participant_ap"] = ap_map
@@ -3594,6 +3611,7 @@ class GruppensucheTest(commands.Cog):
 
         data["participants"] = participants
         data["waitlist"] = waitlist
+
         await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
