@@ -173,6 +173,13 @@ class KuhmuhUpdate(commands.Cog):
             # keine harte Fehlerbehandlung: Sync darf das Cog nicht blockieren
             pass
 
+    async def _admin_role_id(self) -> int:
+        rid = await self.config.admin_role_id()
+        return int(rid or 0)
+
+    async def _is_owner(self, user: discord.abc.User) -> bool:
+        return await self.bot.is_owner(user)
+
     async def _require_admin(self, interaction: discord.Interaction) -> Tuple[bool, Optional[str]]:
         """
         Returns (ok, error_message). Enforces:
@@ -369,7 +376,7 @@ class KuhmuhUpdate(commands.Cog):
     update_group = app_commands.Group(
         name="update",
         description="Admin: Einzelne Cogs updaten/verwalteten.",
-        guilds=[discord.Object(id=GUILD_ID)],
+        guild_ids=[GUILD_ID],
     )
     manage_group = app_commands.Group(
         name="manage",
