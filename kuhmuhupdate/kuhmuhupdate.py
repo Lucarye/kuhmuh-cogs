@@ -358,7 +358,7 @@ class KuhmuhUpdate(commands.Cog):
     # /update run
     # ==========================
     @update_group.command(name="run", description="Gespeichertes Cog updaten (uninstall → repo update → install → load)")
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(cog="Cog auswählen (gespeichert)")
@@ -479,7 +479,7 @@ class KuhmuhUpdate(commands.Cog):
     # /update manage add
     # ==========================
     @manage_group.command(name="add", description="Cog + Repo speichern")
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(cog_name="z.B. gruppensuche_test", repo_name="z.B. kuhmuh")
@@ -504,7 +504,7 @@ class KuhmuhUpdate(commands.Cog):
     # /update manage remove
     # ==========================
     @manage_group.command(name="remove", description="Gespeichertes Cog entfernen")
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(cog="Gespeichertes Cog")
@@ -527,7 +527,7 @@ class KuhmuhUpdate(commands.Cog):
     # /update manage list
     # ==========================
     @manage_group.command(name="list", description="Alle gespeicherten Cogs anzeigen")
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     async def manage_list(self, interaction: discord.Interaction) -> None:
