@@ -1929,6 +1929,8 @@ class GruppensucheTest(commands.Cog):
         self.config.register_guild(searches={})
 
         self._sessions: Dict[int, WizardSession] = {}
+        # --- Concurrency Locks (per Post / message_id) ---
+        self._post_locks: Dict[int, asyncio.Lock] = {}
         # --- Dashboard Debounce ---
         self._dashboard_refresh_tasks: Dict[int, asyncio.Task] = {}
         self._dashboard_refresh_delay = 2  # Sekunden
@@ -1973,6 +1975,13 @@ class GruppensucheTest(commands.Cog):
     def _expire_session(self, user_id: int):
         if user_id in self._sessions:
             del self._sessions[user_id]
+
+    def _lock_for(self, message_id: int) -> asyncio.Lock:
+        lock = self._post_locks.get(int(message_id))
+        if lock is None:
+            lock = asyncio.Lock()
+            self._post_locks[int(message_id)] = lock
+        return lock
 
     async def _go_back(self, interaction: discord.Interaction, session: WizardSession, target: str, **kwargs):
         # Edit-Mode Back bleibt wie bei euch über build_back_button geregelt.
@@ -2780,12 +2789,10 @@ class GruppensucheTest(commands.Cog):
 
         if bool(data.get("is_closed", False)):
             view = ClosedPostView(self, mid)
-            self.bot.add_view(view)
             await msg.edit(embed=embed, view=view)
             return
 
         view = PublicPostView(self, mid)
-        self.bot.add_view(view)
         await self._apply_dynamic_button_labels(view, data)
         await msg.edit(embed=embed, view=view)
 
@@ -3109,128 +3116,130 @@ class GruppensucheTest(commands.Cog):
                 pass
 
     async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
+        lock = self._lock_for(message_id)
+        async with lock:
+            data = await self._get_search(message_id)
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        data = await self._get_search(message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
+            if bool(data.get("is_closed", False)):
+                await self._ephemeral_notice(interaction, "Diese Suche ist geschlossen.")
+                return
 
-        if bool(data.get("is_closed", False)):
-            await self._ephemeral_notice(interaction, "Diese Suche ist geschlossen.")
-            return
+            uid = interaction.user.id
+            participants: List[int] = list(data.get("participants") or [])
+            waitlist: List[int] = list(data.get("waitlist") or [])
+            max_players = int(data.get("max_players", 2))
 
-        uid = interaction.user.id
-        participants: List[int] = list(data.get("participants") or [])
-        waitlist: List[int] = list(data.get("waitlist") or [])
-        max_players = int(data.get("max_players", 2))
+            if uid in participants:
+                await self._ephemeral_notice(interaction, "Du bist bereits Teilnehmer.")
+                return
 
-        if uid in participants:
-            await self._ephemeral_notice(interaction, "Du bist bereits Teilnehmer.")
-            return
+            if uid in waitlist:
+                await self._ephemeral_notice(interaction, "Du bist bereits in der Warteschlange.")
+                return
 
-        if uid in waitlist:
-            await self._ephemeral_notice(interaction, "Du bist bereits in der Warteschlange.")
-            return
+            if len(participants) < max_players:
+                participants.append(uid)
+                data["participants"] = participants
 
-        if len(participants) < max_players:
-            participants.append(uid)
-            data["participants"] = participants
+                ap_map = data.get("participant_ap") or {}
+                ap_map[str(uid)] = ap_val
+                data["participant_ap"] = ap_map
 
-            ap_map = data.get("participant_ap") or {}
-            ap_map[str(uid)] = ap_val
-            data["participant_ap"] = ap_map
+                _ensure_easter_egg_text(data, uid, ap_val)
 
-            # ✅ Easteregg einmalig würfeln & speichern
+                await self._save_refresh_dispatch(data)
+                await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
+                return
+
+            waitlist.append(uid)
+            data["waitlist"] = waitlist
+            data["updated_at"] = int(_now_local().timestamp())
+
+            wl_map = data.get("waitlist_ap") or {}
+            wl_map[str(uid)] = ap_val
+            data["waitlist_ap"] = wl_map
+
             _ensure_easter_egg_text(data, uid, ap_val)
 
             await self._save_refresh_dispatch(data)
-            await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
-            return
-
-        # sonst Warteschlange
-        waitlist.append(uid)
-        data["waitlist"] = waitlist
-        data["updated_at"] = int(_now_local().timestamp())
-
-        wl_map = data.get("waitlist_ap") or {}
-        wl_map[str(uid)] = ap_val
-        data["waitlist_ap"] = wl_map
-
-        # ✅ Easteregg auch für Warteschlange
-        _ensure_easter_egg_text(data, uid, ap_val)
-
-        await self._save_refresh_dispatch(data)
-        await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
+            await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
 
     async def _leave(self, interaction: discord.Interaction, message_id: int):
-        data = await self._get_search(message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
-
-        # ✅ HIER rein (direkt nach dem data-Check)
+        # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
-        uid = interaction.user.id
-        participants: List[int] = list(data.get("participants") or [])
-        waitlist: List[int] = list(data.get("waitlist") or [])
-        max_players = int(data.get("max_players", 2))
-
-        was_participant = uid in participants
-        was_wait = uid in waitlist
-
-        if not was_participant and not was_wait:
-            # ✅ HIER ändern: response -> followup
-            await self._ephemeral_notice(interaction, "Du bist nicht eingetragen.", ephemeral=True)
-            return
-
-        if was_participant:
-            participants.remove(uid)
-        if was_wait:
-            waitlist.remove(uid)
-
-        # AP Maps aufräumen
-        ap_map = data.get("participant_ap") or {}
-        wl_map = data.get("waitlist_ap") or {}
-
-        if was_participant:
-            ap_map.pop(str(uid), None)
-        if was_wait:
-            wl_map.pop(str(uid), None)
-
-        data["participant_ap"] = ap_map
-        data["waitlist_ap"] = wl_map
-
-        # ✅ Easter-Egg: beim Abmelden löschen -> bei erneuter Anmeldung neu würfeln
-        egg_map = data.get("easter_egg_texts")
-        if isinstance(egg_map, dict):
-            egg_map.pop(str(uid), None)
-            data["easter_egg_texts"] = egg_map
-
+        lock = self._lock_for(message_id)
         promoted_id: Optional[int] = None
-        if was_participant and len(participants) < max_players and waitlist:
-            promoted_id = int(waitlist.pop(0))
-            participants.append(promoted_id)
-            wl_map = data.get("waitlist_ap") or {}
+
+        async with lock:
+            data = await self._get_search(message_id)
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+                return
+
+            uid = interaction.user.id
+            participants: List[int] = list(data.get("participants") or [])
+            waitlist: List[int] = list(data.get("waitlist") or [])
+            max_players = int(data.get("max_players", 2))
+
+            was_participant = uid in participants
+            was_wait = uid in waitlist
+
+            if not was_participant and not was_wait:
+                await self._ephemeral_notice(interaction, "Du bist nicht eingetragen.", ephemeral=True)
+                return
+
+            if was_participant:
+                participants.remove(uid)
+            if was_wait:
+                waitlist.remove(uid)
+
             ap_map = data.get("participant_ap") or {}
+            wl_map = data.get("waitlist_ap") or {}
 
-            promoted_ap = wl_map.pop(str(promoted_id), None)
-            if promoted_ap:
-                ap_map[str(promoted_id)] = promoted_ap
+            if was_participant:
+                ap_map.pop(str(uid), None)
+            if was_wait:
+                wl_map.pop(str(uid), None)
 
-            data["waitlist_ap"] = wl_map
             data["participant_ap"] = ap_map
+            data["waitlist_ap"] = wl_map
 
-        data["participants"] = participants
-        data["waitlist"] = waitlist
-        await self._save_refresh_dispatch(data)
+            # Easter-Egg entfernen -> neu würfeln bei neuer Anmeldung
+            egg_map = data.get("easter_egg_texts")
+            if isinstance(egg_map, dict):
+                egg_map.pop(str(uid), None)
+                data["easter_egg_texts"] = egg_map
 
-        # ✅ HIER ändern: response -> followup
+            # Promote aus Warteschlange
+            if was_participant and len(participants) < max_players and waitlist:
+                promoted_id = int(waitlist.pop(0))
+                participants.append(promoted_id)
+
+                wl_map = data.get("waitlist_ap") or {}
+                ap_map = data.get("participant_ap") or {}
+
+                promoted_ap = wl_map.pop(str(promoted_id), None)
+                if promoted_ap:
+                    ap_map[str(promoted_id)] = promoted_ap
+
+                data["waitlist_ap"] = wl_map
+                data["participant_ap"] = ap_map
+
+            data["participants"] = participants
+            data["waitlist"] = waitlist
+
+            await self._save_refresh_dispatch(data)
+
         await self._ephemeral_notice(interaction, "✅ Du wurdest abgemeldet.", ephemeral=True)
 
+        # ✅ Promotion-Notify NACH Lock (verhindert Lock-Blocking bei DMs)
         if promoted_id:
             await self._notify_promotion(data, promoted_id)
 
@@ -3241,6 +3250,9 @@ class GruppensucheTest(commands.Cog):
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         if not isinstance(channel, discord.TextChannel):
             return
+
+        def _member_has_no_dm_role(member: discord.Member) -> bool:
+            return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
 
         owner_id = int(data.get("owner_id", 0))
         mid = int(data.get("message_id", 0))
@@ -3261,7 +3273,7 @@ class GruppensucheTest(commands.Cog):
         owner_dm_ok = False
         promoted_dm_ok = False
 
-        if owner_member:
+        if owner_member and not _member_has_no_dm_role(owner_member):
             try:
                 await owner_member.send(
                     f"🔔 **Warteschlange aufgerückt**\n"
@@ -3273,7 +3285,7 @@ class GruppensucheTest(commands.Cog):
             except Exception:
                 owner_dm_ok = False
 
-        if promoted_member:
+        if promoted_member and not _member_has_no_dm_role(promoted_member):
             try:
                 await promoted_member.send(
                     f"❗ **Ein Teilnehmer hat abgesagt.**\n"
@@ -3316,7 +3328,7 @@ class GruppensucheTest(commands.Cog):
         if not isinstance(type_map, dict):
             type_map = {}
 
-        last = int(type_map.get(str(message_id), 0))
+        last = int(cd.get("type", 0))
         diff = now_ts - last
         if diff < PING_COOLDOWN_SECONDS:
             remaining = PING_COOLDOWN_SECONDS - diff
@@ -3327,8 +3339,7 @@ class GruppensucheTest(commands.Cog):
             )
             return
 
-        type_map[str(message_id)] = now_ts
-        cd["type"] = type_map
+        cd["type"] = now_ts
         data["ping_cd"] = cd
 
         await self._save_refresh_dispatch(
@@ -3341,7 +3352,6 @@ class GruppensucheTest(commands.Cog):
         if guild is None:
             await self._ephemeral_notice(interaction, "Nur auf Servern nutzbar.", ephemeral=True)
             return
-
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         if not isinstance(channel, discord.TextChannel):
@@ -3388,7 +3398,7 @@ class GruppensucheTest(commands.Cog):
         if not isinstance(wait_map, dict):
             wait_map = {}
 
-        last = int(wait_map.get(str(message_id), 0))
+        last = int(cd.get("wait", 0))
         diff = now_ts - last
         if diff < PING_COOLDOWN_SECONDS:
             remaining = PING_COOLDOWN_SECONDS - diff
@@ -3399,8 +3409,7 @@ class GruppensucheTest(commands.Cog):
             )
             return
 
-        wait_map[str(message_id)] = now_ts
-        cd["wait"] = wait_map
+        cd["wait"] = now_ts
         data["ping_cd"] = cd
 
         await self._save_refresh_dispatch(
@@ -3556,6 +3565,16 @@ class GruppensucheTest(commands.Cog):
         if not session.edit_message_id:
             return
         data = await self._get_search(session.edit_message_id)
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(session.edit_message_id)
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
+
+            # ... ab hier bleibt deine bestehende Logik unverändert ...
+            # ... bis inkl. await self._save_refresh_dispatch(data)
+
         if data is None:
             await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
