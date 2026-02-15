@@ -208,9 +208,35 @@ class KuhmuhUpdate(commands.Cog):
         return self.bot.get_cog("Downloader")  # type: ignore
 
     async def _make_ctx(self, interaction: discord.Interaction) -> commands.Context:
-        ctx = await commands.Context.from_interaction(interaction)
-        ctx.prefix = "°"
-        return ctx
+        """
+        Erstellt einen commands.Context sowohl für Slash-Command-Interactions
+        als auch für Button/Select-Interactions (Component Interactions).
+
+        Background:
+        - Context.from_interaction() funktioniert nur bei ApplicationCommand-Interactions
+        (Slash/ContextMenu). Bei Components fehlt "command data".
+        """
+        try:
+            ctx = await commands.Context.from_interaction(interaction)
+            ctx.prefix = "°"
+            return ctx
+        except ValueError:
+            # Component interaction -> fake a message and use bot.get_context
+            class _FakeMessage:
+                __slots__ = ("content", "author", "channel", "guild", "id")
+
+                def __init__(self) -> None:
+                    self.content = "°"
+                    self.author = interaction.user
+                    self.channel = interaction.channel
+                    self.guild = interaction.guild
+                    self.id = 0
+
+            msg = _FakeMessage()
+            ctx = await self.bot.get_context(msg)  # type: ignore
+            ctx.prefix = "°"
+            return ctx
+
 
     async def _dl_repo_update(self, interaction: discord.Interaction, repo: str) -> Tuple[bool, str]:
         dl = self._downloader()
@@ -550,7 +576,7 @@ class KuhmuhUpdate(commands.Cog):
                 await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
                 return
 
-            ctx_load = await commands.Context.from_interaction(interaction)
+            ctx_load = await self._make_ctx(interaction)
             ctx_load.prefix = "°"
 
             catcher = _CommandOutputCatcher()
@@ -723,7 +749,11 @@ class UpdateRunView(discord.ui.View):
             return
 
         await interaction.response.send_message("✅ Update gestartet… Ergebnis wird im Channel gepostet.", ephemeral=True)
-        await self.parent._run_update_public(interaction, self.selected_key)
+        try:
+            await self.parent._run_update_public(interaction, self.selected_key)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Update fehlgeschlagen: {type(e).__name__}: {e}", ephemeral=True)
+
 
     @discord.ui.button(label="Zurück", style=discord.ButtonStyle.secondary)
     async def back_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
