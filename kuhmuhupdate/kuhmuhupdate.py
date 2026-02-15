@@ -241,7 +241,7 @@ class KuhmuhUpdate(commands.Cog):
     # -------------------------
     # Command invocation helpers
     # -------------------------
-    
+
     def _downloader(self) -> Optional[commands.Cog]:
         # Downloader cog name in Red is usually "Downloader"
         return self.bot.get_cog("Downloader")  # type: ignore
@@ -327,7 +327,6 @@ class KuhmuhUpdate(commands.Cog):
 
         return False, "Keine passende Uninstall-Methode im Downloader gefunden."
 
-
     def _get_subcommand(self, group_name: str, sub_name: str) -> Optional[commands.Command]:
         group = self.bot.get_command(group_name)
         if group is None:
@@ -379,7 +378,8 @@ class KuhmuhUpdate(commands.Cog):
             ctx.tick = _tick  # type: ignore
 
         try:
-            await cmd.invoke(ctx)  # <- DAS ist der Key: invoke + StringView => Converter laufen
+            # <- DAS ist der Key: invoke + StringView => Converter laufen
+            await cmd.invoke(ctx)
             return True, catcher.render_text()
         except Exception as e:
             out = catcher.render_text()
@@ -391,8 +391,6 @@ class KuhmuhUpdate(commands.Cog):
                 ctx.reply = original_reply  # type: ignore
             if original_tick is not None:
                 ctx.tick = original_tick  # type: ignore
-
-
 
     def _extract_not_installed(self, text: str) -> bool:
         """
@@ -466,60 +464,462 @@ class KuhmuhUpdate(commands.Cog):
         e.set_footer(text=f"{invoker} • Dauer: {duration_s:.2f}s")
         return e
 
-    # -------------------------
-    # /update (single command UX)
-    # -------------------------
+    async def _send_panel(self, interaction: discord.Interaction, *, panel: str) -> None:
+        """
+        Zeigt das ephemeral Control-Panel an (oder wechselt Ansicht).
+        panel: "main" | "manage" | "run" | "remove"
+        """
+        # Admin check defensiv (Buttons sind zwar in ephemeral Panel, aber trotzdem)
+        ok, err = await self._require_admin(interaction)
+        if not ok:
+            # Bei Button-Callbacks nutzen wir response, bei initial /update edit_original_response
+            with contextlib.suppress(Exception):
+                if interaction.response.is_done():
+                    await interaction.followup.send(err, ephemeral=True)
+                else:
+                    await interaction.response.send_message(err, ephemeral=True)
+            return
 
-    async def _autocomplete_stored_cogs(
-        self,
-        interaction: discord.Interaction,
-        current: str,
-    ) -> List[app_commands.Choice[str]]:
+        if panel == "main":
+            embed = discord.Embed(
+                title="Update Panel",
+                description="Wähle eine Aktion:",
+            )
+            view = UpdateMainView(self)
+            await self._panel_edit(interaction, embed=embed, view=view)
+            return
+
+        if panel == "manage":
+            embed = discord.Embed(
+                title="Update Panel: Manage",
+                description="Einträge hinzufügen/entfernen/anzeigen.",
+            )
+            view = UpdateManageView(self)
+            await self._panel_edit(interaction, embed=embed, view=view)
+            return
+
+        if panel == "run":
+            stored = await self._get_stored_cogs()
+            if not stored:
+                await self._panel_message(interaction, "⚠️ Keine gespeicherten Cogs vorhanden. Nutze Manage → Add.", ephemeral=True)
+                return
+
+            embed = discord.Embed(
+                title="Update Panel: Run",
+                description="Wähle ein Cog aus und starte das Update.\nDas Ergebnis wird öffentlich im Channel gepostet.",
+            )
+            view = UpdateRunView(self)
+            await view.hydrate()
+            await self._panel_edit(interaction, embed=embed, view=view)
+            return
+
+        if panel == "remove":
+            stored = await self._get_stored_cogs()
+            if not stored:
+                await self._panel_message(interaction, "⚠️ Keine gespeicherten Cogs vorhanden.", ephemeral=True)
+                return
+
+            embed = discord.Embed(
+                title="Update Panel: Remove",
+                description="Wähle ein Cog aus und entferne es aus der Liste.",
+            )
+            view = UpdateRemoveView(self)
+            await view.hydrate()
+            await self._panel_edit(interaction, embed=embed, view=view)
+            return
+
+        await self._panel_message(interaction, "❌ Unbekanntes Panel.", ephemeral=True)
+
+    async def _panel_edit(self, interaction: discord.Interaction, *, embed: Optional[discord.Embed], view: Optional[discord.ui.View]) -> None:
+        """
+        Edits the ephemeral panel message when possible. Works for /update initial response and button callbacks.
+        """
+        try:
+            if interaction.response.is_done():
+                # already responded in this interaction -> edit original message of the panel
+                await interaction.edit_original_response(embed=embed, view=view, content=None)
+            else:
+                await interaction.response.edit_message(embed=embed, view=view, content=None)
+        except Exception:
+            # fallback: send ephemeral followup
+            with contextlib.suppress(Exception):
+                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+    async def _panel_message(self, interaction: discord.Interaction, content: str, *, ephemeral: bool = True) -> None:
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(content, ephemeral=ephemeral)
+            else:
+                await interaction.response.send_message(content, ephemeral=ephemeral)
+        except Exception:
+            pass
+
+    async def _run_update_public(self, interaction: discord.Interaction, selected_key: str) -> None:
+        """
+        Führt das Update aus und postet das Status-Embed öffentlich im aktuellen Channel.
+        Das Panel bleibt ephemeral.
+        """
         stored = await self._get_stored_cogs()
-        cur = (current or "").casefold().strip()
+        selection = stored.get(selected_key)
+        if not selection:
+            await self._panel_message(interaction, "⚠️ Auswahl nicht gefunden (Liste evtl. geändert).", ephemeral=True)
+            return
 
-        items = []
-        for key, v in stored.items():
-            name = v.get("cog_name", "")
-            repo = v.get("repo_name", "")
-            if not name:
-                continue
-            if cur and cur not in name.casefold():
-                continue
-            # value = key (normalized) -> wir lösen später wieder auf
-            items.append(app_commands.Choice(name=f"{name}", value=key))
+        cog_name_real = selection["cog_name"]
+        repo_name_real = selection["repo_name"]
 
-        # Discord Limit: max 25 choices
-        items.sort(key=lambda c: c.name.casefold())
-        return items[:25]
+        # Lock to prevent parallel updates
+        if self._update_lock.locked():
+            await self._panel_message(interaction, "⏭️ Ein Update läuft bereits. Bitte warte, bis es abgeschlossen ist.", ephemeral=True)
+            return
 
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(
-        name="update",
-        description="Admin: Cog updaten/verwalten (Dropdown via action).",
-    )
-    @app_commands.describe(
-        action="Aktion auswählen",
-        cog="Gespeichertes Cog (für run/remove)",
-        cog_name="Cog-Name (für add)",
-        repo_name="Repository-Name (für add)",
-        role="ADMIN_ROLE setzen (für setadminrole)",
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(
-                name="Run (uninstall → repo update → install → load)", value="run"),
-            app_commands.Choice(
-                name="Manage: Add (Cog + Repo speichern)", value="add"),
-            app_commands.Choice(
-                name="Manage: Remove (gespeichertes Cog löschen)", value="remove"),
-            app_commands.Choice(
-                name="Manage: List (alle gespeicherten Cogs)", value="list"),
-            app_commands.Choice(
-                name="Manage: SetAdminRole (ADMIN_ROLE setzen)", value="setadminrole"),
-        ]
-    )
-    @app_commands.autocomplete(cog=_autocomplete_stored_cogs)
+        if not interaction.channel:
+            await self._panel_message(interaction, "❌ Kein Channel-Kontext verfügbar.", ephemeral=True)
+            return
+
+        # Öffentliche “Placeholder”-Message, die wir am Ende editieren
+        started = _now_utc()
+        t0 = dt.datetime.now(dt.timezone.utc)
+
+        placeholder = discord.Embed(
+            title=f"Update: {cog_name_real}",
+            description=f"Repo: **{repo_name_real}**\nStart: `{_fmt_dt(started)}`\n\n⏳ Update läuft…",
+        )
+
+        try:
+            public_msg = await interaction.channel.send(embed=placeholder)  # type: ignore
+        except Exception:
+            await self._panel_message(interaction, "❌ Konnte keine öffentliche Nachricht posten (fehlende Rechte?).", ephemeral=True)
+            return
+
+        async with self._update_lock:
+            results: List[StepResult] = []
+
+            # Step 1: Uninstall
+            ok1, out1 = await self._dl_cog_uninstall(interaction, cog_name_real)
+            await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Uninstall {cog_name_real}", out1)
+
+            if ok1:
+                results.append(StepResult(name="Uninstall", status="✅", summary="Deinstalliert.", details=out1))
+            else:
+                if self._extract_not_installed(out1):
+                    results.append(StepResult(name="Uninstall", status="⚠️", summary="Nicht installiert (weiter).", details=out1))
+                else:
+                    results.append(StepResult(name="Uninstall", status="❌", summary="Fehler – Abbruch.", details=out1))
+                    await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
+                    return
+
+            # Step 2: Repo Update
+            ok2, out2 = await self._dl_repo_update(interaction, repo_name_real)
+            await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Repo Update {repo_name_real}", out2)
+
+            if ok2:
+                results.append(StepResult(name="Repo Update", status="✅", summary="Aktualisiert.", details=out2))
+            else:
+                results.append(StepResult(name="Repo Update", status="❌", summary="Fehler – Abbruch.", details=out2))
+                await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
+                return
+
+            # Step 3: Install
+            ok3, out3 = await self._dl_cog_install(interaction, repo_name_real, cog_name_real)
+            await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Install {repo_name_real}/{cog_name_real}", out3)
+
+            if ok3:
+                results.append(StepResult(name="Install", status="✅", summary="Installiert.", details=out3))
+            else:
+                results.append(StepResult(name="Install", status="❌", summary="Fehler – Abbruch.", details=out3))
+                await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
+                return
+
+            # Step 4: Load (über echten ctx.invoke)
+            ctx_load = await commands.Context.from_interaction(interaction)
+            ctx_load.prefix = "°"
+
+            catcher = _CommandOutputCatcher()
+            original_send = ctx_load.send
+            ctx_load.send = catcher.send  # type: ignore
+
+            try:
+                load_cmd = self.bot.get_command("load")
+                if load_cmd is None:
+                    ok4, out4 = False, "Load-Command nicht gefunden."
+                else:
+                    await ctx_load.invoke(load_cmd, cog_name_real)
+                    ok4, out4 = True, catcher.render_text()
+            except Exception as e:
+                out4 = catcher.render_text()
+                err = f"{type(e).__name__}: {e}".strip()
+                ok4 = False
+                out4 = (out4 + "\n" + err).strip() if out4 else err
+            finally:
+                ctx_load.send = original_send  # type: ignore
+
+            await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Load {cog_name_real}", out4)
+
+            if ok4:
+                results.append(StepResult(name="Load", status="✅", summary="Geladen.", details=out4))
+            else:
+                results.append(StepResult(name="Load", status="❌", summary="Fehler – Prozess beendet.", details=out4))
+
+            await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
+
+    async def _finalize_public(
+        self,
+        public_msg: discord.Message,
+        interaction: discord.Interaction,
+        cog_name: str,
+        repo_name: str,
+        started: dt.datetime,
+        t0: dt.datetime,
+        results: List[StepResult],
+    ) -> None:
+        duration = (dt.datetime.now(dt.timezone.utc) - t0).total_seconds()
+
+        limit = int(await self.config.embed_detail_limit() or 400)
+        for r in results:
+            if r.details:
+                snippet = _clamp_text(r.details.replace("```", "'''"), limit)
+                if snippet:
+                    r.summary = f"{r.summary}\n```text\n{snippet}\n```"
+
+        embed_final = await self._build_status_embed(
+            cog_name=cog_name,
+            repo_name=repo_name,
+            started=started,
+            invoker=interaction.user,
+            results=results,
+            duration_s=duration,
+        )
+
+        with contextlib.suppress(Exception):
+            await public_msg.edit(embed=embed_final)
+
+        # Optional: kleine ephemeral Rückmeldung
+        await self._panel_message(interaction, "✅ Update abgeschlossen. Ergebnis im Channel.", ephemeral=True)
+
+
+
+# -----------------------------
+# /update (Panel UX)
+# -----------------------------
+
+class UpdateAddModal(discord.ui.Modal, title="Update: Add Cog"):
+    cog_name = discord.ui.TextInput(label="Cog-Name", placeholder="z.B. gruppensuche_test", required=True, max_length=80)
+    repo_name = discord.ui.TextInput(label="Repo-Name", placeholder="z.B. kuhmuh", required=True, max_length=80)
+
+    def __init__(self, parent: "KuhmuhUpdate"):
+        super().__init__()
+        self.parent = parent
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        ok, err = await self.parent._require_admin(interaction)
+        if not ok:
+            await interaction.response.send_message(err, ephemeral=True)
+            return
+
+        cn = str(self.cog_name.value).strip()
+        rn = str(self.repo_name.value).strip()
+
+        if not cn or not rn:
+            await interaction.response.send_message("❌ `cog_name` und `repo_name` dürfen nicht leer sein.", ephemeral=True)
+            return
+
+        await self.parent._set_stored_cog(cn, rn)
+        await interaction.response.send_message(f"✅ Gespeichert: **{cn}** → Repo **{rn}**", ephemeral=True)
+
+
+class UpdateRunView(discord.ui.View):
+    def __init__(self, parent: "KuhmuhUpdate", *, timeout: int = 180):
+        super().__init__(timeout=timeout)
+        self.parent = parent
+        self.selected_key: Optional[str] = None
+
+    async def _build_select(self) -> discord.ui.Select:
+        stored = await self.parent._get_stored_cogs()
+
+        options = [
+            discord.SelectOption(
+                label=v["cog_name"],
+                description=f"Repo: {v['repo_name']}",
+                value=k,
+            )
+            for k, v in sorted(stored.items(), key=lambda x: x[1]["cog_name"].casefold())
+        ][:25]
+
+        select = discord.ui.Select(
+            placeholder="Wähle ein Cog zum Updaten…",
+            options=options,
+            min_values=1,
+            max_values=1,
+        )
+
+        async def _cb(interaction: discord.Interaction) -> None:
+            self.selected_key = str(select.values[0])
+            await interaction.response.edit_message(view=self)
+
+        select.callback = _cb  # type: ignore
+        return select
+
+    async def hydrate(self) -> None:
+        # Select dynamisch bauen (weil async Config)
+        select = await self._build_select()
+        self.add_item(select)
+
+    @discord.ui.button(label="Start", style=discord.ButtonStyle.success)
+    async def start_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        ok, err = await self.parent._require_admin(interaction)
+        if not ok:
+            await interaction.response.send_message(err, ephemeral=True)
+            return
+
+        if not self.selected_key:
+            await interaction.response.send_message("❌ Bitte zuerst ein Cog auswählen.", ephemeral=True)
+            return
+
+        # Panel bleibt ephemeral → Ergebnis wird öffentlich in den Channel gepostet
+        await interaction.response.send_message("✅ Update gestartet… Ergebnis wird im Channel gepostet.", ephemeral=True)
+
+        await self.parent._run_update_public(interaction, self.selected_key)
+
+    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.secondary)
+    async def back_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self.parent._send_panel(interaction, panel="main")
+
+
+class UpdateRemoveView(discord.ui.View):
+    def __init__(self, parent: "KuhmuhUpdate", *, timeout: int = 180):
+        super().__init__(timeout=timeout)
+        self.parent = parent
+        self.selected_key: Optional[str] = None
+
+    async def _build_select(self) -> discord.ui.Select:
+        stored = await self.parent._get_stored_cogs()
+
+        options = [
+            discord.SelectOption(
+                label=v["cog_name"],
+                description=f"Repo: {v['repo_name']}",
+                value=k,
+            )
+            for k, v in sorted(stored.items(), key=lambda x: x[1]["cog_name"].casefold())
+        ][:25]
+
+        select = discord.ui.Select(
+            placeholder="Wähle ein Cog zum Entfernen…",
+            options=options,
+            min_values=1,
+            max_values=1,
+        )
+
+        async def _cb(interaction: discord.Interaction) -> None:
+            self.selected_key = str(select.values[0])
+            await interaction.response.edit_message(view=self)
+
+        select.callback = _cb  # type: ignore
+        return select
+
+    async def hydrate(self) -> None:
+        select = await self._build_select()
+        self.add_item(select)
+
+    @discord.ui.button(label="Entfernen", style=discord.ButtonStyle.danger)
+    async def remove_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        ok, err = await self.parent._require_admin(interaction)
+        if not ok:
+            await interaction.response.send_message(err, ephemeral=True)
+            return
+
+        if not self.selected_key:
+            await interaction.response.send_message("❌ Bitte zuerst ein Cog auswählen.", ephemeral=True)
+            return
+
+        removed = await self.parent._remove_stored_cog(self.selected_key)
+        if removed:
+            await interaction.response.send_message("✅ Eintrag entfernt.", ephemeral=True)
+        else:
+            await interaction.response.send_message("⚠️ Eintrag nicht gefunden.", ephemeral=True)
+
+    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.secondary)
+    async def back_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self.parent._send_panel(interaction, panel="manage")
+
+
+class UpdateMainView(discord.ui.View):
+    def __init__(self, parent: "KuhmuhUpdate", *, timeout: int = 180):
+        super().__init__(timeout=timeout)
+        self.parent = parent
+
+    @discord.ui.button(label="Run Update", style=discord.ButtonStyle.success)
+    async def run_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self.parent._send_panel(interaction, panel="run")
+
+    @discord.ui.button(label="Manage", style=discord.ButtonStyle.primary)
+    async def manage_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self.parent._send_panel(interaction, panel="manage")
+
+    @discord.ui.button(label="Close", style=discord.ButtonStyle.secondary)
+    async def close_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.edit_message(content="⏭️ Geschlossen.", embed=None, view=None)
+
+
+class UpdateManageView(discord.ui.View):
+    def __init__(self, parent: "KuhmuhUpdate", *, timeout: int = 180):
+        super().__init__(timeout=timeout)
+        self.parent = parent
+
+    @discord.ui.button(label="Add", style=discord.ButtonStyle.success)
+    async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        ok, err = await self.parent._require_admin(interaction)
+        if not ok:
+            await interaction.response.send_message(err, ephemeral=True)
+            return
+        await interaction.response.send_modal(UpdateAddModal(self.parent))
+
+    @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger)
+    async def remove_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self.parent._send_panel(interaction, panel="remove")
+
+    @discord.ui.button(label="List", style=discord.ButtonStyle.secondary)
+    async def list_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        ok, err = await self.parent._require_admin(interaction)
+        if not ok:
+            await interaction.response.send_message(err, ephemeral=True)
+            return
+
+        stored = await self.parent._get_stored_cogs()
+        if not stored:
+            await interaction.response.send_message("⚠️ Keine gespeicherten Cogs vorhanden.", ephemeral=True)
+            return
+
+        lines = []
+        for _, v in sorted(stored.items(), key=lambda x: x[1]["cog_name"].casefold()):
+            lines.append(f"• **{v['cog_name']}** → `{v['repo_name']}`")
+
+        embed = discord.Embed(title="Update: Stored Cogs", description="\n".join(lines))
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary)
+    async def back_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self.parent._send_panel(interaction, panel="main")
+
+
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.command(
+    name="update",
+    description="Admin: Update-Panel öffnen (Run/Manage).",
+)
+async def update_cmd(self, interaction: discord.Interaction) -> None:
+    # Panel ist ephemeral, Ergebnis (Run) wird öffentlich gepostet
+    await interaction.response.defer(ephemeral=True)
+
+    ok, err = await self._require_admin(interaction)
+    if not ok:
+        await interaction.edit_original_response(content=err)
+        return
+
+    await self._send_panel(interaction, panel="main")
+
+
     async def update_cmd(
         self,
         interaction: discord.Interaction,
