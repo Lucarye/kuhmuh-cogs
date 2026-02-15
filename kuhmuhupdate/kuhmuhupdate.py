@@ -244,51 +244,87 @@ class KuhmuhUpdate(commands.Cog):
         # Downloader cog name in Red is usually "Downloader"
         return self.bot.get_cog("Downloader")  # type: ignore
 
-    async def _dl_repo_update(self, repo: str) -> Tuple[bool, str]:
+    async def _make_ctx(self, interaction: discord.Interaction) -> commands.Context:
+        ctx = await commands.Context.from_interaction(interaction)
+        ctx.prefix = "°"
+        return ctx
+
+    async def _dl_repo_update(self, interaction: discord.Interaction, repo: str) -> Tuple[bool, str]:
         dl = self._downloader()
         if dl is None:
             return False, "Downloader-Cog nicht geladen."
 
-        # Best-effort across versions
-        for meth in ("_repo_update", "repo_update", "update_repo"):
+        ctx = await self._make_ctx(interaction)
+
+        # Best-effort across versions: manche Methoden wollen (ctx, repo), manche nur (ctx)
+        for meth in ("repo_update", "_repo_update", "update_repo"):
             fn = getattr(dl, meth, None)
             if fn:
                 try:
-                    res = await fn(repo)  # type: ignore
+                    # zuerst (ctx, repo) probieren
+                    try:
+                        res = await fn(ctx, repo)  # type: ignore
+                    except TypeError:
+                        # fallback: (ctx)
+                        res = await fn(ctx)  # type: ignore
                     return True, str(res) if res is not None else ""
                 except Exception as e:
                     return False, f"{type(e).__name__}: {e}"
+
         return False, "Keine passende Repo-Update Methode im Downloader gefunden."
 
-    async def _dl_cog_install(self, repo: str, cog: str) -> Tuple[bool, str]:
+    async def _dl_cog_install(self, interaction: discord.Interaction, repo: str, cog: str) -> Tuple[bool, str]:
         dl = self._downloader()
         if dl is None:
             return False, "Downloader-Cog nicht geladen."
 
-        for meth in ("_cog_install", "cog_install", "install_cog"):
+        ctx = await self._make_ctx(interaction)
+
+        for meth in ("cog_install", "_cog_install", "install_cog"):
             fn = getattr(dl, meth, None)
             if fn:
                 try:
-                    res = await fn(repo, cog)  # type: ignore
+                    # meist (ctx, repo, cog) – optional noch extras in manchen Versionen
+                    res = await fn(ctx, repo, cog)  # type: ignore
                     return True, str(res) if res is not None else ""
+                except TypeError:
+                    # fallback: (ctx, cog) – falls repo intern ermittelt wird
+                    try:
+                        res = await fn(ctx, cog)  # type: ignore
+                        return True, str(res) if res is not None else ""
+                    except Exception as e:
+                        return False, f"{type(e).__name__}: {e}"
                 except Exception as e:
                     return False, f"{type(e).__name__}: {e}"
+
         return False, "Keine passende Install-Methode im Downloader gefunden."
 
-    async def _dl_cog_uninstall(self, cog: str) -> Tuple[bool, str]:
+    async def _dl_cog_uninstall(self, interaction: discord.Interaction, cog: str) -> Tuple[bool, str]:
         dl = self._downloader()
         if dl is None:
             return False, "Downloader-Cog nicht geladen."
 
-        for meth in ("_cog_uninstall", "cog_uninstall", "uninstall_cog"):
+        ctx = await self._make_ctx(interaction)
+
+        for meth in ("cog_uninstall", "_cog_uninstall", "uninstall_cog"):
             fn = getattr(dl, meth, None)
             if fn:
                 try:
-                    res = await fn(cog)  # type: ignore
+                    # meist (ctx, cog)
+                    res = await fn(ctx, cog)  # type: ignore
                     return True, str(res) if res is not None else ""
+                except TypeError:
+                    # fallback: (ctx) – selten, aber defensiv
+                    try:
+                        res = await fn(ctx)  # type: ignore
+                        return True, str(res) if res is not None else ""
+                    except Exception as e:
+                        return False, f"{type(e).__name__}: {e}"
                 except Exception as e:
                     return False, f"{type(e).__name__}: {e}"
+
         return False, "Keine passende Uninstall-Methode im Downloader gefunden."
+
 
     def _get_subcommand(self, group_name: str, sub_name: str) -> Optional[commands.Command]:
         group = self.bot.get_command(group_name)
@@ -611,7 +647,7 @@ class KuhmuhUpdate(commands.Cog):
                 results: List[StepResult] = []
 
                 # Step 1: Uninstall
-                ok1, out1 = await self._dl_cog_uninstall(cog_name_real)
+                ok1, out1 = await self._dl_cog_uninstall(interaction, cog_name_real)
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Uninstall {cog_name_real}", out1)
 
                 if ok1:
@@ -638,7 +674,7 @@ class KuhmuhUpdate(commands.Cog):
                         return
 
                 # Step 2: Repo Update
-                ok2, out2 = await self._dl_repo_update(repo_name_real)
+                ok2, out2 = await self._dl_repo_update(interaction, repo_name_real)
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Repo Update {repo_name_real}", out2)
 
                 if ok2:
@@ -661,7 +697,7 @@ class KuhmuhUpdate(commands.Cog):
                     return
 
                 # Step 3: Install
-                ok3, out3 = await self._dl_cog_install(repo_name_real, cog_name_real)
+                ok3, out3 = await self._dl_cog_install(interaction, repo_name_real, cog_name_real)
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Install {repo_name_real}/{cog_name_real}", out3)
 
                 if ok3:
@@ -683,8 +719,29 @@ class KuhmuhUpdate(commands.Cog):
                     await interaction.edit_original_response(embed=embed_final, content=None, view=None)
                     return
 
-                # Step 4: Load
-                ok4, out4 = await self._invoke_command_capture(interaction, f"°load {cog_name_real}")
+                # Step 4: Load (über echten ctx)
+                ctx_load = await commands.Context.from_interaction(interaction)
+                ctx_load.prefix = "°"
+
+                catcher = _CommandOutputCatcher()
+                original_send = ctx_load.send
+                ctx_load.send = catcher.send  # type: ignore
+
+                try:
+                    load_cmd = self.bot.get_command("load")
+                    if load_cmd is None:
+                        ok4, out4 = False, "Load-Command nicht gefunden."
+                    else:
+                        await ctx_load.invoke(load_cmd, cog_name_real)
+                        ok4, out4 = True, catcher.render_text()
+                except Exception as e:
+                    out4 = catcher.render_text()
+                    err = f"{type(e).__name__}: {e}".strip()
+                    ok4 = False
+                    out4 = (out4 + "\n" + err).strip() if out4 else err
+                finally:
+                    ctx_load.send = original_send  # type: ignore
+
                 await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Load {cog_name_real}", out4)
 
                 if ok4:
