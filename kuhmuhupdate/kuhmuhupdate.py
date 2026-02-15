@@ -587,7 +587,8 @@ class KuhmuhUpdate(commands.Cog):
         )
 
         try:
-            public_msg = await interaction.channel.send(embed=placeholder)  # type: ignore
+            # type: ignore
+            public_msg = await interaction.channel.send(embed=placeholder)
         except Exception:
             await self._panel_message(interaction, "❌ Konnte keine öffentliche Nachricht posten (fehlende Rechte?).", ephemeral=True)
             return
@@ -600,12 +601,15 @@ class KuhmuhUpdate(commands.Cog):
             await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Uninstall {cog_name_real}", out1)
 
             if ok1:
-                results.append(StepResult(name="Uninstall", status="✅", summary="Deinstalliert.", details=out1))
+                results.append(StepResult(
+                    name="Uninstall", status="✅", summary="Deinstalliert.", details=out1))
             else:
                 if self._extract_not_installed(out1):
-                    results.append(StepResult(name="Uninstall", status="⚠️", summary="Nicht installiert (weiter).", details=out1))
+                    results.append(StepResult(name="Uninstall", status="⚠️",
+                                   summary="Nicht installiert (weiter).", details=out1))
                 else:
-                    results.append(StepResult(name="Uninstall", status="❌", summary="Fehler – Abbruch.", details=out1))
+                    results.append(StepResult(
+                        name="Uninstall", status="❌", summary="Fehler – Abbruch.", details=out1))
                     await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
                     return
 
@@ -614,9 +618,11 @@ class KuhmuhUpdate(commands.Cog):
             await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Repo Update {repo_name_real}", out2)
 
             if ok2:
-                results.append(StepResult(name="Repo Update", status="✅", summary="Aktualisiert.", details=out2))
+                results.append(StepResult(
+                    name="Repo Update", status="✅", summary="Aktualisiert.", details=out2))
             else:
-                results.append(StepResult(name="Repo Update", status="❌", summary="Fehler – Abbruch.", details=out2))
+                results.append(StepResult(
+                    name="Repo Update", status="❌", summary="Fehler – Abbruch.", details=out2))
                 await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
                 return
 
@@ -625,9 +631,11 @@ class KuhmuhUpdate(commands.Cog):
             await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Install {repo_name_real}/{cog_name_real}", out3)
 
             if ok3:
-                results.append(StepResult(name="Install", status="✅", summary="Installiert.", details=out3))
+                results.append(StepResult(name="Install", status="✅",
+                               summary="Installiert.", details=out3))
             else:
-                results.append(StepResult(name="Install", status="❌", summary="Fehler – Abbruch.", details=out3))
+                results.append(StepResult(name="Install", status="❌",
+                               summary="Fehler – Abbruch.", details=out3))
                 await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
                 return
 
@@ -657,9 +665,11 @@ class KuhmuhUpdate(commands.Cog):
             await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Load {cog_name_real}", out4)
 
             if ok4:
-                results.append(StepResult(name="Load", status="✅", summary="Geladen.", details=out4))
+                results.append(StepResult(name="Load", status="✅",
+                               summary="Geladen.", details=out4))
             else:
-                results.append(StepResult(name="Load", status="❌", summary="Fehler – Prozess beendet.", details=out4))
+                results.append(StepResult(name="Load", status="❌",
+                               summary="Fehler – Prozess beendet.", details=out4))
 
             await self._finalize_public(public_msg, interaction, cog_name_real, repo_name_real, started, t0, results)
 
@@ -698,14 +708,15 @@ class KuhmuhUpdate(commands.Cog):
         await self._panel_message(interaction, "✅ Update abgeschlossen. Ergebnis im Channel.", ephemeral=True)
 
 
-
 # -----------------------------
 # /update (Panel UX)
 # -----------------------------
 
 class UpdateAddModal(discord.ui.Modal, title="Update: Add Cog"):
-    cog_name = discord.ui.TextInput(label="Cog-Name", placeholder="z.B. gruppensuche_test", required=True, max_length=80)
-    repo_name = discord.ui.TextInput(label="Repo-Name", placeholder="z.B. kuhmuh", required=True, max_length=80)
+    cog_name = discord.ui.TextInput(
+        label="Cog-Name", placeholder="z.B. gruppensuche_test", required=True, max_length=80)
+    repo_name = discord.ui.TextInput(
+        label="Repo-Name", placeholder="z.B. kuhmuh", required=True, max_length=80)
 
     def __init__(self, parent: "KuhmuhUpdate"):
         super().__init__()
@@ -895,7 +906,8 @@ class UpdateManageView(discord.ui.View):
         for _, v in sorted(stored.items(), key=lambda x: x[1]["cog_name"].casefold()):
             lines.append(f"• **{v['cog_name']}** → `{v['repo_name']}`")
 
-        embed = discord.Embed(title="Update: Stored Cogs", description="\n".join(lines))
+        embed = discord.Embed(title="Update: Stored Cogs",
+                              description="\n".join(lines))
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary)
@@ -903,247 +915,21 @@ class UpdateManageView(discord.ui.View):
         await self.parent._send_panel(interaction, panel="main")
 
 
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-@app_commands.command(
-    name="update",
-    description="Admin: Update-Panel öffnen (Run/Manage).",
-)
-async def update_cmd(self, interaction: discord.Interaction) -> None:
-    # Panel ist ephemeral, Ergebnis (Run) wird öffentlich gepostet
-    await interaction.response.defer(ephemeral=True)
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.command(
+        name="update",
+        description="Admin: Update-Panel öffnen (Run/Manage).",
+    )
+    async def update_cmd(self, interaction: discord.Interaction) -> None:
+        # Panel ist ephemeral, Ergebnis (Run) wird öffentlich gepostet
+        await interaction.response.defer(ephemeral=True)
 
-    ok, err = await self._require_admin(interaction)
-    if not ok:
-        await interaction.edit_original_response(content=err)
-        return
-
-    await self._send_panel(interaction, panel="main")
-
-
-    async def update_cmd(
-        self,
-        interaction: discord.Interaction,
-        action: app_commands.Choice[str],
-        cog: Optional[str] = None,
-        cog_name: Optional[str] = None,
-        repo_name: Optional[str] = None,
-        role: Optional[discord.Role] = None,
-    ) -> None:
-        await interaction.response.defer(ephemeral=False)
-
-        act = (action.value or "").strip()
-
-        # ---------- setadminrole (Owner-only initial; otherwise ADMIN_ROLE required) ----------
-        if act == "setadminrole":
-            if role is None:
-                await interaction.edit_original_response(content="❌ Für `setadminrole` musst du `role` angeben.")
-                return
-
-            current = await self._admin_role_id()
-
-            if current == 0:
-                if not await self._is_owner(interaction.user):
-                    await interaction.edit_original_response(
-                        content="❌ ADMIN_ROLE ist noch nicht gesetzt. Initial darf nur der Bot-Owner `setadminrole` ausführen."
-                    )
-                    return
-            else:
-                ok, err = await self._require_admin(interaction)
-                if not ok:
-                    await interaction.edit_original_response(content=err)
-                    return
-
-            await self.config.admin_role_id.set(int(role.id))
-            await interaction.edit_original_response(content=f"✅ ADMIN_ROLE gesetzt auf: {role.mention} (`{role.id}`)")
-            return
-
-        # Ab hier: ADMIN_ROLE strikt erforderlich
         ok, err = await self._require_admin(interaction)
         if not ok:
             await interaction.edit_original_response(content=err)
             return
 
-        # ---------- list ----------
-        if act == "list":
-            stored = await self._get_stored_cogs()
-            if not stored:
-                await interaction.edit_original_response(content="⚠️ Keine gespeicherten Cogs vorhanden.")
-                return
-
-            lines = []
-            for _, v in sorted(stored.items(), key=lambda x: x[1]["cog_name"].casefold()):
-                lines.append(f"• **{v['cog_name']}** → `{v['repo_name']}`")
-
-            embed = discord.Embed(
-                title="Update: Stored Cogs", description="\n".join(lines))
-            await interaction.edit_original_response(embed=embed, content=None, view=None)
-            return
-
-        # ---------- add ----------
-        if act == "add":
-            cn = (cog_name or "").strip()
-            rn = (repo_name or "").strip()
-
-            if not cn or not rn:
-                await interaction.edit_original_response(
-                    content="❌ Für `add` musst du `cog_name` und `repo_name` angeben."
-                )
-                return
-
-            await self._set_stored_cog(cn, rn)
-            await interaction.edit_original_response(content=f"✅ Gespeichert: **{cn}** → Repo **{rn}**")
-            return
-
-        # ---------- remove ----------
-        if act == "remove":
-            if not cog:
-                await interaction.edit_original_response(content="❌ Für `remove` musst du `cog` auswählen.")
-                return
-
-            removed = await self._remove_stored_cog(cog)
-            if removed:
-                await interaction.edit_original_response(content="✅ Eintrag entfernt.")
-            else:
-                await interaction.edit_original_response(content="⚠️ Eintrag nicht gefunden.")
-            return
-
-        # ---------- run ----------
-        if act == "run":
-            if not cog:
-                await interaction.edit_original_response(content="❌ Für `run` musst du `cog` auswählen.")
-                return
-
-            stored = await self._get_stored_cogs()
-            selection = stored.get(cog)
-            if not selection:
-                await interaction.edit_original_response(content="⚠️ Auswahl nicht gefunden (Liste evtl. geändert).")
-                return
-
-            cog_name_real = selection["cog_name"]
-            repo_name_real = selection["repo_name"]
-
-            # Lock to prevent parallel updates
-            if self._update_lock.locked():
-                await interaction.edit_original_response(
-                    content="⏭️ Ein Update läuft bereits. Bitte warte, bis es abgeschlossen ist.",
-                    embed=None,
-                    view=None,
-                )
-                return
-
-            started = _now_utc()
-            t0 = dt.datetime.now(dt.timezone.utc)
-
-            async with self._update_lock:
-                results: List[StepResult] = []
-
-                # Step 1: Uninstall
-                ok1, out1 = await self._invoke_command_capture(interaction, "cog uninstall", cog_name_real)
-                await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Uninstall {cog_name_real}", out1)
-
-                if ok1:
-                    results.append(StepResult(
-                        name="Uninstall", status="✅", summary="Deinstalliert.", details=out1))
-                else:
-                    if self._extract_not_installed(out1):
-                        results.append(StepResult(
-                            name="Uninstall", status="⚠️", summary="Nicht installiert (weiter).", details=out1))
-                    else:
-                        results.append(StepResult(
-                            name="Uninstall", status="❌", summary="Fehler – Abbruch.", details=out1))
-                        duration = (dt.datetime.now(
-                            dt.timezone.utc) - t0).total_seconds()
-                        embed_final = await self._build_status_embed(
-                            cog_name=cog_name_real,
-                            repo_name=repo_name_real,
-                            started=started,
-                            invoker=interaction.user,
-                            results=results,
-                            duration_s=duration,
-                        )
-                        await interaction.edit_original_response(embed=embed_final, content=None, view=None)
-                        return
-
-                # Step 2: Repo Update
-                ok2, out2 = await self._invoke_command_capture(interaction, "repo update", repo_name_real)
-                await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Repo Update {repo_name_real}", out2)
-
-                if ok2:
-                    results.append(StepResult(
-                        name="Repo Update", status="✅", summary="Aktualisiert.", details=out2))
-                else:
-                    results.append(StepResult(
-                        name="Repo Update", status="❌", summary="Fehler – Abbruch.", details=out2))
-                    duration = (dt.datetime.now(
-                        dt.timezone.utc) - t0).total_seconds()
-                    embed_final = await self._build_status_embed(
-                        cog_name=cog_name_real,
-                        repo_name=repo_name_real,
-                        started=started,
-                        invoker=interaction.user,
-                        results=results,
-                        duration_s=duration,
-                    )
-                    await interaction.edit_original_response(embed=embed_final, content=None, view=None)
-                    return
-
-                # Step 3: Install
-                ok3, out3 = await self._invoke_command_capture(interaction, "cog install", f"{repo_name_real} {cog_name_real}")
-                await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Install {repo_name_real}/{cog_name_real}", out3)
-
-                if ok3:
-                    results.append(StepResult(
-                        name="Install", status="✅", summary="Installiert.", details=out3))
-                else:
-                    results.append(StepResult(
-                        name="Install", status="❌", summary="Fehler – Abbruch.", details=out3))
-                    duration = (dt.datetime.now(
-                        dt.timezone.utc) - t0).total_seconds()
-                    embed_final = await self._build_status_embed(
-                        cog_name=cog_name_real,
-                        repo_name=repo_name_real,
-                        started=started,
-                        invoker=interaction.user,
-                        results=results,
-                        duration_s=duration,
-                    )
-                    await interaction.edit_original_response(embed=embed_final, content=None, view=None)
-                    return
-
-                # Step 4: Load (über echten ctx)
-                ok4, out4 = await self._invoke_command_capture(interaction, "load", cog_name_real)
-                await self._maybe_log_full_output(interaction, f"[KuhmuhUpdate] Load {cog_name_real}", out4)
-
-                if ok4:
-                    results.append(StepResult(
-                        name="Load", status="✅", summary="Geladen.", details=out4))
-                else:
-                    results.append(StepResult(
-                        name="Load", status="❌", summary="Fehler – Prozess beendet.", details=out4))
-
-                duration = (dt.datetime.now(
-                    dt.timezone.utc) - t0).total_seconds()
-
-                limit = int(await self.config.embed_detail_limit() or 400)
-                for r in results:
-                    if r.details:
-                        snippet = _clamp_text(
-                            r.details.replace("```", "'''"), limit)
-                        if snippet:
-                            r.summary = f"{r.summary}\n```text\n{snippet}\n```"
-
-                embed_final = await self._build_status_embed(
-                    cog_name=cog_name_real,
-                    repo_name=repo_name_real,
-                    started=started,
-                    invoker=interaction.user,
-                    results=results,
-                    duration_s=duration,
-                )
-                await interaction.edit_original_response(embed=embed_final, content=None, view=None)
-            return
-
-        await interaction.edit_original_response(content="❌ Unbekannte Aktion.")
+        await self._send_panel(interaction, panel="main")
 
     # -------------------------
     # App command registration
