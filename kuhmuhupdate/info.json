@@ -1,0 +1,20 @@
+{
+  "name": "KuhmuhUpdate",
+  "short": "Admin-Tool: einzelne Cogs updaten (uninstall → repo update → install → load).",
+  "description": "Ein administratives System-Cog für Kuhmuh, das Updates für einzelne, gespeicherte Cogs automatisiert. Unterstützt /update run mit Dropdown-Auswahl und /update manage (add/remove/list). Führt sequenziell Uninstall, Repo Update, Install und Load aus und gibt ein Status-Embed mit ✅⚠️❌⏭️ aus. Enthält einen Lock gegen parallele Updates.",
+  "end_user_data_statement": "Dieses Cog speichert keine personenbezogenen Daten. Es speichert ausschließlich technische Zuordnungen (Cog-Name → Repository-Name) sowie ggf. Konfiguration (z. B. Admin-Role-ID) zur Ausführung von Updates.",
+  "author": [
+    "Julian Winkel"
+  ],
+  "version": "1.0.0",
+  "min_bot_version": "3.5.0",
+  "requirements": [],
+  "tags": [
+    "admin",
+    "maintenance",
+    "updater",
+    "kuhmuh"
+  ],
+  "hidden": false,
+  "install_msg": "✅ KuhmuhUpdate installiert. Konfiguriere zuerst /update manage add und stelle sicher, dass die Admin-Role korrekt gesetzt ist."
+}
