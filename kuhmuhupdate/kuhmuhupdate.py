@@ -261,6 +261,7 @@ class KuhmuhUpdate(commands.Cog):
         Returns (success, rendered_output_text).
         """
         ctx = await commands.Context.from_interaction(interaction)
+        ctx.prefix = "°"
 
         catcher = _CommandOutputCatcher()
 
@@ -281,7 +282,8 @@ class KuhmuhUpdate(commands.Cog):
             ctx.tick = _tick  # type: ignore
 
         try:
-            await ctx.invoke(command, *args, **kwargs)
+            # Direkter Callback-Aufruf: verhindert Type-Conversions, die bei bestimmten Red-Commands .name erwarten
+            await command.callback(command.cog, ctx, *args, **kwargs)  # type: ignore
             output = catcher.render_text()
             return True, output
         except Exception as e:
@@ -432,7 +434,7 @@ class KuhmuhUpdate(commands.Cog):
         repo_name: Optional[str] = None,
         role: Optional[discord.Role] = None,
     ) -> None:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
 
         act = (action.value or "").strip()
 
