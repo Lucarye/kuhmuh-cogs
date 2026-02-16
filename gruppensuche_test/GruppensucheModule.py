@@ -2385,33 +2385,37 @@ class GruppensucheTest(commands.Cog):
         embed: discord.Embed,
         view: discord.ui.View,
     ):
+        """
+        Ephemeral-Wizard: immer dieselbe Ephemeral updaten (kein neues Followup),
+        indem wir bei Component-Interactions nach einem defer/ack über
+        interaction.edit_original_response(...) gehen (statt interaction.message.edit()).
+        """
         try:
-            # 1) Wenn es eine Message gibt (typisch bei Button/Select in Ephemeral ODER auch Public),
-            #    dann immer direkt diese Message editieren.
-            #    Das ist auch ACK-safe nach einem defer, weil wir nicht mehr über interaction.response gehen müssen.
+            # 1) Component-Interaktionen haben typischerweise eine Message (auch ephemeral).
+            #    Dann bearbeiten wir IMMER diese bestehende Nachricht.
             if interaction.message is not None:
-                try:
-                    # Wenn noch nicht geantwortet wurde, können wir sauber über response.edit_message gehen.
-                    if not interaction.response.is_done():
-                        await interaction.response.edit_message(embed=embed, view=view)
-                    else:
-                        # Nach defer / bereits beantwortet: direkt die Message editieren.
-                        await interaction.message.edit(embed=embed, view=view)
-                except Exception:
-                    # Fallback: neue ephemeral Nachricht senden
-                    await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
+                # Wenn noch nicht geantwortet: response.edit_message ist der saubere Weg.
+                if not interaction.response.is_done():
+                    await interaction.response.edit_message(embed=embed, view=view)
+                else:
+                    # Nach defer / bereits geantwortet:
+                    # Für Ephemeral ist edit_original_response stabiler als message.edit.
+                    await interaction.edit_original_response(embed=embed, view=view)
                 return
 
-            # 2) Keine Message vorhanden (z.B. Slash-Command first response, Modal submit ohne Message-Kontext):
-            #    Wenn schon geantwortet wurde -> followup senden, sonst response.send_message.
+            # 2) Kein Message-Kontext (z.B. Slash-Command first response, Modal submit ohne Message):
+            #    Dann über ack-sicheren Sender (response vs followup).
             await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
             return
 
         except Exception:
+            # Letzter Fallback: Wenn selbst edit_original_response scheitert,
+            # senden wir notfalls eine neue Ephemeral (sollte dann aber selten sein).
             try:
                 await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
             except Exception:
                 return
+
 
     async def _ephemeral_notice(
         self,
