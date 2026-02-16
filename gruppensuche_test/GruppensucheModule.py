@@ -2245,7 +2245,13 @@ class GruppensucheTest(commands.Cog):
                 return Step.SPOT
             if cat == "pilafe":
                 return Step.DAY
+            if cat in ("altar", "atoraxxion"):
+                if current_step == Step.DAY:
+                    return Step.PARTY
+                if current_step == Step.PARTY:
+                    return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
             return Step.START
+
 
         # -------- MUHHELFER --------
         if cat == "muhhelfer":
@@ -2923,7 +2929,14 @@ class GruppensucheTest(commands.Cog):
 
                 title = f"{emoji} Gruppensuche – {_spot_name(spot)}"
         else:
-            title = f"{PILAFE_EMOJI} Gruppensuche – Pila Fe"
+            # pilafe / altar / atoraxxion
+            if cat == "altar":
+                title = "🩸 Gruppensuche – Altar des Blutes"
+            elif cat == "atoraxxion":
+                title = "🏛️ Gruppensuche – Atoraxxion"
+            else:
+                title = f"{PILAFE_EMOJI} Gruppensuche – Pila Fe"
+
 
         e = discord.Embed(title=title)
 
@@ -3052,39 +3065,50 @@ class GruppensucheTest(commands.Cog):
                 notes_block + status_block + participants_block + wait_block
 
         else:
-            amount = data.get("scroll_amount") or "—"
-            header = (
-                f"**Suchender:** {owner_display}\n"
-                f"**Kategorie:** Pila Fe Schriftrollen\n"
-                f"**Menge:** {amount}\n"
-                f"**Max. Teilnehmer:** {max_players}\n\n"
-            )
-
+            # pilafe / altar / atoraxxion
             status_block = f"**Status**\n{status_line}\n\n"
 
             # --- Teilnehmer-Liste korrekt bauen ---
-            part_lines = _build_user_lines(
-                participants, data.get("participant_ap") or {})
-
+            part_lines = _build_user_lines(participants, data.get("participant_ap") or {})
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
-                + ("\n".join([f"• {x}" for x in part_lines])
-                   if part_lines else "—")
+                + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
                 + "\n\n"
             )
 
             # --- Warteschlange korrekt bauen ---
-            wait_lines = _build_user_lines(
-                waitlist, data.get("waitlist_ap") or {})
-
+            wait_lines = _build_user_lines(waitlist, data.get("waitlist_ap") or {})
             wait_block = (
                 f"**Warteschlange ({len(waitlist)})**\n"
-                + ("\n".join([f"• {x}" for x in wait_lines])
-                   if wait_lines else "—")
+                + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
             )
 
-            e.description = header + times_block + notes_block + \
-                status_block + participants_block + wait_block
+            if cat == "altar":
+                header = (
+                    f"**Suchender:** {owner_display}\n"
+                    f"**Kategorie:** Altar des Blutes\n"
+                    f"**Max. Teilnehmer:** {max_players}\n\n"
+                )
+                e.description = header + times_block + notes_block + status_block + participants_block + wait_block
+
+            elif cat == "atoraxxion":
+                header = (
+                    f"**Suchender:** {owner_display}\n"
+                    f"**Kategorie:** Atoraxxion\n"
+                    f"**Max. Teilnehmer:** {max_players}\n\n"
+                )
+                e.description = header + times_block + notes_block + status_block + participants_block + wait_block
+
+            else:
+                amount = data.get("scroll_amount") or "—"
+                header = (
+                    f"**Suchender:** {owner_display}\n"
+                    f"**Kategorie:** Pila Fe Schriftrollen\n"
+                    f"**Menge:** {amount}\n"
+                    f"**Max. Teilnehmer:** {max_players}\n\n"
+                )
+                e.description = header + times_block + notes_block + status_block + participants_block + wait_block
+
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
@@ -3137,6 +3161,11 @@ class GruppensucheTest(commands.Cog):
 
         elif cat == "pilafe":
             label = "Rollen-Ping (Pila Fe)"
+        elif cat == "altar":
+            label = "Rollen-Ping (Altar)"
+        elif cat == "atoraxxion":
+            label = "Rollen-Ping (Atoraxxion)"
+
 
         for item in view.children:
             if isinstance(item, discord.ui.Button) and str(item.custom_id or "").startswith("gst:pingtype:"):
@@ -3213,6 +3242,7 @@ class GruppensucheTest(commands.Cog):
 
         if session.category == "muhhelfer":
             ping_role_id = ROLE_SCHWER_ID if session.difficulty == "schwer" else ROLE_NORMAL_ID
+
         elif session.category == "spots":
             if (session.spot_key or "") == "olun":
                 tier = (session.olun_tier or "").lower()
@@ -3223,10 +3253,17 @@ class GruppensucheTest(commands.Cog):
                 else:
                     ping_role_id = ROLE_OLUN_NORMAL_ID
             else:
-                ping_role_id = SPOT_PING_ROLE.get(
-                    session.spot_key or "", TEST_ROLE_ID)
+                ping_role_id = SPOT_PING_ROLE.get(session.spot_key or "", TEST_ROLE_ID)
+
+        elif session.category == "altar":
+            ping_role_id = ROLE_ALTAR_ID
+
+        elif session.category == "atoraxxion":
+            ping_role_id = ROLE_ATORAXXION_ID
+
         else:
             ping_role_id = ROLE_PILAFE_ID
+
 
         data = {
             "guild_id": guild.id,
