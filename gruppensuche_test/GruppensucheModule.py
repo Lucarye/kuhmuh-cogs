@@ -138,8 +138,8 @@ FEATURE_SPOTS_MIRUMOK = True
 FEATURE_SPOTS_OLUN = True
 
 FEATURE_PILAFE = True
-FEATURE_ALTAR = False              # <- vorbereitet, aber nicht im Menü
-FEATURE_ATORAXXION = False         # <- vorbereitet, aber nicht im Menü
+FEATURE_ALTAR = True              # <- vorbereitet, aber nicht im Menü
+FEATURE_ATORAXXION = True         # <- vorbereitet, aber nicht im Menü
 
 FEATURE_POST_IN_CURRENT_CHANNEL = True  # statt TEST_CHANNEL_ID
 FEATURE_DM_REMINDERS = True
