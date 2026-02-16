@@ -116,6 +116,21 @@ OLUN_TOTAL_AP: Dict[str, str] = {
     "dehkia2": "Total AP 1460 - 1490",
 }
 
+ATORAXXION_RUNS: List[Tuple[str, str]] = [
+    ("vahmalkea", "Vahmalkea"),
+    ("sycrakea", "Sycrakea"),
+    ("yolunakea", "Yolunakea"),
+    ("orzekea", "Orzekea"),
+    ("full", "Kompletter Run"),
+]
+
+def _atoraxxion_run_label(key: str) -> str:
+    for k, name in ATORAXXION_RUNS:
+        if k == key:
+            return name
+    return key
+
+
 
 def _olun_tier_label(tier: str) -> str:
     return {"normal": "Normal", "dehkia1": "Dehkia 1", "dehkia2": "Dehkia 2"}.get(tier, tier)
@@ -258,6 +273,7 @@ class BackTarget:
     DAY = "day"
     EDIT_MENU = "edit_menu"
     OLUN_TIER = "olun_tier"
+    ATORAXXION_RUN = "atoraxxion_run"
 
 
 class Step:
@@ -271,6 +287,7 @@ class Step:
     DETAILS = "details"
     EDIT_MENU = "edit_menu"
     OLUN_TIER = "olun_tier"
+    ATORAXXION_RUN = "atoraxxion_run"
 
 
 def _now_utc() -> dt.datetime:
@@ -580,7 +597,6 @@ def _build_auto_close_dt(data: dict) -> Optional[dt.datetime]:
     return base + dt.timedelta(hours=24)
 
 
-
 def _has_mod_rights(member: discord.Member) -> bool:
     role_ids = {r.id for r in member.roles}
     if ADMIN_ROLE_ID and ADMIN_ROLE_ID in role_ids:
@@ -665,6 +681,10 @@ class WizardSession:
     req_text: Optional[str] = None
     notes: Optional[str] = None
     own_ap: Optional[str] = None
+
+    # Atoraxxion: 4 Einzelstufen + 1 Komplett-Run
+    atoraxxion_run: Optional[str] = None  # "t1" | "t2" | "t3" | "t4" | "full"
+
 
 
 # =========================
@@ -1541,6 +1561,66 @@ class OlunTierView(WizardBaseView):
             ),
         )
 
+class AtoraxxionRunView(WizardBaseView):
+    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+        super().__init__(cog, session)
+
+        self._buttons: Dict[str, discord.ui.Button] = {}
+
+        # 5 Buttons, single-choice
+        for idx, (key, label) in enumerate(ATORAXXION_RUNS):
+            row = 0 if idx < 3 else 1
+            btn = discord.ui.Button(
+                label=label,
+                style=discord.ButtonStyle.primary,
+                row=row,
+            )
+            btn.callback = self._make_pick(key)
+            self._buttons[key] = btn
+            self.add_item(btn)
+
+        self.add_item(build_back_button("Tag", BackTarget.DAY, self, row=2))
+        self._refresh_styles()
+
+    def _refresh_styles(self):
+        chosen = (self.session.atoraxxion_run or "").lower()
+        for key, btn in self._buttons.items():
+            btn.style = discord.ButtonStyle.success if key == chosen else discord.ButtonStyle.primary
+
+    def _make_pick(self, key: str):
+        async def _cb(interaction: discord.Interaction):
+            if interaction.user.id != self.session.user_id:
+                await interaction.response.defer()
+                return
+
+            self.session.atoraxxion_run = key
+            self._refresh_styles()
+
+            # kurzes Feedback
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+
+            # weiter im Flow
+            await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
+        return _cb
+
+    def embed(self) -> discord.Embed:
+        chosen = (self.session.atoraxxion_run or "")
+        chosen_label = _atoraxxion_run_label(chosen) if chosen else "—"
+
+        lines = []
+        for key, label in ATORAXXION_RUNS:
+            mark = "✅ " if key == chosen else "• "
+            lines.append(f"{mark}{label}")
+
+        return discord.Embed(
+            title="🏛️ Atoraxxion – Auswahl",
+            description=(
+                "Wähle **eine** Option.\n\n"
+                f"**Auswahl:** {chosen_label}\n\n"
+                + "\n".join(lines)
+            ),
+        )
+
 
 class PartySizeSelect(discord.ui.Select):
     def __init__(self, host_view: "PartySizeView", min_n: int, max_n: int, current: Optional[int] = None):
@@ -2169,6 +2249,11 @@ class GruppensucheTest(commands.Cog):
             await self._send_edit_menu(interaction, session)
             return
 
+        if step == Step.ATORAXXION_RUN:
+            await self._send_atoraxxion_run(interaction, session)
+            return
+
+
         # Fallback (ACK-safe)
         await self._ephemeral_notice(interaction, "Unbekannter Step.")
 
@@ -2245,11 +2330,11 @@ class GruppensucheTest(commands.Cog):
                 return Step.SPOT
             if cat == "pilafe":
                 return Step.DAY
-            if cat in ("altar", "atoraxxion"):
-                # ✅ von START geht's wie bei Pilafe: erst Tag wählen
+            if cat == "altar":
+                return Step.DAY
+            if cat == "atoraxxion":
                 return Step.DAY
             return Step.START
-
 
 
         # -------- MUHHELFER --------
@@ -2294,6 +2379,14 @@ class GruppensucheTest(commands.Cog):
             if current_step == Step.PARTY:
                 return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
 
+        # -------- ATORAXXION --------
+        if cat == "atoraxxion":
+            if current_step == Step.DAY:
+                return Step.ATORAXXION_RUN
+            if current_step == Step.ATORAXXION_RUN:
+                return Step.PARTY
+            if current_step == Step.PARTY:
+                return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
         # Fallback
         return Step.START
 
@@ -2363,6 +2456,11 @@ class GruppensucheTest(commands.Cog):
         view = PartySizeView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
+    async def _send_atoraxxion_run(self, interaction: discord.Interaction, session: WizardSession):
+        view = AtoraxxionRunView(self, session)
+        await self._edit_or_send_ephemeral(interaction, view.embed(), view)
+
+
     async def _send_final_form(self, interaction: discord.Interaction, session: WizardSession):
         defaults = {
             "req_default": _default_req_for(
@@ -2410,7 +2508,6 @@ class GruppensucheTest(commands.Cog):
                     await interaction.message.edit(embed=embed, view=view)
                 return
 
-
             # 2) Kein Message-Kontext (z.B. Slash-Command first response, Modal submit ohne Message):
             #    Dann über ack-sicheren Sender (response vs followup).
             await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
@@ -2423,7 +2520,6 @@ class GruppensucheTest(commands.Cog):
                 await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
             except Exception:
                 return
-
 
     async def _ephemeral_notice(
         self,
@@ -3071,18 +3167,22 @@ class GruppensucheTest(commands.Cog):
             status_block = f"**Status**\n{status_line}\n\n"
 
             # --- Teilnehmer-Liste korrekt bauen ---
-            part_lines = _build_user_lines(participants, data.get("participant_ap") or {})
+            part_lines = _build_user_lines(
+                participants, data.get("participant_ap") or {})
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
-                + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
+                + ("\n".join([f"• {x}" for x in part_lines])
+                   if part_lines else "—")
                 + "\n\n"
             )
 
             # --- Warteschlange korrekt bauen ---
-            wait_lines = _build_user_lines(waitlist, data.get("waitlist_ap") or {})
+            wait_lines = _build_user_lines(
+                waitlist, data.get("waitlist_ap") or {})
             wait_block = (
                 f"**Warteschlange ({len(waitlist)})**\n"
-                + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
+                + ("\n".join([f"• {x}" for x in wait_lines])
+                   if wait_lines else "—")
             )
 
             if cat == "altar":
@@ -3091,14 +3191,36 @@ class GruppensucheTest(commands.Cog):
                     f"**Kategorie:** Altar des Blutes\n"
                     f"**Max. Teilnehmer:** {max_players}\n\n"
                 )
-                e.description = header + times_block + notes_block + status_block + participants_block + wait_block
+                e.description = header + times_block + notes_block + \
+                    status_block + participants_block + wait_block
 
             elif cat == "atoraxxion":
+                    run_key = str(data.get("atoraxxion_run") or "").lower()
+                    run_label = _atoraxxion_run_label(run_key) if run_key else "—"
+
+
                 header = (
                     f"**Suchender:** {owner_display}\n"
                     f"**Kategorie:** Atoraxxion\n"
+                    f"**Auswahl:** {run_label}\n"
                     f"**Max. Teilnehmer:** {max_players}\n\n"
                 )
+
+                status_block = f"**Status**\n{status_line}\n\n"
+
+                part_lines = _build_user_lines(participants, data.get("participant_ap") or {})
+                participants_block = (
+                    f"**Teilnehmer ({len(participants)}/{max_players})**\n"
+                    + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
+                    + "\n\n"
+                )
+
+                wait_lines = _build_user_lines(waitlist, data.get("waitlist_ap") or {})
+                wait_block = (
+                    f"**Warteschlange ({len(waitlist)})**\n"
+                    + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
+                )
+
                 e.description = header + times_block + notes_block + status_block + participants_block + wait_block
 
             else:
@@ -3109,8 +3231,8 @@ class GruppensucheTest(commands.Cog):
                     f"**Menge:** {amount}\n"
                     f"**Max. Teilnehmer:** {max_players}\n\n"
                 )
-                e.description = header + times_block + notes_block + status_block + participants_block + wait_block
-
+                e.description = header + times_block + notes_block + \
+                    status_block + participants_block + wait_block
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
@@ -3161,12 +3283,15 @@ class GruppensucheTest(commands.Cog):
             else:
                 label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping"
 
-        elif cat == "pilafe":
-            label = "Rollen-Ping (Pila Fe)"
         elif cat == "altar":
             label = "Rollen-Ping (Altar)"
         elif cat == "atoraxxion":
-            label = "Rollen-Ping (Atoraxxion)"
+            run_key = str(data.get("atoraxxion_run") or "").lower()
+            run_label = _atoraxxion_run_label(run_key) if run_key else "—"
+            label = f"Rollen-Ping (Atoraxxion: {run_label})"
+
+        elif cat == "pilafe":
+            label = "Rollen-Ping (Pila Fe)"
 
 
         for item in view.children:
@@ -3257,11 +3382,13 @@ class GruppensucheTest(commands.Cog):
             else:
                 ping_role_id = SPOT_PING_ROLE.get(session.spot_key or "", TEST_ROLE_ID)
 
-        elif session.category == "altar":
-            ping_role_id = ROLE_ALTAR_ID
-
         elif session.category == "atoraxxion":
+            # ✅ eine gemeinsame Atoraxxion-Rolle (laut dir)
             ping_role_id = ROLE_ATORAXXION_ID
+
+        elif session.category == "altar":
+            # ✅ Altar-Rolle schon mal korrekt setzen (Flow/30 Stufen kommt danach)
+            ping_role_id = ROLE_ALTAR_ID
 
         else:
             ping_role_id = ROLE_PILAFE_ID
@@ -3292,6 +3419,7 @@ class GruppensucheTest(commands.Cog):
             "owner_ap": session.own_ap,
             "participant_ap": {str(owner_id): session.own_ap or ""},
             "waitlist_ap": {},
+            "atoraxxion_run": session.atoraxxion_run,            
         }
         # ✅ Easteregg beim Ersteller (nur wenn AP > 396)
         _ensure_easter_egg_text(data, owner_id, session.own_ap)
@@ -3360,11 +3488,9 @@ class GruppensucheTest(commands.Cog):
 
             await asyncio.sleep(30)  # alle 30s checken reicht völlig
 
-
     async def _run_start_reminders(self):
         if not FEATURE_DM_REMINDERS:
             return
-
 
         guild = self.bot.get_guild(GUILD_ID)
         if guild is None:
@@ -3462,7 +3588,6 @@ class GruppensucheTest(commands.Cog):
 
             except Exception:
                 continue
-
 
     async def _send_start_30m_reminder(self, guild: discord.Guild, message_id: int, data: dict):
         if not FEATURE_DM_REMINDERS:
