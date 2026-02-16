@@ -143,6 +143,7 @@ FEATURE_ATORAXXION = False         # <- vorbereitet, aber nicht im Menü
 
 FEATURE_POST_IN_CURRENT_CHANNEL = True  # statt TEST_CHANNEL_ID
 FEATURE_DM_REMINDERS = True
+FEATURE_AUTO_CLOSE = True  # ✅ Posts automatisch schließen (siehe Patch 5)
 
 # Master für Spots (zusätzlich zu MIRU/GYFIN)
 
@@ -380,7 +381,14 @@ def _parse_date_input(text: str) -> Optional[dt.date]:
 
 
 _TIME_RE = re.compile(
-    r"(?P<h>\d{1,2})(?:[:\.,](?P<m>\d{2}))?\s*(?:uhr)?", re.IGNORECASE)
+    r"(?P<h>\d{1,2})(?:[:\.,](?P<m>\d{2}))?\s*(?:uhr)?", re.IGNORECASE
+)
+
+# ✅ "in 3h", "in 45m", "in 2 std", "in 30 min" (nur sinnvoll, wenn Tag = heute)
+_REL_TIME_RE = re.compile(
+    r"\bin\s*(?P<n>\d{1,4})\s*(?P<unit>h|std|stunde|stunden|m|min|mins|minute|minuten)\b",
+    re.IGNORECASE,
+)
 
 
 _AP_NUM_RE = re.compile(r"(\d+)")
@@ -449,6 +457,10 @@ def _parse_time_token(token: str) -> Optional[tuple[int, int]]:
 
 
 def _extract_start_time_from_start_text(start_text: str) -> Optional[tuple[int, int]]:
+    """
+    Extrahiert eine HH:MM (lokal) aus freiem Text.
+    Relative Angaben ("in 3h") werden hier NICHT verarbeitet – das macht _extract_start_dt_from_start_text().
+    """
     t = (start_text or "").strip().lower()
     if not t:
         return None
@@ -474,6 +486,59 @@ def _extract_start_time_from_start_text(start_text: str) -> Optional[tuple[int, 
     return _parse_time_token(t)
 
 
+def _extract_start_dt_from_start_text(day_d: dt.date, start_text: str) -> Optional[dt.datetime]:
+    """
+    Liefert ein konkretes start_dt (Europe/Berlin), wenn parsebar.
+    Unterstützt zusätzlich:
+      - "in 3h", "in 45m", "in 2 std", "in 30 min"
+    ABER nur, wenn day_d == heute (sonst wird's semantisch komisch).
+    """
+    t = (start_text or "").strip().lower()
+    if not t:
+        return None
+
+    today = _now_local().date()
+
+    # ✅ Relative: "in X h/min" – nur wenn Tag == heute
+    m = _REL_TIME_RE.search(t)
+    if m:
+        if day_d != today:
+            return None
+
+        n = int(m.group("n"))
+        unit = (m.group("unit") or "").lower()
+
+        now = _now_local()
+        if unit in ("h", "std", "stunde", "stunden"):
+            return (now + dt.timedelta(hours=n)).replace(second=0, microsecond=0)
+        if unit in ("m", "min", "mins", "minute", "minuten"):
+            return (now + dt.timedelta(minutes=n)).replace(second=0, microsecond=0)
+
+        return None
+
+    # ✅ Absolute / "jetzt" / Fenster / Fixzeit über bestehende Logik
+    hm = _extract_start_time_from_start_text(start_text)
+    if not hm:
+        return None
+
+    h, m2 = hm
+    tz = BERLIN
+
+    # 24:00 → nächster Tag 00:00 (lokale Zeit)
+    if h == 24 and m2 == 0:
+        return dt.datetime.combine(
+            day_d + dt.timedelta(days=1),
+            dt.time(0, 0),
+            tzinfo=tz,
+        )
+
+    return dt.datetime.combine(
+        day_d,
+        dt.time(h, m2),
+        tzinfo=tz,
+    )
+
+
 def _build_start_dt_if_possible(data: dict) -> Optional[dt.datetime]:
     day_iso = str(data.get("day_date_iso") or "").strip()
     if not day_iso:
@@ -484,28 +549,36 @@ def _build_start_dt_if_possible(data: dict) -> Optional[dt.datetime]:
         return None
 
     start_text = str(data.get("start_text") or "")
-    hm = _extract_start_time_from_start_text(start_text)
-    if not hm:
+    return _extract_start_dt_from_start_text(day_d, start_text)
+
+
+def _end_of_day_2359(day_d: dt.date) -> dt.datetime:
+    """
+    23:59 lokal (Europe/Berlin). Absichtlich ohne Sekunden.
+    Beispiel: 15.02 23:59:59 -> Basis wird 15.02 23:59.
+    """
+    return dt.datetime.combine(day_d, dt.time(23, 59), tzinfo=BERLIN)
+
+
+def _build_auto_close_dt(data: dict) -> Optional[dt.datetime]:
+    """
+    Auto-Close Regel:
+    - wenn start_dt parsebar: start_dt + 24h
+    - sonst: (day_d 23:59) + 24h
+    """
+    day_iso = str(data.get("day_date_iso") or "").strip()
+    if not day_iso:
+        return None
+    try:
+        day_d = dt.date.fromisoformat(day_iso)
+    except Exception:
         return None
 
-    h, m = hm
+    start_dt = _build_start_dt_if_possible(data)
+    base = start_dt if start_dt else _end_of_day_2359(day_d)
 
-    # ✅ gleiche Zeitzone wie _now_local()
-    tz = BERLIN
+    return base + dt.timedelta(hours=24)
 
-    # 24:00 → nächster Tag 00:00 (lokale Zeit)
-    if h == 24 and m == 0:
-        return dt.datetime.combine(
-            day_d + dt.timedelta(days=1),
-            dt.time(0, 0),
-            tzinfo=tz,
-        )
-
-    return dt.datetime.combine(
-        day_d,
-        dt.time(h, m),
-        tzinfo=tz,
-    )
 
 
 def _has_mod_rights(member: discord.Member) -> bool:
@@ -1506,7 +1579,6 @@ class PartySizeSelect(discord.ui.Select):
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
 
 
-
 class PartySizeView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession, current: Optional[int] = None):
         super().__init__(cog, session)
@@ -2314,21 +2386,24 @@ class GruppensucheTest(commands.Cog):
         view: discord.ui.View,
     ):
         try:
-            # 1) Wenn wir schon geantwortet haben (z.B. Modal submit), können wir nicht mehr response.send/edit nutzen.
-            if interaction.response.is_done():
-                # Modal-Submit hat oft kein "original response" zum Editieren -> fallback auf followup ephemeral
+            # 1) Wenn es eine Message gibt (typisch bei Button/Select in Ephemeral ODER auch Public),
+            #    dann immer direkt diese Message editieren.
+            #    Das ist auch ACK-safe nach einem defer, weil wir nicht mehr über interaction.response gehen müssen.
+            if interaction.message is not None:
                 try:
-                    await interaction.edit_original_response(embed=embed, view=view)
+                    # Wenn noch nicht geantwortet wurde, können wir sauber über response.edit_message gehen.
+                    if not interaction.response.is_done():
+                        await interaction.response.edit_message(embed=embed, view=view)
+                    else:
+                        # Nach defer / bereits beantwortet: direkt die Message editieren.
+                        await interaction.message.edit(embed=embed, view=view)
                 except Exception:
+                    # Fallback: neue ephemeral Nachricht senden
                     await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
                 return
 
-            # 2) Wenn es eine Message gibt (typisch bei Button/Select auf einer Ephemeral-Message)
-            if interaction.message is not None:
-                await interaction.response.edit_message(embed=embed, view=view)
-                return
-
-            # 3) Erstes Slash-Command: neue Ephemeral senden
+            # 2) Keine Message vorhanden (z.B. Slash-Command first response, Modal submit ohne Message-Kontext):
+            #    Wenn schon geantwortet wurde -> followup senden, sonst response.send_message.
             await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
             return
 
@@ -2674,7 +2749,6 @@ class GruppensucheTest(commands.Cog):
         )
 
         text = header + "\n" + "\n".join(lines)
-
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         failed: list[int] = []
@@ -3155,6 +3229,7 @@ class GruppensucheTest(commands.Cog):
             "channel_id": channel.id,
             "message_id": 0,
             "owner_id": owner_id,
+            "auto_closed_at": 0,
             "category": session.category,
             "day_date_iso": day_iso,
             "max_players": max_players,
@@ -3235,11 +3310,18 @@ class GruppensucheTest(commands.Cog):
             except Exception:
                 pass
 
+            try:
+                await self._run_auto_close()
+            except Exception:
+                pass
+
             await asyncio.sleep(30)  # alle 30s checken reicht völlig
+
 
     async def _run_start_reminders(self):
         if not FEATURE_DM_REMINDERS:
             return
+
 
         guild = self.bot.get_guild(GUILD_ID)
         if guild is None:
@@ -3284,6 +3366,60 @@ class GruppensucheTest(commands.Cog):
 
             except Exception:
                 continue
+
+    async def _run_auto_close(self):
+        if not FEATURE_AUTO_CLOSE:
+            return
+
+        guild = self.bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+
+        searches = await self.config.guild(guild).searches()
+        if not searches:
+            return
+
+        now = _now_local()
+
+        for mid_str, data in (searches or {}).items():
+            try:
+                mid = int(mid_str)
+
+                # schon geschlossen? -> nix tun
+                if bool(data.get("is_closed", False)):
+                    continue
+
+                # bereits auto-closed markiert? (Safety)
+                if int(data.get("auto_closed_at", 0)) > 0:
+                    continue
+
+                close_dt = _build_auto_close_dt(data)
+                if not close_dt:
+                    continue
+
+                if now < close_dt:
+                    continue
+
+                # ✅ Close unter Lock (Race-sicher)
+                lock = self._lock_for(mid)
+                async with lock:
+                    fresh = await self._get_search(mid)
+                    if not fresh:
+                        continue
+
+                    if bool(fresh.get("is_closed", False)):
+                        continue
+                    if int(fresh.get("auto_closed_at", 0)) > 0:
+                        continue
+
+                    fresh["is_closed"] = True
+                    fresh["auto_closed_at"] = int(_now_local().timestamp())
+
+                    await self._save_refresh_dispatch(fresh)
+
+            except Exception:
+                continue
+
 
     async def _send_start_30m_reminder(self, guild: discord.Guild, message_id: int, data: dict):
         if not FEATURE_DM_REMINDERS:
