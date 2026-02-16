@@ -2246,11 +2246,10 @@ class GruppensucheTest(commands.Cog):
             if cat == "pilafe":
                 return Step.DAY
             if cat in ("altar", "atoraxxion"):
-                if current_step == Step.DAY:
-                    return Step.PARTY
-                if current_step == Step.PARTY:
-                    return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
+                # ✅ von START geht's wie bei Pilafe: erst Tag wählen
+                return Step.DAY
             return Step.START
+
 
 
         # -------- MUHHELFER --------
@@ -2404,10 +2403,13 @@ class GruppensucheTest(commands.Cog):
                 if not interaction.response.is_done():
                     await interaction.response.edit_message(embed=embed, view=view)
                 else:
-                    # Nach defer / bereits geantwortet:
-                    # Für Ephemeral ist edit_original_response stabiler als message.edit.
-                    await interaction.edit_original_response(embed=embed, view=view)
+                    # ✅ WICHTIG:
+                    # Bei Followup-Ephemerals (z.B. Edit-Flow via _send_ephemeral_new)
+                    # ist die "original response" NICHT die sichtbare Message.
+                    # Daher: die konkrete Message editieren.
+                    await interaction.message.edit(embed=embed, view=view)
                 return
+
 
             # 2) Kein Message-Kontext (z.B. Slash-Command first response, Modal submit ohne Message):
             #    Dann über ack-sicheren Sender (response vs followup).
