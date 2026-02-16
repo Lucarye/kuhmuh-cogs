@@ -119,13 +119,12 @@ class KuhmuhUpdate(commands.Cog):
         guild_ids=[GUILD_ID],
     )
 
-    # /update manage
     manage_group = app_commands.Group(
         name="manage",
         description="Gespeicherte Cogs verwalten (add/remove/list).",
         parent=update_group,
-        guild_ids=[GUILD_ID],
     )
+
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -143,14 +142,32 @@ class KuhmuhUpdate(commands.Cog):
     # App command registration
     # -------------------------
     async def cog_load(self) -> None:
-        try:
-            self.bot.tree.add_command(self.update_group, guild=discord.Object(id=GUILD_ID))
-        except Exception:
-            pass
+        guild_obj = discord.Object(id=GUILD_ID)
+
+        # Wichtig: alte Registrierungen raus (guild + global), sonst CommandAlreadyRegistered
+        with contextlib.suppress(Exception):
+            self.bot.tree.remove_command("update", guild=guild_obj)
+        with contextlib.suppress(Exception):
+            self.bot.tree.remove_command("update", guild=None)
+
+        # Neu hinzufügen (guild-scoped)
+        with contextlib.suppress(Exception):
+            self.bot.tree.add_command(self.update_group, guild=guild_obj)
+
+        # Direkt syncen, damit der Command sofort wieder da ist
+        with contextlib.suppress(Exception):
+            await self.bot.tree.sync(guild=guild_obj)
+
 
     async def cog_unload(self) -> None:
+        guild_obj = discord.Object(id=GUILD_ID)
+
         with contextlib.suppress(Exception):
-            self.bot.tree.remove_command(self.update_group.name, guild=discord.Object(id=GUILD_ID))
+            self.bot.tree.remove_command("update", guild=guild_obj)
+
+        with contextlib.suppress(Exception):
+            await self.bot.tree.sync(guild=guild_obj)
+
 
     async def _startup_guild_sync(self) -> None:
         try:
@@ -158,7 +175,6 @@ class KuhmuhUpdate(commands.Cog):
             await self.bot.wait_until_ready()
 
             guild_obj = discord.Object(id=GUILD_ID)
-            self.bot.tree.copy_global_to(guild=guild_obj)
             await self.bot.tree.sync(guild=guild_obj)
         except Exception:
             pass
