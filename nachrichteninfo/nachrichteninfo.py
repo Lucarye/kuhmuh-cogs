@@ -49,7 +49,7 @@ class NachrichtenInfo(commands.Cog):
         await self._run(ctx, nachricht, ephemeral=False)
 
     @commands.is_owner()
-    @commands.hybrid_command(name="nachrichteninfoh", with_app_command=True, description="Analysiert eine Nachricht (Buttons & Embed-Infos).")
+    @commands.hybrid_command(name="nachrichteninfo", with_app_command=True, description="Analysiert eine Nachricht (Buttons & Embed-Infos).")
     async def nachrichteninfo_hybrid(self, ctx: commands.Context, *, nachricht: str):
         await ctx.defer(ephemeral=True)
         await self._run(ctx, nachricht, ephemeral=True)
