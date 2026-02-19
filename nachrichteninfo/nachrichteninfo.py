@@ -106,16 +106,6 @@ class NachrichtenInfo(commands.Cog):
         """Owner: Nachricht analysieren (Nachrichtenlink ODER 'channel_id message_id')."""
         await self._run(ctx, nachricht, ephemeral=False)
 
-    @commands.is_owner()
-    @commands.hybrid_command(
-        name="nachrichteninfo",
-        with_app_command=True,
-        description="Analysiert eine Nachricht (Buttons & Embed-Infos).",
-    )
-    async def nachrichteninfo_hybrid(self, ctx: commands.Context, *, nachricht: str):
-        await ctx.defer(ephemeral=True)
-        await self._run(ctx, nachricht, ephemeral=True)
-
     async def _run(self, ctx: commands.Context, nachricht: str, ephemeral: bool):
         ch_id = msg_id = None
         m = MSG_RE.search(nachricht)
