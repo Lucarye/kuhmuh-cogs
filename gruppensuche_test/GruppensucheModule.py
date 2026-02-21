@@ -123,12 +123,14 @@ ATORAXXION_DUNGEONS: List[Tuple[str, str]] = [
     ("orzekea", "Orzekea"),
 ]
 
+
 def _atoraxxion_dungeon_label(key: str) -> str:
     k = str(key or "").lower().strip()
     for kk, name in ATORAXXION_DUNGEONS:
         if kk == k:
             return name
     return key
+
 
 def _atoraxxion_selected_keys(data: dict) -> list[str]:
     """
@@ -681,6 +683,7 @@ def _default_req_for(data: dict) -> str:
 
     return ""
 
+
 def _normalize_atoraxxion_runs(data: dict) -> list[str]:
     """
     Normalisiert die Atoraxxion-Auswahl zu Keys:
@@ -734,6 +737,7 @@ def _normalize_atoraxxion_runs(data: dict) -> list[str]:
 # =========================
 # Session
 # =========================
+
 
 @dataclass
 class WizardSession:
@@ -1720,7 +1724,8 @@ class AtoraxxionRunView(WizardBaseView):
 
         # wenn alle 4 gewählt: alles grün
         for k, btn in self._run_buttons.items():
-            btn.style = discord.ButtonStyle.success if (k in chosen) else discord.ButtonStyle.secondary
+            btn.style = discord.ButtonStyle.success if (
+                k in chosen) else discord.ButtonStyle.secondary
 
     def _make_toggle_cb(self, key: str):
         async def _cb(interaction: discord.Interaction):
@@ -1761,7 +1766,6 @@ class AtoraxxionRunView(WizardBaseView):
             return
 
         await self.cog._goto_next(interaction, self.session, Step.atoraxxion_runs)
-
 
     async def _next(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -2689,19 +2693,43 @@ class GruppensucheTest(commands.Cog):
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _edit_or_send_ephemeral(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
+        """
+        ACK-sicherer Wizard-Renderer:
+        - Wenn wir bereits eine Ephemeral-Message haben (interaction.message ist ephemeral): diese Message direkt editieren.
+        - Wenn Interaction noch offen ist: response.edit_message verwenden.
+        - Wenn Interaction bereits responded/deferred ist: edit_original_response verwenden.
+        - Nur wenn alles fehlschlägt: followup.send (als echter Fallback).
+        """
         msg = getattr(interaction, "message", None)
 
-        # Wenn die Interaction von einem öffentlichen Post kommt: NICHT editieren!
-        if msg is not None and not getattr(msg.flags, "ephemeral", False):
-            await self._send_ephemeral_new(interaction, embed, view)
-            return
-
-        # Normalfall: wir sind im Wizard-Ephemeral und editieren sauber weiter
+        # 1) Best Case: Wir sind auf einer Ephemeral-Component-Message -> diese direkt editieren
         try:
-            await interaction.response.edit_message(embed=embed, view=view)
-        except discord.InteractionResponded:
-            # Falls bereits responded wurde (selten, aber möglich), dann followup neu senden
+            if msg is not None and getattr(msg.flags, "ephemeral", False):
+                await msg.edit(embed=embed, view=view)
+                return
+        except Exception:
+            pass
+
+        # 2) Wenn Interaction noch NICHT responded ist: normal edit_message antworten
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(embed=embed, view=view)
+                return
+        except Exception:
+            pass
+
+        # 3) Wenn deferred/responded: Original Response (das Wizard-Ephemeral) editieren
+        try:
+            await interaction.edit_original_response(embed=embed, view=view)
+            return
+        except Exception:
+            pass
+
+        # 4) Letzter Fallback: neues Ephemeral (sollte praktisch nie mehr passieren)
+        try:
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        except Exception:
+            pass
 
     async def _ephemeral_notice(
         self,
@@ -3177,7 +3205,8 @@ class GruppensucheTest(commands.Cog):
                 m = guild.get_member(uid_int)
                 mention = (m.mention if m else f"<@{uid_int}>")
                 ap = ap_dict.get(str(uid_int))
-                lines_out.append(_fmt_player_with_ap_and_egg(mention, ap, _egg_for(uid_int)))
+                lines_out.append(_fmt_player_with_ap_and_egg(
+                    mention, ap, _egg_for(uid_int)))
             return lines_out
 
         # Kopfblock: Suchender (ohne Easter Egg)
@@ -3188,17 +3217,20 @@ class GruppensucheTest(commands.Cog):
         # Gemeinsame Blöcke (zentral, für alle Kategorien gleich)
         status_block = f"**Status**\n{status_line}\n\n"
 
-        part_lines = _build_user_lines(participants, data.get("participant_ap") or {})
+        part_lines = _build_user_lines(
+            participants, data.get("participant_ap") or {})
         participants_block = (
             f"**Teilnehmer ({len(participants)}/{max_players})**\n"
-            + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
+            + ("\n".join([f"• {x}" for x in part_lines])
+               if part_lines else "—")
             + "\n\n"
         )
 
         wait_lines = _build_user_lines(waitlist, data.get("waitlist_ap") or {})
         wait_block = (
             f"**Warteschlange ({len(waitlist)})**\n"
-            + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
+            + ("\n".join([f"• {x}" for x in wait_lines])
+               if wait_lines else "—")
         )
 
         # Titel
@@ -3259,7 +3291,8 @@ class GruppensucheTest(commands.Cog):
                 else:
                     boss_lines.append(f"• {name}")
 
-            bosses_block = "**Bosse:**\n" + ("\n".join(boss_lines) if boss_lines else "—") + "\n\n"
+            bosses_block = "**Bosse:**\n" + \
+                ("\n".join(boss_lines) if boss_lines else "—") + "\n\n"
             if has_double:
                 bosses_block += "⚠️ **2. Charakter erforderlich**\n\n"
 
@@ -3357,7 +3390,8 @@ class GruppensucheTest(commands.Cog):
                     "yolunakea": "Yolunakea",
                     "orzekea": "Orzekea",
                 }
-                lines_sel = "\n".join([f"• {dungeon_map.get(k, k)}" for k in runs])
+                lines_sel = "\n".join(
+                    [f"• {dungeon_map.get(k, k)}" for k in runs])
                 selection_block = f"**Auswahl:** Teil-Run\n\n**Dungeons:**\n{lines_sel}\n\n"
             else:
                 selection_block = "**Auswahl:** —\n\n"
@@ -3435,7 +3469,8 @@ class GruppensucheTest(commands.Cog):
             spot = str(data.get("spot_key", "")).lower()
             if spot == "olun":
                 tier = str(data.get("olun_tier", "normal")).lower()
-                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1", "dehkia2": "Dehkia2"}.get(tier, tier)
+                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1",
+                              "dehkia2": "Dehkia2"}.get(tier, tier)
                 label = f"Rollen-Ping (Olun {tier_label})"
             else:
                 label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping"
@@ -4209,16 +4244,20 @@ class GruppensucheTest(commands.Cog):
             edit_message_id=message_id,
             category=str(data.get("category")),
             day_date_iso=str(data.get("day_date_iso")),
-            difficulty=str(data.get("difficulty")) if data.get("category") == "muhhelfer" else None,
+            difficulty=str(data.get("difficulty")) if data.get(
+                "category") == "muhhelfer" else None,
             boss_runs=dict(data.get("boss_runs") or {}),
-            spot_key=str(data.get("spot_key")) if data.get("category") == "spots" else None,
+            spot_key=str(data.get("spot_key")) if data.get(
+                "category") == "spots" else None,
             max_players=int(data.get("max_players", 2)),
-            scroll_amount=str(data.get("scroll_amount")) if data.get("category") == "pilafe" else None,
+            scroll_amount=str(data.get("scroll_amount")) if data.get(
+                "category") == "pilafe" else None,
             duration_text=data.get("duration_text"),
             start_text=data.get("start_text"),
             req_text=data.get("req_text"),
             notes=data.get("notes"),
-            olun_tier=str(data.get("olun_tier")) if str(data.get("spot_key")) == "olun" else None,
+            olun_tier=str(data.get("olun_tier")) if str(
+                data.get("spot_key")) == "olun" else None,
             atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
         )
 
@@ -4542,7 +4581,8 @@ class GruppensucheTest(commands.Cog):
 
         # nur erlaubte Keys + stabile Reihenfolge
         allowed_order = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
-        new_runs = [k for k in allowed_order if k in {str(x).lower().strip() for x in new_runs}]
+        new_runs = [k for k in allowed_order if k in {
+            str(x).lower().strip() for x in new_runs}]
 
         # wenn nichts gewählt -> Fehlermeldung
         if not new_runs:
