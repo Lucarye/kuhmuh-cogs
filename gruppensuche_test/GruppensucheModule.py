@@ -1659,17 +1659,12 @@ class PartySizeView(WizardBaseView):
         mn, mx = _allowed_party_range(session.category or "", session.spot_key)
         self.add_item(PartySizeSelect(self, mn, mx, current=current))
 
-        # Zurück-Ziel hängt an der Kategorie / dem Flow
-        self.add_item(build_back_button(
-            "Tag" if session.category != "atoraxxion" else "Atoraxxion-Auswahl",
-            (lambda s: BackTarget.ATORAXXION_RUN if (s.category == "atoraxxion") else BackTarget.DAY),
-            self,
-            row=2,
-        ))
+        # ✅ Einheitliches Wizard-Erlebnis:
+        # Nach "Tag" kommt "Max. Teilnehmer" (Party) – daher muss "Zurück" von Party IMMER zurück zu "Tag".
+        self.add_item(build_back_button("Tag", BackTarget.DAY, self, row=1))
 
     def embed(self) -> discord.Embed:
-        mn, mx = _allowed_party_range(
-            self.session.category or "", self.session.spot_key)
+        mn, mx = _allowed_party_range(self.session.category or "", self.session.spot_key)
 
         if self.session.category == "muhhelfer":
             diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
@@ -1721,6 +1716,19 @@ class PartySizeView(WizardBaseView):
         if self.session.category == "pilafe":
             return discord.Embed(
                 title=f"{PILAFE_EMOJI} Gruppensuche – Pila Fe",
+                description=_party_size_help_text(mn, mx),
+            )
+
+        # ✅ Altar / Atoraxxion: gleiche Party-UI wie Standard
+        if (self.session.category or "").lower() == "altar":
+            return discord.Embed(
+                title="🩸 Gruppensuche – Altar des Blutes",
+                description=_party_size_help_text(mn, mx),
+            )
+
+        if (self.session.category or "").lower() == "atoraxxion":
+            return discord.Embed(
+                title="🏛️ Gruppensuche – Atoraxxion",
                 description=_party_size_help_text(mn, mx),
             )
 
@@ -1834,10 +1842,8 @@ class ConfirmView(discord.ui.View):
             )
             confirm_label = "🗑 Ja, endgültig löschen"
 
-        confirm_btn = discord.ui.Button(
-            label=confirm_label, style=discord.ButtonStyle.danger)
-        cancel_btn = discord.ui.Button(
-            label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
+        confirm_btn = discord.ui.Button(label=confirm_label, style=discord.ButtonStyle.danger)
+        cancel_btn = discord.ui.Button(label="❌ Abbrechen", style=discord.ButtonStyle.secondary)
 
         confirm_btn.callback = self._confirm
         cancel_btn.callback = self._cancel
@@ -1851,38 +1857,45 @@ class ConfirmView(discord.ui.View):
             return False
         return True
 
-    async def _cancel(self, interaction: discord.Interaction):
+    async def _safe_edit_self(self, interaction: discord.Interaction, text: str):
+        """
+        Bearbeitet IMMER die gleiche Ephemeral-Message (Confirm-Dialog) und entfernt Buttons.
+        """
         try:
-            await interaction.response.edit_message(content="Abgebrochen.", view=None)
-        except discord.InteractionResponded:
-            try:
-                if interaction.message:
-                    await interaction.message.edit(content="Abgebrochen.", view=None)
-            except Exception:
-                pass
+            if interaction.response.is_done():
+                await interaction.edit_original_response(content=text, view=None)
+            else:
+                await interaction.response.edit_message(content=text, view=None)
+            return
+        except Exception:
+            pass
+
+        # Fallback (sollte selten nötig sein)
+        try:
+            if interaction.message:
+                await interaction.message.edit(content=text, view=None)
+        except Exception:
+            pass
+
+    async def _cancel(self, interaction: discord.Interaction):
+        await self._safe_edit_self(interaction, "Abgebrochen.")
 
     async def _confirm(self, interaction: discord.Interaction):
-        # 1) Aktion ausführen (kann dauern)
+        # CLOSE ist schnell -> wir können direkt die Message updaten (ACK + Buttons weg)
+        if self.action == "close":
+            await self._safe_edit_self(interaction, "Suche wird geschlossen…")
+            await self.cog._close_search(interaction, self.message_id)
+            await self._safe_edit_self(interaction, "Suche wurde geschlossen.")
+            return
+
+        # DELETE kann dauern -> erst defer, dann löschen, dann UI updaten
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
-        if self.action == "delete":
-            await self.cog._delete_search(interaction, self.message_id)
-            done_text = "Suche wurde gelöscht."
-        else:
-            await self.cog._close_search(interaction, self.message_id)
-            done_text = "Suche wurde geschlossen."
-
-        # 2) Danach dieselbe Confirm-Message ohne Buttons aktualisieren
-        try:
-            if interaction.message:
-                await interaction.message.edit(content=done_text, view=None)
-        except Exception:
-            # (kein followup senden -> sonst wieder 2. ephemeral)
-            pass
-
+        await self.cog._delete_search(interaction, self.message_id)
+        await self._safe_edit_self(interaction, "Suche wurde gelöscht.")
 
 class PublicPostView(discord.ui.View):
     def __init__(self, cog: "GruppensucheTest", message_id: int):
