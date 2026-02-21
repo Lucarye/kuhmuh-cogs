@@ -683,7 +683,8 @@ class WizardSession:
     own_ap: Optional[str] = None
 
     # Atoraxxion: 4 Einzelstufen + 1 Komplett-Run
-    atoraxxion_runs: List[str] = field(default_factory=list)  # "t1" | "t2" | "t3" | "t4" | "full"
+    # "t1" | "t2" | "t3" | "t4" | "full"
+    atoraxxion_runs: List[str] = field(default_factory=list)
 
 
 # =========================
@@ -1554,92 +1555,145 @@ class OlunTierView(WizardBaseView):
         )
 
 
-class AtoraxxionRunView(discord.ui.View):
-    def __init__(self, cog: commands.Cog, session: WizardSession, back_target: str):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.session = session
+class AtoraxxionRunView(WizardBaseView):
+    """
+    Atoraxxion: Mehrfachauswahl (4 Dungeons) + Schnellwahl "Kompletter Run".
+    - Kein extra Ephemeral
+    - Weiter nur wenn mind. 1 Dungeon gewählt
+    - Wenn alle 4 gewählt -> wie "Kompletter Run" behandeln
+    """
 
-        # sicherstellen, dass wir immer eine Liste haben
+    def __init__(self, cog: "GruppensucheTest", session: WizardSession, back_target: str):
+        super().__init__(cog, session, timeout_seconds=WIZARD_TIMEOUT_SECONDS)
+
+        # nur die 4 Dungeons (ohne "full")
+        self._dungeon_runs: list[tuple[str, str]] = [
+            ("vahmalkea", "Vahmalkea"),
+            ("sycrakea", "Sycrakea"),
+            ("yolunakea", "Yolunakea"),
+            ("orzekea", "Orzekea"),
+        ]
+        self._all_keys = {k for k, _ in self._dungeon_runs}
+
         if not isinstance(getattr(self.session, "atoraxxion_runs", None), list):
             self.session.atoraxxion_runs = []
 
-        # Buttons für die 4 Dungeons (Row 0)
-        for idx, (key, label) in enumerate(ATORAXXION_RUNS):
-            row = 0  # alle 4 in eine Reihe
+        # Toggle-Buttons (Row 0)
+        self._run_buttons: dict[str, discord.ui.Button] = {}
+        for idx, (key, label) in enumerate(self._dungeon_runs):
             btn = discord.ui.Button(
                 label=label,
                 style=discord.ButtonStyle.secondary,
-                row=row,
+                row=0,
             )
-
-            async def _toggle_cb(interaction: discord.Interaction, k=key):
-                chosen = set(self.session.atoraxxion_runs or [])
-
-                if k in chosen:
-                    chosen.remove(k)
-                else:
-                    chosen.add(k)
-
-                # wenn alle 4 gewählt → wie "Kompletter Run" behandeln (für Logik/Konsistenz)
-                all_keys = {kk for kk, _ in ATORAXXION_RUNS}
-                if chosen == all_keys:
-                    self.session.atoraxxion_runs = list(all_keys)
-                else:
-                    self.session.atoraxxion_runs = list(chosen)
-
-                await interaction.response.edit_message(view=self)
-
-            btn.callback = _toggle_cb
+            btn.callback = self._make_toggle_cb(key)
+            self._run_buttons[key] = btn
             self.add_item(btn)
 
-        # "Kompletter Run" als Schnellwahl (Row 1, alleine)
+        # Schnellwahl: Kompletter Run (Row 1, solo)
         full_btn = discord.ui.Button(
             label="Kompletter Run",
             style=discord.ButtonStyle.primary,
             row=1,
         )
-
-        async def _full_run_cb(interaction: discord.Interaction):
-            self.session.atoraxxion_runs = [k for k, _ in ATORAXXION_RUNS]
-            await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
-
-        full_btn.callback = _full_run_cb
+        full_btn.callback = self._pick_full
         self.add_item(full_btn)
 
-        # Weiter-Button (Row 1)
+        # Weiter (Row 1)
         next_btn = discord.ui.Button(
             label="Weiter",
             style=discord.ButtonStyle.success,
             row=1,
         )
-
-        async def _next_cb(interaction: discord.Interaction):
-            chosen = set(self.session.atoraxxion_runs or [])
-            if not chosen:
-                await interaction.response.send_message(
-                    "Bitte wähle mindestens einen Dungeon aus.", ephemeral=True
-                )
-                return
-
-            # wenn alle 4 gewählt → wie kompletter Run behandeln (gleiche Datenlage)
-            all_keys = {kk for kk, _ in ATORAXXION_RUNS}
-            if chosen == all_keys:
-                self.session.atoraxxion_runs = list(all_keys)
-
-            await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
-
-        next_btn.callback = _next_cb
+        next_btn.callback = self._next
         self.add_item(next_btn)
 
-        # Zurück (Row 2) – FIX: build_back_button statt BackButton
-        self.add_item(build_back_button("Zurück", back_target, self, row=2))
+        # Zurück (Row 2)
+        self.add_item(build_back_button("Kategorie", back_target, self, row=2))
 
-    async def on_timeout(self):
-        # optional: Buttons deaktivieren, wenn du willst
-        for item in self.children:
-            if isinstance(item, discord.ui.Button):
-                item.disabled = True
+        self._refresh_styles()
+
+    def embed(self) -> discord.Embed:
+        chosen = set(self.session.atoraxxion_runs or [])
+        chosen = chosen & self._all_keys
+
+        if chosen == self._all_keys and len(self._all_keys) == 4:
+            selection_line = "**Auswahl:** Kompletter Run"
+        elif chosen:
+            names = [label for (k, label) in self._dungeon_runs if k in chosen]
+            selection_line = "**Auswahl:** " + " • ".join(names)
+        else:
+            selection_line = "**Auswahl:** —"
+
+        return discord.Embed(
+            title="🏛️ Gruppensuche – Atoraxxion",
+            description=(
+                "Wähle einen oder mehrere Dungeons.\n"
+                "• **Kompletter Run** = alle 4\n"
+                "• **Weiter** erst, wenn mindestens 1 Dungeon gewählt ist\n\n"
+                f"{selection_line}"
+            ),
+        )
+
+    def _refresh_styles(self):
+        chosen = set(self.session.atoraxxion_runs or [])
+        chosen = chosen & self._all_keys
+
+        # wenn alle 4 gewählt: alles grün
+        for k, btn in self._run_buttons.items():
+            btn.style = discord.ButtonStyle.success if (k in chosen) else discord.ButtonStyle.secondary
+
+    def _make_toggle_cb(self, key: str):
+        async def _cb(interaction: discord.Interaction):
+            if interaction.user.id != self.session.user_id:
+                await interaction.response.defer()
+                return
+
+            chosen = set(self.session.atoraxxion_runs or [])
+            chosen = chosen & self._all_keys
+
+            if key in chosen:
+                chosen.remove(key)
+            else:
+                chosen.add(key)
+
+            # wenn alle 4 -> wie kompletter Run behandeln
+            if chosen == self._all_keys:
+                self.session.atoraxxion_runs = list(self._all_keys)
+            else:
+                self.session.atoraxxion_runs = list(chosen)
+
+            self._refresh_styles()
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+
+        return _cb
+
+    async def _pick_full(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        self.session.atoraxxion_runs = list(self._all_keys)
+        self._refresh_styles()
+        await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
+
+    async def _next(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        chosen = set(self.session.atoraxxion_runs or [])
+        chosen = chosen & self._all_keys
+        if not chosen:
+            await self.cog._ephemeral_notice(interaction, "Bitte wähle mindestens einen Dungeon aus.", ephemeral=True)
+            return
+
+        if chosen == self._all_keys:
+            self.session.atoraxxion_runs = list(self._all_keys)
+        else:
+            self.session.atoraxxion_runs = list(chosen)
+
+        await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -1886,9 +1940,9 @@ class ConfirmView(discord.ui.View):
             await self.cog._ephemeral_notice(interaction, "Das kannst nur du bedienen.")
             return False
         return True
-    
-    async def _safe_edit_self(self, interaction: discord.Interaction, *, content: str, view: Optional[discord.ui.View]):
-        # 1) Am zuverlässigsten: direkt die Message bearbeiten, auf der geklickt wurde
+
+    async def _safe_edit_self(self, interaction: discord.Interaction, content: str, view: Optional[discord.ui.View] = None):
+        # Primär: die Message bearbeiten, auf der geklickt wurde (bei Ephemeral zuverlässig)
         try:
             if interaction.message:
                 await interaction.message.edit(content=content, view=view)
@@ -1896,39 +1950,35 @@ class ConfirmView(discord.ui.View):
         except Exception:
             pass
 
-        # 2) Falls die Interaction noch nicht geantwortet hat
+        # Falls Interaction noch offen ist: edit_message versuchen
         try:
-            await interaction.response.edit_message(content=content, view=view)
-            return
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(content=content, view=view)
+                return
         except Exception:
             pass
 
-        # 3) Fallback: Original response bearbeiten
+        # Fallback: Original response
         try:
             await interaction.edit_original_response(content=content, view=view)
-            return
         except Exception:
             pass
 
     async def _cancel(self, interaction: discord.Interaction):
-        await self._safe_edit_self(interaction, "Abgebrochen.")
+        await self._safe_edit_self(interaction, "Abgebrochen.", view=None)
 
     async def _confirm(self, interaction: discord.Interaction):
-        # CLOSE ist schnell -> wir können direkt die Message updaten (ACK + Buttons weg)
         if self.action == "close":
-            await self._safe_edit_self(interaction, "Suche wird geschlossen…")
+            # UI sofort "busy" machen (Buttons weg), dann schließen, dann finaler Text
+            await self._safe_edit_self(interaction, "Suche wird geschlossen…", view=None)
             await self.cog._close_search(interaction, self.message_id)
-            await self._safe_edit_self(interaction, "Suche wurde geschlossen.")
+            await self._safe_edit_self(interaction, "Suche wurde geschlossen.", view=None)
             return
 
-        # DELETE kann dauern -> erst defer, dann löschen, dann UI updaten
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except discord.InteractionResponded:
-            pass
-
+        # delete
+        await self._safe_edit_self(interaction, "Suche wird gelöscht…", view=None)
         await self.cog._delete_search(interaction, self.message_id)
-        await self._safe_edit_self(interaction, "Suche wurde gelöscht.")
+        await self._safe_edit_self(interaction, "Suche wurde gelöscht.", view=None)
 
 
 class PublicPostView(discord.ui.View):
@@ -3266,7 +3316,8 @@ class GruppensucheTest(commands.Cog):
                     if k in chosen:
                         lines.append(f"• **{label}**")
 
-                run_block = run_head + (("\n".join(lines) + "\n") if lines else "—\n")
+                run_block = run_head + \
+                    (("\n".join(lines) + "\n") if lines else "—\n")
 
                 header = (
                     f"**Suchender:** {owner_display}\n"
@@ -3286,7 +3337,8 @@ class GruppensucheTest(commands.Cog):
                 )
 
             # --- Description final ---
-            e.description = header + times_block + notes_block + status_block + participants_block + wait_block
+            e.description = header + times_block + notes_block + \
+                status_block + participants_block + wait_block
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
