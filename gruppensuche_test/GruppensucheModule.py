@@ -1098,18 +1098,15 @@ class DaySelectView(WizardBaseView):
                     await interaction.response.defer()
                     return
 
-                # Auswahl setzen + Styles updaten
                 self.session.day_date_iso = iso_val
                 self._refresh_day_styles()
 
                 if self.session.mode == "edit":
-                    # optional: sofort visuell updaten
                     await interaction.response.edit_message(embed=self.embed(), view=self)
                     await self.cog._apply_edit_day(interaction, self.session)
                     return
 
-                # create-mode: sofort visuell updaten, dann weiter
-                await interaction.response.edit_message(embed=self.embed(), view=self)
+                # ✅ create-mode: nicht edit_message + goto_next
                 await self.cog._goto_next(interaction, self.session, Step.DAY)
 
             btn.callback = _cb
@@ -1525,12 +1522,7 @@ class OlunTierView(WizardBaseView):
                 return
 
             self.session.olun_tier = tier
-            self._refresh_styles()
-
-            # ✅ kurzes visuelles Feedback (optional, aber nice UX)
-            await interaction.response.edit_message(embed=self.embed(), view=self)
-
-            # danach normal weiter
+            # ✅ kein edit_message als "Feedback" hier
             await self.cog._goto_next(interaction, self.session, Step.OLUN_TIER)
         return _cb
 
@@ -1568,27 +1560,24 @@ class AtoraxxionRunView(WizardBaseView):
 
         self._buttons: Dict[str, discord.ui.Button] = {}
 
-        # 5 Buttons, single-choice (Layout nach Vorgabe)
         row_map = {
             "vahmalkea": 0,
             "sycrakea": 0,
             "yolunakea": 0,
             "orzekea": 0,
-            "full": 1,        
+            "full": 1,
         }
 
         for key, label in ATORAXXION_RUNS:
             row = row_map.get(key, 1)
-            btn = discord.ui.Button(
-                label=label,
-                style=discord.ButtonStyle.primary,
-                row=row,
-            )
+            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.primary, row=row)
             btn.callback = self._make_pick(key)
             self._buttons[key] = btn
             self.add_item(btn)
 
-        self.add_item(build_back_button("Tag", BackTarget.DAY, self, row=2))
+        # ✅ Back aus Atoraxxion-Auswahl = zurück zur Kategorie (START)
+        self.add_item(build_back_button("Kategorie", BackTarget.START, self, row=2))
+
         self._refresh_styles()
 
     def _refresh_styles(self):
@@ -1603,12 +1592,7 @@ class AtoraxxionRunView(WizardBaseView):
                 return
 
             self.session.atoraxxion_run = key
-            self._refresh_styles()
-
-            # kurzes Feedback
-            await interaction.response.edit_message(embed=self.embed(), view=self)
-
-            # weiter im Flow
+            # ✅ Kein interaction.response.edit_message(...) hier -> verhindert 2. Ephemeral
             await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
         return _cb
 
@@ -1868,27 +1852,22 @@ class ConfirmView(discord.ui.View):
         return True
 
     async def _cancel(self, interaction: discord.Interaction):
-        # ✅ ack-sicher
         try:
-            await interaction.response.defer(ephemeral=True)
+            await interaction.response.edit_message(content="Abgebrochen.", view=None)
         except discord.InteractionResponded:
-            pass
-
-        # ✅ Message selbst editieren (nicht response.edit_message)
-        try:
-            if interaction.message:
-                await interaction.message.edit(content="Abgebrochen.", view=None)
-        except Exception:
-            pass
+            try:
+                if interaction.message:
+                    await interaction.message.edit(content="Abgebrochen.", view=None)
+            except Exception:
+                pass
 
     async def _confirm(self, interaction: discord.Interaction):
-        # ✅ ack-sicher (wichtig bei Close/Delete -> kann dauern)
+        # 1) Aktion ausführen (kann dauern)
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
-        # 1) Erst Aktion ausführen
         if self.action == "delete":
             await self.cog._delete_search(interaction, self.message_id)
             done_text = "Suche wurde gelöscht."
@@ -1896,18 +1875,12 @@ class ConfirmView(discord.ui.View):
             await self.cog._close_search(interaction, self.message_id)
             done_text = "Suche wurde geschlossen."
 
-        # 2) Dann Confirm-Message zuverlässig aktualisieren (Buttons entfernen)
+        # 2) Danach dieselbe Confirm-Message ohne Buttons aktualisieren
         try:
             if interaction.message:
                 await interaction.message.edit(content=done_text, view=None)
-                return
         except Exception:
-            pass
-
-        # 3) Fallback: wenn edit fehlschlägt -> neue Ephemeral ohne Buttons
-        try:
-            await self.cog._ephemeral_notice(interaction, done_text, ephemeral=True)
-        except Exception:
+            # (kein followup senden -> sonst wieder 2. ephemeral)
             pass
 
 
@@ -2426,17 +2399,6 @@ class GruppensucheTest(commands.Cog):
                 return Step.PARTY
             if current_step == Step.PARTY:
                 return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
-
-        # -------- ATORAXXION --------
-        if cat == "atoraxxion":
-            if current_step == Step.DAY:
-                return Step.ATORAXXION_RUN
-            if current_step == Step.ATORAXXION_RUN:
-                return Step.PARTY
-            if current_step == Step.PARTY:
-                return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
-        # Fallback
-        return Step.START
 
     async def _goto_next(self, interaction: discord.Interaction, session: WizardSession, current_step: str):
         next_step = self._resolve_next_step(session, current_step)
