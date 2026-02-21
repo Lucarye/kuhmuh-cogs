@@ -974,6 +974,7 @@ class StartSelect(discord.ui.Select):
         self.host_view.session.day_date_iso = None
         self.host_view.session.max_players = None
         self.host_view.session.olun_tier = None
+        self.host_view.session.atoraxxion_run = None
 
         # und weiter im Flow (zentraler Router)
         await self.host_view.cog._goto_next(interaction, self.host_view.session, Step.START)
@@ -1567,9 +1568,17 @@ class AtoraxxionRunView(WizardBaseView):
 
         self._buttons: Dict[str, discord.ui.Button] = {}
 
-        # 5 Buttons, single-choice
-        for idx, (key, label) in enumerate(ATORAXXION_RUNS):
-            row = 0 if idx < 3 else 1
+        # 5 Buttons, single-choice (Layout nach Vorgabe)
+        row_map = {
+            "vahmalkea": 0,
+            "sycrakea": 0,
+            "yolunakea": 0,
+            "orzekea": 0,
+            "full": 1,        
+        }
+
+        for key, label in ATORAXXION_RUNS:
+            row = row_map.get(key, 1)
             btn = discord.ui.Button(
                 label=label,
                 style=discord.ButtonStyle.primary,
@@ -1868,25 +1877,31 @@ class ConfirmView(discord.ui.View):
             pass
 
     async def _confirm(self, interaction: discord.Interaction):
-        # ✅ ack-sicher (wichtig bei Delete -> fetch/delete kann dauern)
+        # ✅ ack-sicher (wichtig bei Close/Delete -> kann dauern)
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
+        # 1) Erst Aktion ausführen
         if self.action == "delete":
             await self.cog._delete_search(interaction, self.message_id)
-            try:
-                if interaction.message:
-                    await interaction.message.edit(content="Suche wurde gelöscht.", view=None)
-            except Exception:
-                pass
-            return
+            done_text = "Suche wurde gelöscht."
+        else:
+            await self.cog._close_search(interaction, self.message_id)
+            done_text = "Suche wurde geschlossen."
 
-        await self.cog._close_search(interaction, self.message_id)
+        # 2) Dann Confirm-Message zuverlässig aktualisieren (Buttons entfernen)
         try:
             if interaction.message:
-                await interaction.message.edit(content="Suche wurde geschlossen.", view=None)
+                await interaction.message.edit(content=done_text, view=None)
+                return
+        except Exception:
+            pass
+
+        # 3) Fallback: wenn edit fehlschlägt -> neue Ephemeral ohne Buttons
+        try:
+            await self.cog._ephemeral_notice(interaction, done_text, ephemeral=True)
         except Exception:
             pass
 
@@ -2264,13 +2279,19 @@ class GruppensucheTest(commands.Cog):
         if session.mode == "edit":
             return BackTarget.EDIT_MENU
 
-        if session.category == "spots":
+        cat = (session.category or "").lower()
+
+        # ✅ NEU: Altar/Atoraxxion -> zurück zur Kategorieauswahl
+        if cat in ("altar", "atoraxxion"):
+            return BackTarget.START
+
+        if cat == "spots":
             # Olun hat Zwischenschritt (Tier)
             if (session.spot_key or "") == "olun":
                 return BackTarget.OLUN_TIER
             return BackTarget.SPOT
 
-        if session.category == "pilafe":
+        if cat == "pilafe":
             return BackTarget.START
 
         # muhhelfer:
@@ -2320,6 +2341,13 @@ class GruppensucheTest(commands.Cog):
         if cat == "atoraxxion" and not FEATURE_ATORAXXION:
             session.category = None
             return Step.START
+
+        # -------- ALTAR --------
+        if cat == "altar":
+            if current_step == Step.DAY:
+                return Step.PARTY
+            if current_step == Step.PARTY:
+                return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
 
         # -------- START --------
         if current_step == Step.START:
@@ -3164,17 +3192,21 @@ class GruppensucheTest(commands.Cog):
             # --- Status / Listen einmalig bauen ---
             status_block = f"**Status**\n{status_line}\n\n"
 
-            part_lines = _build_user_lines(participants, data.get("participant_ap") or {})
+            part_lines = _build_user_lines(
+                participants, data.get("participant_ap") or {})
             participants_block = (
                 f"**Teilnehmer ({len(participants)}/{max_players})**\n"
-                + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
+                + ("\n".join([f"• {x}" for x in part_lines])
+                   if part_lines else "—")
                 + "\n\n"
             )
 
-            wait_lines = _build_user_lines(waitlist, data.get("waitlist_ap") or {})
+            wait_lines = _build_user_lines(
+                waitlist, data.get("waitlist_ap") or {})
             wait_block = (
                 f"**Warteschlange ({len(waitlist)})**\n"
-                + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
+                + ("\n".join([f"• {x}" for x in wait_lines])
+                   if wait_lines else "—")
             )
 
             # --- Header je nach Kategorie ---
@@ -3207,7 +3239,8 @@ class GruppensucheTest(commands.Cog):
                 )
 
             # --- Description final ---
-            e.description = header + times_block + notes_block + status_block + participants_block + wait_block
+            e.description = header + times_block + notes_block + \
+                status_block + participants_block + wait_block
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
@@ -3267,7 +3300,6 @@ class GruppensucheTest(commands.Cog):
 
         elif cat == "pilafe":
             label = "Rollen-Ping (Pila Fe)"
-
 
         for item in view.children:
             if isinstance(item, discord.ui.Button) and str(item.custom_id or "").startswith("gst:pingtype:"):
@@ -3355,7 +3387,8 @@ class GruppensucheTest(commands.Cog):
                 else:
                     ping_role_id = ROLE_OLUN_NORMAL_ID
             else:
-                ping_role_id = SPOT_PING_ROLE.get(session.spot_key or "", TEST_ROLE_ID)
+                ping_role_id = SPOT_PING_ROLE.get(
+                    session.spot_key or "", TEST_ROLE_ID)
 
         elif session.category == "atoraxxion":
             # ✅ eine gemeinsame Atoraxxion-Rolle (laut dir)
@@ -3367,7 +3400,6 @@ class GruppensucheTest(commands.Cog):
 
         else:
             ping_role_id = ROLE_PILAFE_ID
-
 
         data = {
             "guild_id": guild.id,
@@ -3394,7 +3426,7 @@ class GruppensucheTest(commands.Cog):
             "owner_ap": session.own_ap,
             "participant_ap": {str(owner_id): session.own_ap or ""},
             "waitlist_ap": {},
-            "atoraxxion_run": session.atoraxxion_run,            
+            "atoraxxion_run": session.atoraxxion_run,
         }
         # ✅ Easteregg beim Ersteller (nur wenn AP > 396)
         _ensure_easter_egg_text(data, owner_id, session.own_ap)
