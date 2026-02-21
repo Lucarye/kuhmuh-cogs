@@ -683,29 +683,51 @@ def _default_req_for(data: dict) -> str:
 
 def _normalize_atoraxxion_runs(data: dict) -> list[str]:
     """
-    Normalisiert Atoraxxion-Auswahl:
-    - bevorzugt 'atoraxxion_runs' (Liste)
-    - fallback: 'atoraxxion_run' (Single-String legacy)
-    """
-    runs = data.get("atoraxxion_runs")
+    Normalisiert die Atoraxxion-Auswahl zu Keys:
+    vahmalkea / sycrakea / yolunakea / orzekea
 
-    if isinstance(runs, list):
+    Unterstützt:
+    - neue Form:  atoraxxion_runs: list[str]
+    - legacy:     atoraxxion_run: str
+    - legacy:     "full" => kompletter Run
+    """
+    ALL_KEYS = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
+
+    raw = data.get("atoraxxion_runs")
+    if raw is None:
+        raw = data.get("atoraxxion_run")  # legacy single
+
+    # String-Fälle (legacy)
+    if isinstance(raw, str):
+        v = raw.strip().lower()
+        if not v:
+            return []
+        if v in ("full", "komplett", "complete", "all"):
+            return ALL_KEYS.copy()
+        return [v]
+
+    # Listen/Set/Tuple
+    if isinstance(raw, (list, tuple, set)):
         out: list[str] = []
-        for x in runs:
+        for x in raw:
+            if x is None:
+                continue
             s = str(x).strip().lower()
             if s:
                 out.append(s)
-        return out
 
-    legacy = str(data.get("atoraxxion_run") or "").strip().lower()
-    return [legacy] if legacy else []
+        # Wenn irgendwo "full" drin steckt -> Full Run
+        if "full" in out:
+            return ALL_KEYS.copy()
 
-    # --- Fallback: altes Feld ---
-    old = str(data.get("atoraxxion_runs") or "").lower().strip()
-    if old == "full":
-        return ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
-    if old in valid:
-        return [old]
+        # Optional: Dedupe bei Mehrfachauswahl
+        seen = set()
+        deduped: list[str] = []
+        for k in out:
+            if k not in seen:
+                seen.add(k)
+                deduped.append(k)
+        return deduped
 
     return []
 
@@ -1898,11 +1920,12 @@ class EditMenuView(WizardBaseView):
         self.add_item(size_btn)
         self.add_item(details_btn)
 
-        if post_data.get("category") == "muhhelfer":
-            bosses_btn = discord.ui.Button(
-                label="Bosse & Doppelrun bearbeiten", style=discord.ButtonStyle.secondary, row=1)
-            bosses_btn.callback = self._bosses
-            self.add_item(bosses_btn)
+        if str(post_data.get("category", "")).lower() == "atoraxxion":
+            dungeons_btn = discord.ui.Button(
+                label="Dungeons bearbeiten", style=discord.ButtonStyle.secondary, row=1
+            )
+            dungeons_btn.callback = self._atoraxxion
+            self.add_item(dungeons_btn)
 
         back_btn = discord.ui.Button(
             label="Bearbeitung beenden", style=discord.ButtonStyle.secondary, row=2)
@@ -1942,6 +1965,12 @@ class EditMenuView(WizardBaseView):
             return
         await self.cog._send_boss_select(interaction, self.session)
 
+    async def _atoraxxion(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+        await self.cog._send_atoraxxion_runs(interaction, self.session, back_target=BackTarget.EDIT_MENU)
+        
     async def _back(self, interaction: discord.Interaction):
         await interaction.response.edit_message(content="Bearbeitung beendet.", embed=None, view=None)
 
@@ -2505,7 +2534,7 @@ class GruppensucheTest(commands.Cog):
         # -------- ATORAXXION --------
         if cat == "atoraxxion":
             if current_step == Step.atoraxxion_runs:
-                return Step.DAY
+                return Step.EDIT_MENU if session.mode == "edit" else Step.DAY
             if current_step == Step.DAY:
                 return Step.PARTY
             if current_step == Step.PARTY:
@@ -3560,7 +3589,6 @@ class GruppensucheTest(commands.Cog):
             "participant_ap": {str(owner_id): session.own_ap or ""},
             "waitlist_ap": {},
             "atoraxxion_runs": list(session.atoraxxion_runs or []),
-            "atoraxxion_runs": ("full" if len(session.atoraxxion_runs or []) >= 4 else None),
         }
         # ✅ Easteregg beim Ersteller (nur wenn AP > 396)
         _ensure_easter_egg_text(data, owner_id, session.own_ap)
