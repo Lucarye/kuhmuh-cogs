@@ -3160,49 +3160,8 @@ class GruppensucheTest(commands.Cog):
 
         else:
             # pilafe / altar / atoraxxion
-            status_block = f"**Status**\n{status_line}\n\n"
 
-            # --- Teilnehmer-Liste korrekt bauen ---
-            part_lines = _build_user_lines(
-                participants, data.get("participant_ap") or {})
-            participants_block = (
-                f"**Teilnehmer ({len(participants)}/{max_players})**\n"
-                + ("\n".join([f"• {x}" for x in part_lines])
-                   if part_lines else "—")
-                + "\n\n"
-            )
-
-            # --- Warteschlange korrekt bauen ---
-            wait_lines = _build_user_lines(
-                waitlist, data.get("waitlist_ap") or {})
-            wait_block = (
-                f"**Warteschlange ({len(waitlist)})**\n"
-                + ("\n".join([f"• {x}" for x in wait_lines])
-                   if wait_lines else "—")
-            )
-
-            if cat == "altar":
-                header = (
-                    f"**Suchender:** {owner_display}\n"
-                    f"**Kategorie:** Altar des Blutes\n"
-                    f"**Max. Teilnehmer:** {max_players}\n\n"
-                )
-                e.description = header + times_block + notes_block + \
-                    status_block + participants_block + wait_block
-
-            elif cat == "atoraxxion":
-                run_key = str(data.get("atoraxxion_run") or "").lower()
-                run_label = _atoraxxion_run_label(
-                    run_key) if run_key else "—"
-
-
-                header = (
-                    f"**Suchender:** {owner_display}\n"
-                    f"**Kategorie:** Atoraxxion\n"
-                    f"**Auswahl:** {run_label}\n"
-                    f"**Max. Teilnehmer:** {max_players}\n\n"
-                )
-
+            # --- Status / Listen einmalig bauen ---
             status_block = f"**Status**\n{status_line}\n\n"
 
             part_lines = _build_user_lines(participants, data.get("participant_ap") or {})
@@ -3218,18 +3177,37 @@ class GruppensucheTest(commands.Cog):
                 + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
             )
 
-            e.description = header + times_block + notes_block + status_block + participants_block + wait_block
+            # --- Header je nach Kategorie ---
+            if cat == "altar":
+                header = (
+                    f"**Suchender:** {owner_display}\n"
+                    f"**Kategorie:** Altar des Blutes\n"
+                    f"**Max. Teilnehmer:** {max_players}\n\n"
+                )
+
+            elif cat == "atoraxxion":
+                run_key = str(data.get("atoraxxion_run") or "").lower()
+                run_label = _atoraxxion_run_label(run_key) if run_key else "—"
+
+                header = (
+                    f"**Suchender:** {owner_display}\n"
+                    f"**Kategorie:** Atoraxxion\n"
+                    f"**Auswahl:** {run_label}\n"
+                    f"**Max. Teilnehmer:** {max_players}\n\n"
+                )
 
             else:
-            amount = data.get("scroll_amount") or "—"
-            header = (
-                f"**Suchender:** {owner_display}\n"
-                f"**Kategorie:** Pila Fe Schriftrollen\n"
-                f"**Menge:** {amount}\n"
-                f"**Max. Teilnehmer:** {max_players}\n\n"
-            )
-            e.description = header + times_block + notes_block + \
-                status_block + participants_block + wait_block
+                # Pila Fe
+                amount = data.get("scroll_amount") or "—"
+                header = (
+                    f"**Suchender:** {owner_display}\n"
+                    f"**Kategorie:** Pila Fe Schriftrollen\n"
+                    f"**Menge:** {amount}\n"
+                    f"**Max. Teilnehmer:** {max_players}\n\n"
+                )
+
+            # --- Description final ---
+            e.description = header + times_block + notes_block + status_block + participants_block + wait_block
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
