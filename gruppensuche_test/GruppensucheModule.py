@@ -124,12 +124,12 @@ ATORAXXION_RUNS: List[Tuple[str, str]] = [
     ("full", "Kompletter Run"),
 ]
 
+
 def _atoraxxion_run_label(key: str) -> str:
     for k, name in ATORAXXION_RUNS:
         if k == key:
             return name
     return key
-
 
 
 def _olun_tier_label(tier: str) -> str:
@@ -684,7 +684,6 @@ class WizardSession:
 
     # Atoraxxion: 4 Einzelstufen + 1 Komplett-Run
     atoraxxion_run: Optional[str] = None  # "t1" | "t2" | "t3" | "t4" | "full"
-
 
 
 # =========================
@@ -1561,6 +1560,7 @@ class OlunTierView(WizardBaseView):
             ),
         )
 
+
 class AtoraxxionRunView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
@@ -2253,7 +2253,6 @@ class GruppensucheTest(commands.Cog):
             await self._send_atoraxxion_run(interaction, session)
             return
 
-
         # Fallback (ACK-safe)
         await self._ephemeral_notice(interaction, "Unbekannter Step.")
 
@@ -2335,7 +2334,6 @@ class GruppensucheTest(commands.Cog):
             if cat == "atoraxxion":
                 return Step.DAY
             return Step.START
-
 
         # -------- MUHHELFER --------
         if cat == "muhhelfer":
@@ -2459,7 +2457,6 @@ class GruppensucheTest(commands.Cog):
     async def _send_atoraxxion_run(self, interaction: discord.Interaction, session: WizardSession):
         view = AtoraxxionRunView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
-
 
     async def _send_final_form(self, interaction: discord.Interaction, session: WizardSession):
         defaults = {
@@ -3035,7 +3032,6 @@ class GruppensucheTest(commands.Cog):
             else:
                 title = f"{PILAFE_EMOJI} Gruppensuche – Pila Fe"
 
-
         e = discord.Embed(title=title)
 
         # Kopfblock (wie rechts)
@@ -3196,7 +3192,8 @@ class GruppensucheTest(commands.Cog):
 
             elif cat == "atoraxxion":
                     run_key = str(data.get("atoraxxion_run") or "").lower()
-                    run_label = _atoraxxion_run_label(run_key) if run_key else "—"
+                    run_label = _atoraxxion_run_label(
+                        run_key) if run_key else "—"
 
 
                 header = (
