@@ -4227,36 +4227,30 @@ class GruppensucheTest(commands.Cog):
     # =========================
 
     async def _start_edit_flow(self, interaction: discord.Interaction, message_id: int, data: dict):
-            session = WizardSession(
-                user_id=interaction.user.id,
-                guild_id=interaction.guild_id or 0,
-                mode="edit",
-                edit_message_id=message_id,
-                category=str(data.get("category")),
-                day_date_iso=str(data.get("day_date_iso")),
-                difficulty=str(data.get("difficulty")) if data.get("category") == "muhhelfer" else None,
-                boss_runs=dict(data.get("boss_runs") or {}),
-                spot_key=str(data.get("spot_key")) if data.get("category") == "spots" else None,
-                max_players=int(data.get("max_players", 2)),
-                scroll_amount=str(data.get("scroll_amount")) if data.get("category") == "pilafe" else None,
-                duration_text=data.get("duration_text"),
-                start_text=data.get("start_text"),
-                req_text=data.get("req_text"),
-                notes=data.get("notes"),
-                olun_tier=str(data.get("olun_tier")) if str(data.get("spot_key")) == "olun" else None,
-                atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
-            )
+        session = WizardSession(
+            user_id=interaction.user.id,
+            guild_id=interaction.guild_id or 0,
+            mode="edit",
+            edit_message_id=message_id,
+            category=str(data.get("category")),
+            day_date_iso=str(data.get("day_date_iso")),
+            difficulty=str(data.get("difficulty")) if data.get("category") == "muhhelfer" else None,
+            boss_runs=dict(data.get("boss_runs") or {}),
+            spot_key=str(data.get("spot_key")) if data.get("category") == "spots" else None,
+            max_players=int(data.get("max_players", 2)),
+            scroll_amount=str(data.get("scroll_amount")) if data.get("category") == "pilafe" else None,
+            duration_text=data.get("duration_text"),
+            start_text=data.get("start_text"),
+            req_text=data.get("req_text"),
+            notes=data.get("notes"),
+            olun_tier=str(data.get("olun_tier")) if str(data.get("spot_key")) == "olun" else None,
+            atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
+        )
+
         session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
 
-        # WICHTIG: Edit-Menü darf niemals den öffentlichen Post überschreiben.
-        view = EditMenuView(self, session, data)
-        await self._send_ephemeral_new(interaction, view.embed(), view)
-
-    async def _send_edit_menu(self, interaction: discord.Interaction, session: WizardSession):
-        if not session.edit_message_id:
-            await self._ephemeral_notice(interaction, "Edit-Session ungültig.", ephemeral=True)
-            return
+        await self._send_edit_menu(interaction, session)
 
         data = await self._get_search(session.edit_message_id)
         if data is None:
@@ -4603,4 +4597,3 @@ class GruppensucheTest(commands.Cog):
         )
 
         await self._send_edit_menu(interaction, session)
-
