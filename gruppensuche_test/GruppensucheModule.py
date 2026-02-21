@@ -1676,7 +1676,12 @@ class PartySizeView(WizardBaseView):
         self.add_item(PartySizeSelect(self, mn, mx, current=current))
 
         # Zurück-Ziel hängt an der Kategorie / dem Flow
-        self.add_item(build_back_button("Tag", BackTarget.DAY, self, row=1))
+        self.add_item(build_back_button(
+            "Tag" if session.category != "atoraxxion" else "Atoraxxion-Auswahl",
+            (lambda s: BackTarget.ATORAXXION_RUN if (s.category == "atoraxxion") else BackTarget.DAY),
+            self,
+            row=2,
+        ))
 
     def embed(self) -> discord.Embed:
         mn, mx = _allowed_party_range(
@@ -2193,6 +2198,9 @@ class GruppensucheTest(commands.Cog):
         if target == BackTarget.OLUN_TIER:
             await self._send_step(interaction, session, Step.OLUN_TIER)
             return
+        if target == BackTarget.ATORAXXION_RUN:
+            await self._send_step(interaction, session, Step.ATORAXXION_RUN)
+            return
 
     # =========================
     # Command (Test)
@@ -2281,13 +2289,17 @@ class GruppensucheTest(commands.Cog):
 
         cat = (session.category or "").lower()
 
-        # ✅ NEU: Altar/Atoraxxion -> zurück zur Kategorieauswahl
-        if cat in ("altar", "atoraxxion"):
+        # ✅ Atoraxxion: Tag kommt nach der Run-Auswahl -> zurück zur Run-Auswahl
+        if cat == "atoraxxion":
+            return BackTarget.ATORAXXION_RUN
+
+        # ✅ Altar: aktuell (noch) keine Zwischenstufe -> zurück zur Kategorie
+        if cat == "altar":
             return BackTarget.START
 
         if cat == "spots":
             # Olun hat Zwischenschritt (Tier)
-            if (session.spot_key or "") == "olun":
+            if (session.spot_key or "").lower() == "olun":
                 return BackTarget.OLUN_TIER
             return BackTarget.SPOT
 
@@ -2360,8 +2372,18 @@ class GruppensucheTest(commands.Cog):
             if cat == "altar":
                 return Step.DAY
             if cat == "atoraxxion":
-                return Step.DAY
+                # ✅ Atto: erst Run-Auswahl, dann Tag
+                return Step.ATORAXXION_RUN
             return Step.START
+
+        # -------- ATORAXXION --------
+        if cat == "atoraxxion":
+            if current_step == Step.ATORAXXION_RUN:
+                return Step.DAY
+            if current_step == Step.DAY:
+                return Step.PARTY
+            if current_step == Step.PARTY:
+                return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
 
         # -------- MUHHELFER --------
         if cat == "muhhelfer":
@@ -2438,13 +2460,16 @@ class GruppensucheTest(commands.Cog):
         if session.category == "pilafe":
             await self._send_day_selection(interaction, session)
             return
+        if session.category in ("altar", "atoraxxion"):
+            # ✅ beide starten über die Tag-Auswahl
+            await self._send_day_selection(interaction, session)
+            return
 
         await self._ephemeral_notice(
             interaction,
             "Ungültige Auswahl. Bitte neu starten.",
             ephemeral=True,
         )
-        # optional: direkt zurück zum Start-Menü
         await self._send_start(interaction, session)
 
     async def _send_difficulty(self, interaction: discord.Interaction, session: WizardSession):
