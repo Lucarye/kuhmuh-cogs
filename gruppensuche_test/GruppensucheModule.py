@@ -3203,33 +3203,33 @@ class GruppensucheTest(commands.Cog):
                     f"**Max. Teilnehmer:** {max_players}\n\n"
                 )
 
-                status_block = f"**Status**\n{status_line}\n\n"
+            status_block = f"**Status**\n{status_line}\n\n"
 
-                part_lines = _build_user_lines(participants, data.get("participant_ap") or {})
-                participants_block = (
-                    f"**Teilnehmer ({len(participants)}/{max_players})**\n"
-                    + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
-                    + "\n\n"
-                )
+            part_lines = _build_user_lines(participants, data.get("participant_ap") or {})
+            participants_block = (
+                f"**Teilnehmer ({len(participants)}/{max_players})**\n"
+                + ("\n".join([f"• {x}" for x in part_lines]) if part_lines else "—")
+                + "\n\n"
+            )
 
-                wait_lines = _build_user_lines(waitlist, data.get("waitlist_ap") or {})
-                wait_block = (
-                    f"**Warteschlange ({len(waitlist)})**\n"
-                    + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
-                )
+            wait_lines = _build_user_lines(waitlist, data.get("waitlist_ap") or {})
+            wait_block = (
+                f"**Warteschlange ({len(waitlist)})**\n"
+                + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
+            )
 
-                e.description = header + times_block + notes_block + status_block + participants_block + wait_block
+            e.description = header + times_block + notes_block + status_block + participants_block + wait_block
 
             else:
-                amount = data.get("scroll_amount") or "—"
-                header = (
-                    f"**Suchender:** {owner_display}\n"
-                    f"**Kategorie:** Pila Fe Schriftrollen\n"
-                    f"**Menge:** {amount}\n"
-                    f"**Max. Teilnehmer:** {max_players}\n\n"
-                )
-                e.description = header + times_block + notes_block + \
-                    status_block + participants_block + wait_block
+            amount = data.get("scroll_amount") or "—"
+            header = (
+                f"**Suchender:** {owner_display}\n"
+                f"**Kategorie:** Pila Fe Schriftrollen\n"
+                f"**Menge:** {amount}\n"
+                f"**Max. Teilnehmer:** {max_players}\n\n"
+            )
+            e.description = header + times_block + notes_block + \
+                status_block + participants_block + wait_block
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
