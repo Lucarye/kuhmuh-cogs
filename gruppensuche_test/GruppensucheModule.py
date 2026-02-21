@@ -3191,9 +3191,9 @@ class GruppensucheTest(commands.Cog):
                     status_block + participants_block + wait_block
 
             elif cat == "atoraxxion":
-                    run_key = str(data.get("atoraxxion_run") or "").lower()
-                    run_label = _atoraxxion_run_label(
-                        run_key) if run_key else "—"
+                run_key = str(data.get("atoraxxion_run") or "").lower()
+                run_label = _atoraxxion_run_label(
+                    run_key) if run_key else "—"
 
 
                 header = (
