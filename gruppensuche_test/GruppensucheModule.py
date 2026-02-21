@@ -1555,128 +1555,91 @@ class OlunTierView(WizardBaseView):
 
 
 class AtoraxxionRunView(discord.ui.View):
-    """Mehrfachauswahl für Atoraxxion (wie LoML-Bosse):
-    - 4 Dungeons togglebar
-    - „Kompletter Run“ als Shortcut (wählt alle 4 und geht direkt weiter)
-    - „Weiter“ geht nur, wenn mindestens 1 Dungeon gewählt ist
-    """
-
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, back_target: str):
-        super().__init__(timeout=None)
+    def __init__(self, cog: commands.Cog, session: WizardSession, back_target: str):
+        super().__init__(timeout=300)
         self.cog = cog
         self.session = session
-        self.back_target = back_target
-        self._toggle_buttons: dict[str, discord.ui.Button] = {}
 
-        # Row 0: vier Dungeons (Orzekea in Reihe 1/Row 0, wie gewünscht)
-        for key, label in ATORAXXION_RUNS:
+        # sicherstellen, dass wir immer eine Liste haben
+        if not isinstance(getattr(self.session, "atoraxxion_runs", None), list):
+            self.session.atoraxxion_runs = []
+
+        # Buttons für die 4 Dungeons (Row 0)
+        for idx, (key, label) in enumerate(ATORAXXION_RUNS):
+            row = 0  # alle 4 in eine Reihe
             btn = discord.ui.Button(
                 label=label,
                 style=discord.ButtonStyle.secondary,
-                row=0,
+                row=row,
             )
-            btn.callback = self._toggle_cb(key)
-            self._toggle_buttons[key] = btn
+
+            async def _toggle_cb(interaction: discord.Interaction, k=key):
+                chosen = set(self.session.atoraxxion_runs or [])
+
+                if k in chosen:
+                    chosen.remove(k)
+                else:
+                    chosen.add(k)
+
+                # wenn alle 4 gewählt → wie "Kompletter Run" behandeln (für Logik/Konsistenz)
+                all_keys = {kk for kk, _ in ATORAXXION_RUNS}
+                if chosen == all_keys:
+                    self.session.atoraxxion_runs = list(all_keys)
+                else:
+                    self.session.atoraxxion_runs = list(chosen)
+
+                await interaction.response.edit_message(view=self)
+
+            btn.callback = _toggle_cb
             self.add_item(btn)
 
-        # Row 1: Shortcut – Kompletter Run (alle 4)
+        # "Kompletter Run" als Schnellwahl (Row 1, alleine)
         full_btn = discord.ui.Button(
             label="Kompletter Run",
             style=discord.ButtonStyle.primary,
             row=1,
         )
-        full_btn.callback = self._full_run_cb
+
+        async def _full_run_cb(interaction: discord.Interaction):
+            self.session.atoraxxion_runs = [k for k, _ in ATORAXXION_RUNS]
+            await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
+
+        full_btn.callback = _full_run_cb
         self.add_item(full_btn)
 
-        # Row 2: Zurück / Weiter
-        self.add_item(BackButton(back_target, self, row=2))
-        next_btn = discord.ui.Button(label="Weiter", style=discord.ButtonStyle.success, row=2)
-        next_btn.callback = self._next_cb
-        self.add_item(next_btn)
+        # Weiter-Button (Row 1)
+        next_btn = discord.ui.Button(
+            label="Weiter",
+            style=discord.ButtonStyle.success,
+            row=1,
+        )
 
-        self._refresh_styles()
-
-    # -----------------------------
-    # UI helpers
-    # -----------------------------
-    def _selected_set(self) -> set[str]:
-        return {str(x).lower() for x in (self.session.atoraxxion_runs or []) if str(x).strip()}
-
-    def _refresh_styles(self) -> None:
-        chosen = self._selected_set()
-        for key, btn in self._toggle_buttons.items():
-            btn.style = discord.ButtonStyle.success if key in chosen else discord.ButtonStyle.secondary
-
-    # -----------------------------
-    # Callbacks
-    # -----------------------------
-    def _toggle_cb(self, key: str):
-        async def _cb(interaction: discord.Interaction):
-            if interaction.user.id != self.session.user_id:
-                await interaction.response.defer()
+        async def _next_cb(interaction: discord.Interaction):
+            chosen = set(self.session.atoraxxion_runs or [])
+            if not chosen:
+                await interaction.response.send_message(
+                    "Bitte wähle mindestens einen Dungeon aus.", ephemeral=True
+                )
                 return
 
-            key_l = str(key).lower()
-            chosen = self._selected_set()
-            if key_l in chosen:
-                chosen.remove(key_l)
-            else:
-                chosen.add(key_l)
+            # wenn alle 4 gewählt → wie kompletter Run behandeln (gleiche Datenlage)
+            all_keys = {kk for kk, _ in ATORAXXION_RUNS}
+            if chosen == all_keys:
+                self.session.atoraxxion_runs = list(all_keys)
 
-            # ✅ Persist
-            self.session.atoraxxion_runs = list(chosen)
+            await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
 
-            self._refresh_styles()
-            await interaction.response.edit_message(embed=self.embed(), view=self)
+        next_btn.callback = _next_cb
+        self.add_item(next_btn)
 
-        return _cb
+        # Zurück (Row 2) – FIX: build_back_button statt BackButton
+        self.add_item(build_back_button("Zurück", back_target, self, row=2))
 
-    async def _full_run_cb(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
-
-        # ✅ Alle 4 auswählen + direkt weiter
-        self.session.atoraxxion_runs = [k for k, _ in ATORAXXION_RUNS]
-        await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
-
-    async def _next_cb(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
-
-        if not self._selected_set():
-            # UX: gleiche Ephemeral bearbeiten, nicht neu erzeugen
-            await interaction.response.edit_message(
-                embed=self.embed(error="Bitte wähle mindestens 1 Dungeon aus."),
-                view=self,
-            )
-            return
-
-        await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
-
-    # -----------------------------
-    # Embed
-    # -----------------------------
-    def embed(self, error: Optional[str] = None) -> discord.Embed:
-        chosen = self._selected_set()
-
-        # Anzeige: wenn alle 4 -> „Kompletter Run“, sonst Liste
-        if len(chosen) >= len(ATORAXXION_RUNS):
-            chosen_label = "Kompletter Run"
-        else:
-            # preserve canonical order from ATORAXXION_RUNS
-            ordered = [lbl for k, lbl in ATORAXXION_RUNS if k in chosen]
-            chosen_label = ", ".join(ordered) if ordered else "—"
-
-        e = discord.Embed(title="🏛️ Atoraxxion – Auswahl")
-        e.description = (
-            "Wähle die Dungeons aus, die du laufen möchtest.\n\n"
-            f"**Auswahl:** {chosen_label}"
-        )
-        if error:
-            e.add_field(name="⚠️ Hinweis", value=error, inline=False)
-        return e
+    async def on_timeout(self):
+        # optional: Buttons deaktivieren, wenn du willst
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -1923,24 +1886,27 @@ class ConfirmView(discord.ui.View):
             await self.cog._ephemeral_notice(interaction, "Das kannst nur du bedienen.")
             return False
         return True
-
-    async def _safe_edit_self(self, interaction: discord.Interaction, text: str):
-        """
-        Bearbeitet IMMER die gleiche Ephemeral-Message (Confirm-Dialog) und entfernt Buttons.
-        """
+    
+    async def _safe_edit_self(self, interaction: discord.Interaction, *, content: str, view: Optional[discord.ui.View]):
+        # 1) Am zuverlässigsten: direkt die Message bearbeiten, auf der geklickt wurde
         try:
-            if interaction.response.is_done():
-                await interaction.edit_original_response(content=text, view=None)
-            else:
-                await interaction.response.edit_message(content=text, view=None)
+            if interaction.message:
+                await interaction.message.edit(content=content, view=view)
+                return
+        except Exception:
+            pass
+
+        # 2) Falls die Interaction noch nicht geantwortet hat
+        try:
+            await interaction.response.edit_message(content=content, view=view)
             return
         except Exception:
             pass
 
-        # Fallback (sollte selten nötig sein)
+        # 3) Fallback: Original response bearbeiten
         try:
-            if interaction.message:
-                await interaction.message.edit(content=text, view=None)
+            await interaction.edit_original_response(content=content, view=view)
+            return
         except Exception:
             pass
 
@@ -2343,24 +2309,23 @@ class GruppensucheTest(commands.Cog):
 
         cat = (session.category or "").lower()
 
-        # ✅ Atoraxxion: Tag kommt nach der Run-Auswahl -> zurück zur Run-Auswahl
+        # ✅ Atoraxxion: zurück zur Dungeon-Auswahl (nicht ins Hauptmenü)
         if cat == "atoraxxion":
             return BackTarget.ATORAXXION_RUN
 
-        # ✅ Altar: aktuell (noch) keine Zwischenstufe -> zurück zur Kategorie
+        # ✅ Altar: bleibt vorerst Hauptmenü (bis wir den Stufen-Step einbauen)
         if cat == "altar":
             return BackTarget.START
 
         if cat == "spots":
-            # Olun hat Zwischenschritt (Tier)
-            if (session.spot_key or "").lower() == "olun":
+            if (session.spot_key or "") == "olun":
                 return BackTarget.OLUN_TIER
             return BackTarget.SPOT
 
         if cat == "pilafe":
             return BackTarget.START
 
-        # muhhelfer:
+        # muhhelfer
         total = _sum_runs(session.boss_runs)
         prev = BackTarget.BOSSES if total >= 5 else BackTarget.DOUBLE
         return prev
@@ -3286,37 +3251,29 @@ class GruppensucheTest(commands.Cog):
                 )
 
             elif cat == "atoraxxion":
-                # ✅ Neu: Mehrfachauswahl (atoraxxion_runs). Fallback: alter Key atoraxxion_run.
-                runs = data.get("atoraxxion_runs") or []
-                if not isinstance(runs, list):
-                    runs = []
-                runs = [str(x).lower() for x in runs if str(x).strip()]
+                chosen = set(data.get("atoraxxion_runs") or [])
+                all_keys = {kk for kk, _ in ATORAXXION_RUNS}
 
-                run_key = str(data.get("atoraxxion_run") or "").lower().strip()
-                if run_key and not runs:
-                    if run_key == "full":
-                        runs = [k for k, _ in ATORAXXION_RUNS]
-                    else:
-                        runs = [run_key]
-
-                # preserve order
-                ordered = [(k, lbl) for (k, lbl) in ATORAXXION_RUNS if k in set(runs)]
-                is_full = len(ordered) >= len(ATORAXXION_RUNS)
-
-                if is_full:
-                    dungeons_block = "**Dungeons:** Kompletter Run\n" + "\n".join(
-                        [f"• **{lbl}**" for _, lbl in ATORAXXION_RUNS]
-                    ) + "\n\n"
+                is_full_run = (chosen == all_keys) and len(all_keys) == 4
+                if is_full_run:
+                    run_head = "**Auswahl:** Kompletter Run\n"
                 else:
-                    dungeons_block = "**Dungeons:**\n" + (
-                        "\n".join([f"• **{lbl}**" for _, lbl in ordered]) if ordered else "—"
-                    ) + "\n\n"
+                    run_head = "**Auswahl:**\n"
+
+                # schöner, sichtbarer Block
+                lines = []
+                for k, label in ATORAXXION_RUNS:
+                    if k in chosen:
+                        lines.append(f"• **{label}**")
+
+                run_block = run_head + (("\n".join(lines) + "\n") if lines else "—\n")
 
                 header = (
                     f"**Suchender:** {owner_display}\n"
                     f"**Kategorie:** Atoraxxion\n"
+                    f"{run_block}\n"
                     f"**Max. Teilnehmer:** {max_players}\n\n"
-                ) + dungeons_block
+                )
 
             else:
                 # Pila Fe
@@ -3329,8 +3286,7 @@ class GruppensucheTest(commands.Cog):
                 )
 
             # --- Description final ---
-            e.description = header + times_block + notes_block + \
-                status_block + participants_block + wait_block
+            e.description = header + times_block + notes_block + status_block + participants_block + wait_block
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
@@ -3383,7 +3339,7 @@ class GruppensucheTest(commands.Cog):
 
         elif cat == "altar":
             label = "Rollen-Ping (Altar)"
-            
+
         elif cat == "atoraxxion":
             label = "Rollen-Ping (Atoraxxion)"
 
