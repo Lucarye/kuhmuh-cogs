@@ -116,20 +116,50 @@ OLUN_TOTAL_AP: Dict[str, str] = {
     "dehkia2": "Total AP 1460 - 1490",
 }
 
-ATORAXXION_RUNS: List[Tuple[str, str]] = [
+ATORAXXION_DUNGEONS: List[Tuple[str, str]] = [
     ("vahmalkea", "Vahmalkea"),
     ("sycrakea", "Sycrakea"),
     ("yolunakea", "Yolunakea"),
     ("orzekea", "Orzekea"),
-    ("full", "Kompletter Run"),
 ]
 
-
-def _atoraxxion_run_label(key: str) -> str:
-    for k, name in ATORAXXION_RUNS:
-        if k == key:
+def _atoraxxion_dungeon_label(key: str) -> str:
+    k = str(key or "").lower().strip()
+    for kk, name in ATORAXXION_DUNGEONS:
+        if kk == k:
             return name
     return key
+
+def _atoraxxion_selected_keys(data: dict) -> list[str]:
+    """
+    Unterstützt beide Felder:
+    - Neu: data["atoraxxion_runs"] = ["vahmalkea", ...]
+    - Alt: data["atoraxxion_run"] = "complete_run" | "vahmalkea" | ...
+    Regeln:
+    - complete_run => alle 4
+    - sonst => 1 oder mehrere, je nachdem was vorhanden ist
+    """
+    runs = data.get("atoraxxion_runs")
+    if isinstance(runs, list) and runs:
+        out: list[str] = []
+        for x in runs:
+            k = str(x or "").lower().strip()
+            if k and k not in out:
+                out.append(k)
+        # Reihenfolge fixieren wie definiert
+        order = [k for k, _ in ATORAXXION_DUNGEONS]
+        out.sort(key=lambda z: order.index(z) if z in order else 999)
+        # Wenn alle 4 gewählt -> wie kompletter Run behandeln
+        if len(out) >= 4:
+            return [k for k, _ in ATORAXXION_DUNGEONS]
+        return out
+
+    rk = str(data.get("atoraxxion_run") or "").lower().strip()
+    if rk == "complete_run":
+        return [k for k, _ in ATORAXXION_DUNGEONS]
+    if rk:
+        return [rk]
+    return []
 
 
 def _olun_tier_label(tier: str) -> str:
@@ -273,7 +303,7 @@ class BackTarget:
     DAY = "day"
     EDIT_MENU = "edit_menu"
     OLUN_TIER = "olun_tier"
-    ATORAXXION_RUN = "atoraxxion_run"
+    atoraxxion_runs = "atoraxxion_runs"
 
 
 class Step:
@@ -287,7 +317,7 @@ class Step:
     DETAILS = "details"
     EDIT_MENU = "edit_menu"
     OLUN_TIER = "olun_tier"
-    ATORAXXION_RUN = "atoraxxion_run"
+    atoraxxion_runs = "atoraxxion_runs"
 
 
 def _now_utc() -> dt.datetime:
@@ -651,6 +681,31 @@ def _default_req_for(data: dict) -> str:
 
     return ""
 
+def _normalize_atoraxxion_runs(data: dict) -> list[str]:
+    """
+    Vereinheitlicht Atoraxxion-Auswahl:
+    - neu: data["atoraxxion_runs"] = ["vahmalkea", ...]
+    - alt: data["atoraxxion_runs"] = "full" | "vahmalkea" | ...
+    """
+    valid = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
+
+    runs = data.get("atoraxxion_runs")
+    if isinstance(runs, list):
+        cleaned = []
+        for x in runs:
+            k = str(x).lower().strip()
+            if k in valid and k not in cleaned:
+                cleaned.append(k)
+        return cleaned
+
+    # --- Fallback: altes Feld ---
+    old = str(data.get("atoraxxion_runs") or "").lower().strip()
+    if old == "full":
+        return ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
+    if old in valid:
+        return [old]
+
+    return []
 
 # =========================
 # Session
@@ -1675,7 +1730,7 @@ class AtoraxxionRunView(WizardBaseView):
 
         self.session.atoraxxion_runs = list(self._all_keys)
         self._refresh_styles()
-        await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
+        await self.cog._goto_next(interaction, self.session, Step.atoraxxion_runs)
 
     async def _next(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -1693,7 +1748,7 @@ class AtoraxxionRunView(WizardBaseView):
         else:
             self.session.atoraxxion_runs = list(chosen)
 
-        await self.cog._goto_next(interaction, self.session, Step.ATORAXXION_RUN)
+        await self.cog._goto_next(interaction, self.session, Step.atoraxxion_runs)
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -2268,8 +2323,8 @@ class GruppensucheTest(commands.Cog):
         if target == BackTarget.OLUN_TIER:
             await self._send_step(interaction, session, Step.OLUN_TIER)
             return
-        if target == BackTarget.ATORAXXION_RUN:
-            await self._send_step(interaction, session, Step.ATORAXXION_RUN)
+        if target == BackTarget.atoraxxion_runs:
+            await self._send_step(interaction, session, Step.atoraxxion_runs)
             return
 
     # =========================
@@ -2342,8 +2397,8 @@ class GruppensucheTest(commands.Cog):
             await self._send_edit_menu(interaction, session)
             return
 
-        if step == Step.ATORAXXION_RUN:
-            await self._send_atoraxxion_run(interaction, session)
+        if step == Step.atoraxxion_runs:
+            await self._send_atoraxxion_runs(interaction, session)
             return
 
         # Fallback (ACK-safe)
@@ -2361,7 +2416,7 @@ class GruppensucheTest(commands.Cog):
 
         # ✅ Atoraxxion: zurück zur Dungeon-Auswahl (nicht ins Hauptmenü)
         if cat == "atoraxxion":
-            return BackTarget.ATORAXXION_RUN
+            return BackTarget.atoraxxion_runs
 
         # ✅ Altar: bleibt vorerst Hauptmenü (bis wir den Stufen-Step einbauen)
         if cat == "altar":
@@ -2442,12 +2497,12 @@ class GruppensucheTest(commands.Cog):
                 return Step.DAY
             if cat == "atoraxxion":
                 # ✅ Atto: erst Run-Auswahl, dann Tag
-                return Step.ATORAXXION_RUN
+                return Step.atoraxxion_runs
             return Step.START
 
         # -------- ATORAXXION --------
         if cat == "atoraxxion":
-            if current_step == Step.ATORAXXION_RUN:
+            if current_step == Step.atoraxxion_runs:
                 return Step.DAY
             if current_step == Step.DAY:
                 return Step.PARTY
@@ -2565,7 +2620,7 @@ class GruppensucheTest(commands.Cog):
         view = PartySizeView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
-    async def _send_atoraxxion_run(self, interaction: discord.Interaction, session: WizardSession):
+    async def _send_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession):
         view = AtoraxxionRunView(self, session, back_target=BackTarget.START)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
@@ -3301,31 +3356,56 @@ class GruppensucheTest(commands.Cog):
                 )
 
             elif cat == "atoraxxion":
-                chosen = set(data.get("atoraxxion_runs") or [])
-                all_keys = {kk for kk, _ in ATORAXXION_RUNS}
-
-                is_full_run = (chosen == all_keys) and len(all_keys) == 4
-                if is_full_run:
-                    run_head = "**Auswahl:** Kompletter Run\n"
-                else:
-                    run_head = "**Auswahl:**\n"
-
-                # schöner, sichtbarer Block
-                lines = []
-                for k, label in ATORAXXION_RUNS:
-                    if k in chosen:
-                        lines.append(f"• **{label}**")
-
-                run_block = run_head + \
-                    (("\n".join(lines) + "\n") if lines else "—\n")
+                runs = _normalize_atoraxxion_runs(data)
 
                 header = (
                     f"**Suchender:** {owner_display}\n"
                     f"**Kategorie:** Atoraxxion\n"
-                    f"{run_block}\n"
                     f"**Max. Teilnehmer:** {max_players}\n\n"
                 )
 
+                all_keys = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
+
+                dungeon_map = {
+                    "vahmalkea": "Vahmalkea",
+                    "sycrakea": "Sycrakea",
+                    "yolunakea": "Yolunakea",
+                    "orzekea": "Orzekea",
+                }
+
+                if set(runs) == all_keys:
+                    selection_block = (
+                        "**Auswahl:** Kompletter Run\n\n"
+                        "**Dungeons:**\n"
+                        "• **Vahmalkea**\n"
+                        "• **Sycrakea**\n"
+                        "• **Yolunakea**\n"
+                        "• **Orzekea**\n\n"
+                    )
+                elif runs:
+                    # Reihenfolge sauber halten wie die 4 „Hauptdungeons“
+                    ordered = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
+                    picked = [k for k in ordered if k in set(runs)]
+                    lines = "\n".join([f"• **{dungeon_map.get(k, k)}**" for k in picked])
+
+                    selection_block = (
+                        "**Auswahl:** Teil-Run\n\n"
+                        "**Dungeons:**\n"
+                        f"{lines}\n\n"
+                    )
+                else:
+                    selection_block = "**Auswahl:** —\n\n"
+
+                e.description = (
+                    header
+                    + selection_block
+                    + times_block
+                    + notes_block
+                    + status_block
+                    + participants_block
+                    + wait_block
+                )
+                
             else:
                 # Pila Fe
                 amount = data.get("scroll_amount") or "—"
@@ -3335,11 +3415,7 @@ class GruppensucheTest(commands.Cog):
                     f"**Menge:** {amount}\n"
                     f"**Max. Teilnehmer:** {max_players}\n\n"
                 )
-
-            # --- Description final ---
-            e.description = header + times_block + notes_block + \
-                status_block + participants_block + wait_block
-
+                e.description = header + times_block + notes_block + status_block + participants_block + wait_block
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
         return e
@@ -3524,7 +3600,7 @@ class GruppensucheTest(commands.Cog):
             "participant_ap": {str(owner_id): session.own_ap or ""},
             "waitlist_ap": {},
             "atoraxxion_runs": list(session.atoraxxion_runs or []),
-            "atoraxxion_run": ("full" if len(session.atoraxxion_runs or []) >= 4 else None),
+            "atoraxxion_runs": ("full" if len(session.atoraxxion_runs or []) >= 4 else None),
         }
         # ✅ Easteregg beim Ersteller (nur wenn AP > 396)
         _ensure_easter_egg_text(data, owner_id, session.own_ap)
