@@ -3405,7 +3405,7 @@ class GruppensucheTest(commands.Cog):
                     + participants_block
                     + wait_block
                 )
-                
+
             else:
                 # Pila Fe
                 amount = data.get("scroll_amount") or "—"
@@ -3450,29 +3450,30 @@ class GruppensucheTest(commands.Cog):
 
     async def _apply_dynamic_button_labels(self, view: discord.ui.View, data: dict):
         label = "Rollen-Ping"
-        cat = str(data.get("category", ""))
+        cat = str(data.get("category", "")).lower()
 
         if cat == "muhhelfer":
-            diff = str(data.get("difficulty", "normal"))
+            diff = str(data.get("difficulty", "normal")).lower()
             label = f"Rollen-Ping ({'Schwer' if diff == 'schwer' else 'Normal'})"
+
         elif cat == "spots":
-            spot = str(data.get("spot_key", ""))
+            spot = str(data.get("spot_key", "")).lower()
             if spot == "olun":
-                tier = str(data.get("olun_tier", "normal"))
-                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1",
-                              "dehkia2": "Dehkia2"}.get(tier, tier)
+                tier = str(data.get("olun_tier", "normal")).lower()
+                tier_label = {"normal": "Normal", "dehkia1": "Dehkia1", "dehkia2": "Dehkia2"}.get(tier, tier)
                 label = f"Rollen-Ping (Olun {tier_label})"
             else:
                 label = f"Rollen-Ping ({_spot_name(spot)})" if spot else "Rollen-Ping"
 
-        elif cat == "altar":
-            label = "Rollen-Ping (Altar)"
+        elif cat == "pilafe":
+            label = "Rollen-Ping (Pila Fe)"
 
+        # ✅ NEU: kurze, feste Labels (wie gewünscht)
         elif cat == "atoraxxion":
             label = "Rollen-Ping (Atoraxxion)"
 
-        elif cat == "pilafe":
-            label = "Rollen-Ping (Pila Fe)"
+        elif cat == "altar":
+            label = "Rollen-Ping (Altar)"
 
         for item in view.children:
             if isinstance(item, discord.ui.Button) and str(item.custom_id or "").startswith("gst:pingtype:"):
