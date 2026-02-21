@@ -1754,7 +1754,14 @@ class AtoraxxionRunView(WizardBaseView):
 
         self.session.atoraxxion_runs = list(self._all_keys)
         self._refresh_styles()
+
+        # ✅ EDIT: direkt speichern
+        if self.session.mode == "edit":
+            await self.cog._apply_edit_atoraxxion_runs(interaction, self.session)
+            return
+
         await self.cog._goto_next(interaction, self.session, Step.atoraxxion_runs)
+
 
     async def _next(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -1771,6 +1778,11 @@ class AtoraxxionRunView(WizardBaseView):
             self.session.atoraxxion_runs = list(self._all_keys)
         else:
             self.session.atoraxxion_runs = list(chosen)
+
+        # ✅ EDIT: direkt speichern
+        if self.session.mode == "edit":
+            await self.cog._apply_edit_atoraxxion_runs(interaction, self.session)
+            return
 
         await self.cog._goto_next(interaction, self.session, Step.atoraxxion_runs)
 
@@ -1970,7 +1982,7 @@ class EditMenuView(WizardBaseView):
             await interaction.response.defer()
             return
         await self.cog._send_atoraxxion_runs(interaction, self.session, back_target=BackTarget.EDIT_MENU)
-        
+
     async def _back(self, interaction: discord.Interaction):
         await interaction.response.edit_message(content="Bearbeitung beendet.", embed=None, view=None)
 
@@ -2651,8 +2663,8 @@ class GruppensucheTest(commands.Cog):
         view = PartySizeView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
-    async def _send_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession):
-        view = AtoraxxionRunView(self, session, back_target=BackTarget.START)
+    async def _send_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession, back_target: str = BackTarget.START):
+        view = AtoraxxionRunView(self, session, back_target=back_target)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _send_final_form(self, interaction: discord.Interaction, session: WizardSession):
@@ -4215,28 +4227,25 @@ class GruppensucheTest(commands.Cog):
     # =========================
 
     async def _start_edit_flow(self, interaction: discord.Interaction, message_id: int, data: dict):
-        session = WizardSession(
-            user_id=interaction.user.id,
-            guild_id=interaction.guild_id or 0,
-            mode="edit",
-            edit_message_id=message_id,
-            category=str(data.get("category")),
-            day_date_iso=str(data.get("day_date_iso")),
-            difficulty=str(data.get("difficulty")) if data.get(
-                "category") == "muhhelfer" else None,
-            boss_runs=dict(data.get("boss_runs") or {}),
-            spot_key=str(data.get("spot_key")) if data.get(
-                "category") == "spots" else None,
-            max_players=int(data.get("max_players", 2)),
-            scroll_amount=str(data.get("scroll_amount")) if data.get(
-                "category") == "pilafe" else None,
-            duration_text=data.get("duration_text"),
-            start_text=data.get("start_text"),
-            req_text=data.get("req_text"),
-            notes=data.get("notes"),
-            olun_tier=str(data.get("olun_tier")) if str(
-                data.get("spot_key")) == "olun" else None,
-        )
+            session = WizardSession(
+                user_id=interaction.user.id,
+                guild_id=interaction.guild_id or 0,
+                mode="edit",
+                edit_message_id=message_id,
+                category=str(data.get("category")),
+                day_date_iso=str(data.get("day_date_iso")),
+                difficulty=str(data.get("difficulty")) if data.get("category") == "muhhelfer" else None,
+                boss_runs=dict(data.get("boss_runs") or {}),
+                spot_key=str(data.get("spot_key")) if data.get("category") == "spots" else None,
+                max_players=int(data.get("max_players", 2)),
+                scroll_amount=str(data.get("scroll_amount")) if data.get("category") == "pilafe" else None,
+                duration_text=data.get("duration_text"),
+                start_text=data.get("start_text"),
+                req_text=data.get("req_text"),
+                notes=data.get("notes"),
+                olun_tier=str(data.get("olun_tier")) if str(data.get("spot_key")) == "olun" else None,
+                atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
+            )
         session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
 
@@ -4536,6 +4545,61 @@ class GruppensucheTest(commands.Cog):
             data,
             changes=[{"key": "bosses", "label": "Bosse",
                       "old": old_bosses, "new": new_bosses}],
+        )
+
+        await self._send_edit_menu(interaction, session)
+
+    async def _apply_edit_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession):
+        if not session.edit_message_id:
+            return
+
+        data = await self._get_search(session.edit_message_id)
+        if data is None:
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+            return
+
+        if str(data.get("category", "")).lower() != "atoraxxion":
+            await self._ephemeral_notice(interaction, "Dungeon-Bearbeitung ist nur für Atoraxxion.", ephemeral=True)
+            return
+
+        # alte / neue Auswahl normalisieren
+        old_runs = _normalize_atoraxxion_runs(data)
+        new_runs = list(session.atoraxxion_runs or [])
+
+        # nur erlaubte Keys + stabile Reihenfolge
+        allowed_order = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
+        new_runs = [k for k in allowed_order if k in {str(x).lower().strip() for x in new_runs}]
+
+        # wenn nichts gewählt -> Fehlermeldung
+        if not new_runs:
+            await self._ephemeral_notice(interaction, "Bitte wähle mindestens einen Dungeon aus.", ephemeral=True)
+            return
+
+        data["atoraxxion_runs"] = new_runs
+        data["updated_at"] = int(_now_local().timestamp())
+
+        await self._save_refresh_dispatch(data)
+
+        def _fmt(keys: list[str]) -> str:
+            if set(keys) == set(allowed_order):
+                return "Kompletter Run"
+            m = {
+                "vahmalkea": "Vahmalkea",
+                "sycrakea": "Sycrakea",
+                "yolunakea": "Yolunakea",
+                "orzekea": "Orzekea",
+            }
+            return ", ".join(m.get(k, k) for k in keys) if keys else "—"
+
+        self._schedule_edit_notify(
+            int(session.edit_message_id),
+            data,
+            changes=[{
+                "key": "atoraxxion_runs",
+                "label": "Atoraxxion Auswahl",
+                "old": _fmt(old_runs),
+                "new": _fmt(new_runs),
+            }],
         )
 
         await self._send_edit_menu(interaction, session)
