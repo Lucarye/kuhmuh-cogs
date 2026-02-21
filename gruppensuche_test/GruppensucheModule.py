@@ -683,20 +683,22 @@ def _default_req_for(data: dict) -> str:
 
 def _normalize_atoraxxion_runs(data: dict) -> list[str]:
     """
-    Vereinheitlicht Atoraxxion-Auswahl:
-    - neu: data["atoraxxion_runs"] = ["vahmalkea", ...]
-    - alt: data["atoraxxion_runs"] = "full" | "vahmalkea" | ...
+    Normalisiert Atoraxxion-Auswahl:
+    - bevorzugt 'atoraxxion_runs' (Liste)
+    - fallback: 'atoraxxion_run' (Single-String legacy)
     """
-    valid = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
-
     runs = data.get("atoraxxion_runs")
+
     if isinstance(runs, list):
-        cleaned = []
+        out: list[str] = []
         for x in runs:
-            k = str(x).lower().strip()
-            if k in valid and k not in cleaned:
-                cleaned.append(k)
-        return cleaned
+            s = str(x).strip().lower()
+            if s:
+                out.append(s)
+        return out
+
+    legacy = str(data.get("atoraxxion_run") or "").strip().lower()
+    return [legacy] if legacy else []
 
     # --- Fallback: altes Feld ---
     old = str(data.get("atoraxxion_runs") or "").lower().strip()
@@ -3110,7 +3112,6 @@ class GruppensucheTest(commands.Cog):
         owner_id = int(data.get("owner_id", 0))
         owner = guild.get_member(owner_id)
 
-        # --- Day / time / notes ---
         day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
         try:
             day_d = dt.date.fromisoformat(day_iso)
@@ -3118,6 +3119,19 @@ class GruppensucheTest(commands.Cog):
         except Exception:
             day_str = str(day_iso)
 
+        max_players = int(data.get("max_players", 2))
+        participants: List[int] = list(data.get("participants") or [])
+        waitlist: List[int] = list(data.get("waitlist") or [])
+
+        is_closed = bool(data.get("is_closed", False))
+        is_full = len(participants) >= max_players
+
+        if is_closed:
+            status_line = "🔴 Geschlossen"
+        else:
+            status_line = "🔴 Voll" if is_full else "🟢 Offen"
+
+        # Times / Notes (zentral)
         duration_text = data.get("duration_text") or "—"
         start_text = data.get("start_text") or "—"
         notes = data.get("notes") or "—"
@@ -3129,17 +3143,9 @@ class GruppensucheTest(commands.Cog):
         )
         notes_block = f"**Notiz:** {notes}\n\n"
 
-        # --- Participants / status ---
-        max_players = int(data.get("max_players", 2))
-        participants: List[int] = list(data.get("participants") or [])
-        waitlist: List[int] = list(data.get("waitlist") or [])
+        req_text = data.get("req_text") or ""
 
-        is_closed = bool(data.get("is_closed", False))
-        is_full = len(participants) >= max_players
-        status_line = "🔴 Geschlossen" if is_closed else ("🔴 Voll" if is_full else "🟢 Offen")
-        status_block = f"**Status**\n{status_line}\n\n"
-
-        # --- Easter Eggs / AP formatting ---
+        # Easter Egg Map (optional)
         egg_map = data.get("easter_egg_texts")
         if not isinstance(egg_map, dict):
             egg_map = {}
@@ -3149,14 +3155,22 @@ class GruppensucheTest(commands.Cog):
             return txt or None
 
         def _build_user_lines(user_ids: list[int], ap_dict: dict) -> list[str]:
-            lines: list[str] = []
+            lines_out: list[str] = []
             for uid in user_ids:
                 uid_int = int(uid)
                 m = guild.get_member(uid_int)
                 mention = (m.mention if m else f"<@{uid_int}>")
                 ap = ap_dict.get(str(uid_int))
-                lines.append(_fmt_player_with_ap_and_egg(mention, ap, _egg_for(uid_int)))
-            return lines
+                lines_out.append(_fmt_player_with_ap_and_egg(mention, ap, _egg_for(uid_int)))
+            return lines_out
+
+        # Kopfblock: Suchender (ohne Easter Egg)
+        owner_txt = owner.mention if owner else f"<@{owner_id}>"
+        owner_ap = data.get("owner_ap")
+        owner_display = _fmt_player_with_ap(owner_txt, owner_ap)
+
+        # Gemeinsame Blöcke (zentral, für alle Kategorien gleich)
+        status_block = f"**Status**\n{status_line}\n\n"
 
         part_lines = _build_user_lines(participants, data.get("participant_ap") or {})
         participants_block = (
@@ -3171,17 +3185,13 @@ class GruppensucheTest(commands.Cog):
             + ("\n".join([f"• {x}" for x in wait_lines]) if wait_lines else "—")
         )
 
-        # --- Title / owner header ---
-        owner_txt = owner.mention if owner else f"<@{owner_id}>"
-        owner_ap = data.get("owner_ap")
-        owner_display = _fmt_player_with_ap(owner_txt, owner_ap)
-
+        # Titel
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal")).lower()
             diff_label = "Schwer" if diff == "schwer" else "Normal"
             title = f"{MUHKUH_EMOJI} Gruppensuche – Muhhelfer ({diff_label})"
         elif cat == "spots":
-            spot = str(data.get("spot_key", "")).lower()
+            spot = str(data.get("spot_key", ""))
             if spot == "olun":
                 tier = str(data.get("olun_tier", "normal"))
                 tier_label = _olun_tier_label(tier)
@@ -3196,21 +3206,17 @@ class GruppensucheTest(commands.Cog):
                 else:
                     emoji = CHEER_EMOJI
                 title = f"{emoji} Gruppensuche – {_spot_name(spot)}"
-        elif cat == "altar":
-            title = "🩸 Gruppensuche – Altar des Blutes"
-        elif cat == "atoraxxion":
-            title = "🏛️ Gruppensuche – Atoraxxion"
         else:
-            title = f"{PILAFE_EMOJI} Gruppensuche – Pila Fe"
+            if cat == "altar":
+                title = "🩸 Gruppensuche – Altar des Blutes"
+            elif cat == "atoraxxion":
+                title = "🏛️ Gruppensuche – Atoraxxion"
+            else:
+                title = f"{PILAFE_EMOJI} Gruppensuche – Pila Fe"
 
         e = discord.Embed(title=title)
 
-        # --- Category specific blocks ---
-        req_text = data.get("req_text") or ""
-
-        header = ""
-        extra_block = ""
-
+        # Kategorie-spezifische Description (JEWEILS genau einmal setzen)
         if cat == "muhhelfer":
             diff = str(data.get("difficulty", "normal")).lower()
             diff_label = "Schwer" if diff == "schwer" else "Normal"
@@ -3227,7 +3233,7 @@ class GruppensucheTest(commands.Cog):
             )
 
             boss_runs = data.get("boss_runs") or {}
-            boss_lines: list[str] = []
+            boss_lines = []
             has_double = False
             for key, runs in boss_runs.items():
                 name = _boss_name(str(key))
@@ -3241,10 +3247,18 @@ class GruppensucheTest(commands.Cog):
             if has_double:
                 bosses_block += "⚠️ **2. Charakter erforderlich**\n\n"
 
-            extra_block = bosses_block
+            e.description = (
+                header
+                + bosses_block
+                + times_block
+                + notes_block
+                + status_block
+                + participants_block
+                + wait_block
+            )
 
         elif cat == "spots":
-            spot = str(data.get("spot_key", "")).lower()
+            spot = str(data.get("spot_key", ""))
             if spot == "olun":
                 tier = str(data.get("olun_tier", "normal")).lower()
                 req_default = OLUN_REQ.get(tier, "")
@@ -3259,27 +3273,46 @@ class GruppensucheTest(commands.Cog):
                 f"**Max. Teilnehmer:** {max_players}\n\n"
             )
 
+            spot_block = ""
             if spot == "olun":
                 tier = str(data.get("olun_tier", "normal")).lower()
                 tier_label = _olun_tier_label(tier)
-                extra_block = (
+                spot_block += (
                     f"**Spot:** Olun\n"
                     f"**Stufe:** {tier_label}\n"
                     f"{OLUN_TOTAL_AP.get(tier, '')}\n\n"
                 )
             else:
                 total_ap = SPOT_TOTAL_AP.get(spot, "")
-                extra_block = f"**Spot:** {_spot_name(spot)}\n"
                 if total_ap:
-                    extra_block += f"{total_ap}\n\n"
+                    spot_block += f"**Spot:** {_spot_name(spot)}\n{total_ap}\n\n"
                 else:
-                    extra_block += "\n"
+                    spot_block += f"**Spot:** {_spot_name(spot)}\n\n"
+
+            e.description = (
+                header
+                + spot_block
+                + times_block
+                + notes_block
+                + status_block
+                + participants_block
+                + wait_block
+            )
 
         elif cat == "altar":
             header = (
                 f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Altar des Blutes\n"
                 f"**Max. Teilnehmer:** {max_players}\n\n"
+            )
+
+            e.description = (
+                header
+                + times_block
+                + notes_block
+                + status_block
+                + participants_block
+                + wait_block
             )
 
         elif cat == "atoraxxion":
@@ -3293,7 +3326,7 @@ class GruppensucheTest(commands.Cog):
 
             all_keys = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
             if set(runs) == all_keys:
-                extra_block = (
+                selection_block = (
                     "**Auswahl:** Kompletter Run\n\n"
                     "**Dungeons:**\n"
                     "• Vahmalkea\n"
@@ -3308,10 +3341,20 @@ class GruppensucheTest(commands.Cog):
                     "yolunakea": "Yolunakea",
                     "orzekea": "Orzekea",
                 }
-                lines = "\n".join([f"• {dungeon_map.get(k, k)}" for k in runs])
-                extra_block = f"**Auswahl:** Teil-Run\n\n**Dungeons:**\n{lines}\n\n"
+                lines_sel = "\n".join([f"• {dungeon_map.get(k, k)}" for k in runs])
+                selection_block = f"**Auswahl:** Teil-Run\n\n**Dungeons:**\n{lines_sel}\n\n"
             else:
-                extra_block = "**Auswahl:** —\n\n"
+                selection_block = "**Auswahl:** —\n\n"
+
+            e.description = (
+                header
+                + selection_block
+                + times_block
+                + notes_block
+                + status_block
+                + participants_block
+                + wait_block
+            )
 
         else:
             # Pila Fe
@@ -3323,8 +3366,14 @@ class GruppensucheTest(commands.Cog):
                 f"**Max. Teilnehmer:** {max_players}\n\n"
             )
 
-        # --- Description final (single source of truth) ---
-        e.description = header + extra_block + times_block + notes_block + status_block + participants_block + wait_block
+            e.description = (
+                header
+                + times_block
+                + notes_block
+                + status_block
+                + participants_block
+                + wait_block
+            )
 
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
