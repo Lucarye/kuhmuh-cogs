@@ -2688,44 +2688,20 @@ class GruppensucheTest(commands.Cog):
         view = OlunTierView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
-    async def _edit_or_send_ephemeral(
-        self,
-        interaction: discord.Interaction,
-        embed: discord.Embed,
-        view: discord.ui.View,
-    ):
-        """
-        Ephemeral-Wizard: immer dieselbe Ephemeral updaten (kein neues Followup),
-        indem wir bei Component-Interactions nach einem defer/ack über
-        interaction.edit_original_response(...) gehen (statt interaction.message.edit()).
-        """
-        try:
-            # 1) Component-Interaktionen haben typischerweise eine Message (auch ephemeral).
-            #    Dann bearbeiten wir IMMER diese bestehende Nachricht.
-            if interaction.message is not None:
-                # Wenn noch nicht geantwortet: response.edit_message ist der saubere Weg.
-                if not interaction.response.is_done():
-                    await interaction.response.edit_message(embed=embed, view=view)
-                else:
-                    # ✅ WICHTIG:
-                    # Bei Followup-Ephemerals (z.B. Edit-Flow via _send_ephemeral_new)
-                    # ist die "original response" NICHT die sichtbare Message.
-                    # Daher: die konkrete Message editieren.
-                    await interaction.message.edit(embed=embed, view=view)
-                return
+    async def _edit_or_send_ephemeral(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
+        msg = getattr(interaction, "message", None)
 
-            # 2) Kein Message-Kontext (z.B. Slash-Command first response, Modal submit ohne Message):
-            #    Dann über ack-sicheren Sender (response vs followup).
-            await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
+        # Wenn die Interaction von einem öffentlichen Post kommt: NICHT editieren!
+        if msg is not None and not getattr(msg.flags, "ephemeral", False):
+            await self._send_ephemeral_new(interaction, embed, view)
             return
 
-        except Exception:
-            # Letzter Fallback: Wenn selbst edit_original_response scheitert,
-            # senden wir notfalls eine neue Ephemeral (sollte dann aber selten sein).
-            try:
-                await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
-            except Exception:
-                return
+        # Normalfall: wir sind im Wizard-Ephemeral und editieren sauber weiter
+        try:
+            await interaction.response.edit_message(embed=embed, view=view)
+        except discord.InteractionResponded:
+            # Falls bereits responded wurde (selten, aber möglich), dann followup neu senden
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     async def _ephemeral_notice(
         self,
@@ -2765,11 +2741,10 @@ class GruppensucheTest(commands.Cog):
             pass
 
     async def _send_ephemeral_new(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
-        # Sendet IMMER eine neue ephemeral Nachricht (niemals edit_message auf einem öffentlichen Post).
         try:
-            await self._ephemeral_notice(interaction, embed=embed, view=view, ephemeral=True)
-        except Exception:
-            pass
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        except discord.InteractionResponded:
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     async def _ping_participants(self, interaction: discord.Interaction, message_id: int, data: dict):
         # ✅ ack-sicher (wie _ping_type/_ping_wait)
@@ -4251,6 +4226,11 @@ class GruppensucheTest(commands.Cog):
         self._sessions[interaction.user.id] = session
 
         await self._send_edit_menu(interaction, session)
+
+    async def _send_edit_menu(self, interaction: discord.Interaction, session: WizardSession):
+        if not session.edit_message_id:
+            await self._ephemeral_notice(interaction, "Edit-Session ungültig.", ephemeral=True)
+            return
 
         data = await self._get_search(session.edit_message_id)
         if data is None:
