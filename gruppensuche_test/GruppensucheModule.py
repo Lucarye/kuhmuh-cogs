@@ -4255,16 +4255,20 @@ class GruppensucheTest(commands.Cog):
             edit_message_id=message_id,
             category=str(data.get("category")),
             day_date_iso=str(data.get("day_date_iso")),
-            difficulty=str(data.get("difficulty")) if data.get("category") == "muhhelfer" else None,
+            difficulty=str(data.get("difficulty")) if data.get(
+                "category") == "muhhelfer" else None,
             boss_runs=dict(data.get("boss_runs") or {}),
-            spot_key=str(data.get("spot_key")) if data.get("category") == "spots" else None,
+            spot_key=str(data.get("spot_key")) if data.get(
+                "category") == "spots" else None,
             max_players=int(data.get("max_players", 2)),
-            scroll_amount=str(data.get("scroll_amount")) if data.get("category") == "pilafe" else None,
+            scroll_amount=str(data.get("scroll_amount")) if data.get(
+                "category") == "pilafe" else None,
             duration_text=data.get("duration_text"),
             start_text=data.get("start_text"),
             req_text=data.get("req_text"),
             notes=data.get("notes"),
-            olun_tier=str(data.get("olun_tier")) if str(data.get("spot_key")) == "olun" else None,
+            olun_tier=str(data.get("olun_tier")) if str(
+                data.get("spot_key")) == "olun" else None,
             atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
         )
 
@@ -4533,7 +4537,8 @@ class GruppensucheTest(commands.Cog):
 
         # ✅ Kategorieabhängiges Label für req
         if old_req != data.get("req_text"):
-            req_label = "Gewünschte AP" if cat in ("atoraxxion", "altar") else "Anforderung AK/VK"
+            req_label = "Gewünschte AP" if cat in (
+                "atoraxxion", "altar") else "Anforderung AK/VK"
             changes.append({
                 "key": "req",
                 "label": req_label,
@@ -4608,12 +4613,15 @@ class GruppensucheTest(commands.Cog):
 
         await self._send_edit_menu(interaction, session)
 
-        async def _apply_edit_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession):
-            # ACK sichern (verhindert "Interaktion fehlgeschlagen")
-            try:
-                await interaction.response.defer(ephemeral=True)
-            except discord.InteractionResponded:
-                pass
+    async def _apply_edit_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession):
+        # ACK sichern (verhindert "Interaktion fehlgeschlagen")
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        if not session.edit_message_id:
+            return
 
         data = await self._get_search(session.edit_message_id)
         if data is None:
