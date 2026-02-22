@@ -854,9 +854,21 @@ class DetailsModal(discord.ui.Modal):
             if existing_req:
                 req_default_value = existing_req
 
+        cat = (session.category or "").lower()
+
+        # Standard (muhhelfer/spots): AK/VK
+        req_label = "Gewünschte AK/VK (optional)"
+        req_placeholder = f"Empfohlen: {current_req}" if current_req else "z.B. 370+ AP / 440+ VK"
+
+        # ✅ Atoraxxion/Altar: gewünschte AP
+        if cat in ("atoraxxion", "altar"):
+            req_label = "Gewünschte AP (optional)"
+            # current_req kommt ggf. aus defaults/req_default (bei atto oft leer) – das ist ok
+            req_placeholder = "z.B. 300+ (oder 305+)" if not current_req else f"Empfohlen: {current_req}"
+
         self.req_text = discord.ui.TextInput(
-            label="Gewünschte AK/VK (optional)",
-            placeholder=f"Empfohlen: {current_req}" if current_req else "z.B. 370+ AP / 440+ VK",
+            label=req_label,
+            placeholder=req_placeholder,
             required=False,
             max_length=60,
             default=req_default_value,
@@ -1952,12 +1964,17 @@ class EditMenuView(WizardBaseView):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
+        # ✅ wichtig: wizard_interaction auf die aktuelle Ephemeral-Message setzen
+        self.session.wizard_interaction = interaction
         await self.cog._send_day_selection(interaction, self.session)
 
     async def _size(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
+        # ✅ wichtig
+        self.session.wizard_interaction = interaction
+
         current = int(self.post_data.get("max_players", 2))
         view = PartySizeView(self.cog, self.session, current=current)
         await self.cog._edit_or_send_ephemeral(interaction, view.embed(), view)
@@ -1967,6 +1984,9 @@ class EditMenuView(WizardBaseView):
             await interaction.response.defer()
             return
 
+        # ✅ wichtig
+        self.session.wizard_interaction = interaction
+
         defaults = dict(self.post_data)
         defaults["req_default"] = _default_req_for(self.post_data)
 
@@ -1975,16 +1995,12 @@ class EditMenuView(WizardBaseView):
         except discord.InteractionResponded:
             await interaction.followup.send_modal(DetailsModal(self.cog, self.session, defaults=defaults))
 
-    async def _bosses(self, interaction: discord.Interaction):
-        if interaction.user.id != self.session.user_id:
-            await interaction.response.defer()
-            return
-        await self.cog._send_boss_select(interaction, self.session)
-
     async def _atoraxxion(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
+        # ✅ wichtig
+        self.session.wizard_interaction = interaction
         await self.cog._send_atoraxxion_runs(interaction, self.session, back_target=BackTarget.EDIT_MENU)
 
     async def _back(self, interaction: discord.Interaction):
@@ -2699,6 +2715,15 @@ class GruppensucheTest(commands.Cog):
         if msg is not None and not getattr(msg.flags, "ephemeral", False):
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             return
+
+        # ✅ WICHTIG: Wenn wir eine Ephemeral-Message haben, editieren wir DIE direkt.
+        # Das verhindert "zweites Ephemeral" nach Modal-Submit.
+        if msg is not None and getattr(msg.flags, "ephemeral", False):
+            try:
+                await msg.edit(embed=embed, view=view)
+                return
+            except Exception:
+                pass
 
         # Normalfall: Wizard-Ephemeral wird editiert
         try:
@@ -4258,7 +4283,11 @@ class GruppensucheTest(commands.Cog):
             return
 
         view = EditMenuView(self, session, data)
-        await self._edit_or_send_ephemeral(interaction, view.embed(), view)
+
+        # ✅ wichtig: wenn möglich immer die Interaction nehmen,
+        # die zur Wizard-Ephemeral-Message gehört
+        base = session.wizard_interaction or interaction
+        await self._edit_or_send_ephemeral(base, view.embed(), view)
 
     async def _apply_edit_day(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
@@ -4416,19 +4445,20 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
-        # --- alte Werte sauber sichern (für "old -> new") ---
+        cat = str(data.get("category", "")).lower()
+
+        # --- alte Werte sichern ---
         old_duration = data.get("duration_text")
         old_start = data.get("start_text")
         old_req = data.get("req_text")
         old_notes = data.get("notes")
         old_day_iso = data.get("day_date_iso")
-        old_amount = data.get("scroll_amount") if data.get(
-            "category") == "pilafe" else None
+        old_amount = data.get("scroll_amount") if cat == "pilafe" else None
+        old_owner_ap = data.get("owner_ap")
 
-        # --- Änderungen anwenden (Edit: nur überschreiben, wenn session-Feld gesetzt ist) ---
-        if data.get("category") == "pilafe":
-            if session.scroll_amount is not None:
-                data["scroll_amount"] = session.scroll_amount
+        # --- Änderungen anwenden ---
+        if cat == "pilafe" and session.scroll_amount is not None:
+            data["scroll_amount"] = session.scroll_amount
 
         if session.duration_text is not None:
             data["duration_text"] = session.duration_text
@@ -4442,7 +4472,19 @@ class GruppensucheTest(commands.Cog):
         if session.notes is not None:
             data["notes"] = session.notes
 
-        # ✅ Reminder reset, wenn Startzeit (oder Tag) geändert wurde
+        # ✅ Host-AP korrekt übernehmen
+        if session.own_ap is not None:
+            owner_id = int(data.get("owner_id", 0))
+            data["owner_ap"] = session.own_ap
+
+            ap_map = data.get("participant_ap")
+            if not isinstance(ap_map, dict):
+                ap_map = {}
+
+            ap_map[str(owner_id)] = session.own_ap
+            data["participant_ap"] = ap_map
+
+        # ✅ Reminder reset bei Start/Tag-Änderung
         if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day_iso):
             rem = data.get("reminders")
             if not isinstance(rem, dict):
@@ -4450,19 +4492,19 @@ class GruppensucheTest(commands.Cog):
             rem.pop("start_30m", None)
             data["reminders"] = rem
 
+        # --- Speichern ---
         await self._save_refresh_dispatch(data)
 
-        # --- Change-Liste bauen (old -> new) ---
+        # --- Change-Liste bauen ---
         changes: list[dict] = []
 
-        if data.get("category") == "pilafe":
-            new_amount = data.get("scroll_amount")
-            if old_amount != new_amount:
+        if cat == "pilafe":
+            if old_amount != data.get("scroll_amount"):
                 changes.append({
                     "key": "scroll_amount",
                     "label": "Menge",
                     "old": old_amount,
-                    "new": new_amount
+                    "new": data.get("scroll_amount")
                 })
 
         if old_duration != data.get("duration_text"):
@@ -4481,10 +4523,12 @@ class GruppensucheTest(commands.Cog):
                 "new": data.get("start_text")
             })
 
+        # ✅ Kategorieabhängiges Label für req
         if old_req != data.get("req_text"):
+            req_label = "Gewünschte AP" if cat in ("atoraxxion", "altar") else "Anforderung AK/VK"
             changes.append({
                 "key": "req",
-                "label": "Anforderung AK/VK",
+                "label": req_label,
                 "old": old_req,
                 "new": data.get("req_text")
             })
@@ -4497,10 +4541,23 @@ class GruppensucheTest(commands.Cog):
                 "new": data.get("notes")
             })
 
+        # ✅ Host-AP Change-Notify
+        if old_owner_ap != data.get("owner_ap"):
+            changes.append({
+                "key": "owner_ap",
+                "label": "Host AP",
+                "old": old_owner_ap,
+                "new": data.get("owner_ap"),
+            })
+
         if changes:
             self._schedule_edit_notify(
-                int(session.edit_message_id), data, changes=changes)
+                int(session.edit_message_id),
+                data,
+                changes=changes
+            )
 
+        # Zurück ins Edit-Menü (ohne neues Ephemeral)
         await self._send_edit_menu(interaction, session)
 
     async def _apply_edit_bosses(self, interaction: discord.Interaction, session: WizardSession):
