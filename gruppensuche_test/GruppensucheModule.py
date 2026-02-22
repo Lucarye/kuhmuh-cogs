@@ -261,6 +261,14 @@ def _ui_for(category: str) -> dict:
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
+def _get_post_lock(self, message_id: int) -> asyncio.Lock:
+    lock = self._post_locks.get(message_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        self._post_locks[message_id] = lock
+    return lock
+
+
 def _format_remaining(seconds: int) -> str:
     seconds = int(seconds)
 
@@ -2092,12 +2100,14 @@ class ConfirmView(discord.ui.View):
             await self._safe_edit_self(interaction, "Suche wird geschlossen…", view=None)
             await self.cog._close_search(interaction, self.message_id)
             await self._safe_edit_self(interaction, "Suche wurde geschlossen.", view=None)
+            await self.cog._cleanup_post_lock(self.message_id)
             return
 
         # delete
         await self._safe_edit_self(interaction, "Suche wird gelöscht…", view=None)
         await self.cog._delete_search(interaction, self.message_id)
         await self._safe_edit_self(interaction, "Suche wurde gelöscht.", view=None)
+        await self.cog._cleanup_post_lock(self.message_id)
 
 
 class PublicPostView(discord.ui.View):
@@ -2203,13 +2213,119 @@ class PublicPostView(discord.ui.View):
         return data
 
     async def _on_join(self, interaction: discord.Interaction):
-        async def _done(i: discord.Interaction, ap_val: str):
-            await self.cog._join(i, self.message_id, ap_val)
+        await interaction.response.defer(ephemeral=True)
 
-        await interaction.response.send_modal(JoinApModal(self.cog, _done))
+        if not interaction.guild:
+            return
+
+        mid = int(self.message_id)
+
+        async with self.cog._lock_for(mid):
+            data = await self.cog.config.custom("POST", str(mid)).all()
+
+            # geschlossen?
+            if bool(data.get("is_closed", False)):
+                await interaction.followup.send("🔒 Diese Suche ist bereits geschlossen.", ephemeral=True)
+                return
+
+            max_players = int(data.get("max_players", 2))
+            participants: List[int] = list(data.get("participants") or [])
+            waitlist: List[int] = list(data.get("waitlist") or [])
+
+            uid = int(interaction.user.id)
+
+            # schon drin?
+            if uid in participants:
+                await interaction.followup.send("✅ Du bist bereits bei den Teilnehmern eingetragen.", ephemeral=True)
+                return
+            if uid in waitlist:
+                await interaction.followup.send("🕒 Du bist bereits in der Warteschlange.", ephemeral=True)
+                return
+
+            # eintragen (Teilnehmer oder Warteliste)
+            if len(participants) < max_players:
+                participants.append(uid)
+                msg = "✅ Eingetragen (Teilnehmer)."
+            else:
+                waitlist.append(uid)
+                msg = "🕒 Eingetragen (Warteschlange)."
+
+            await self.cog.config.custom("POST", str(mid)).participants.set(participants)
+            await self.cog.config.custom("POST", str(mid)).waitlist.set(waitlist)
+
+            # Post aktualisieren (embed + view) atomar nach Update
+            guild = interaction.guild
+            embed = await self.cog._build_public_embed(guild, {**data, "participants": participants, "waitlist": waitlist})
+            view = PublicPostView(self.cog, mid)
+
+            try:
+                if interaction.channel:
+                    await self.cog._refresh_public_post(guild=interaction.guild, channel=interaction.channel, message_id=mid)
+            except Exception:
+                pass
+
+        await interaction.followup.send(msg, ephemeral=True)
 
     async def _on_leave(self, interaction: discord.Interaction):
-        await self.cog._leave(interaction, self.message_id)
+        await interaction.response.defer(ephemeral=True)
+
+        if not interaction.guild:
+            return
+
+        mid = int(self.message_id)
+        uid = int(interaction.user.id)
+
+        promoted_id: Optional[int] = None
+
+        async with self.cog._lock_for(mid):
+            data = await self.cog.config.custom("POST", str(mid)).all()
+
+            participants: List[int] = list(data.get("participants") or [])
+            waitlist: List[int] = list(data.get("waitlist") or [])
+
+            changed = False
+
+            if uid in participants:
+                participants.remove(uid)
+                changed = True
+
+                # Promotion aus Warteliste (atomar!)
+                if waitlist:
+                    promoted_id = int(waitlist.pop(0))
+                    participants.append(promoted_id)
+
+            elif uid in waitlist:
+                waitlist.remove(uid)
+                changed = True
+
+            if not changed:
+                await interaction.followup.send("ℹ️ Du bist nicht eingetragen.", ephemeral=True)
+                return
+
+            await self.cog.config.custom("POST", str(mid)).participants.set(participants)
+            await self.cog.config.custom("POST", str(mid)).waitlist.set(waitlist)
+
+            # Post aktualisieren
+            guild = interaction.guild
+            embed = await self.cog._build_public_embed(guild, {**data, "participants": participants, "waitlist": waitlist})
+            view = PublicPostView(self.cog, mid)
+
+            try:
+                if interaction.channel:
+                    await self.cog._refresh_public_post(guild=interaction.guild, channel=interaction.channel, message_id=mid)
+            except Exception:
+                pass
+
+        # Notify Promotion außerhalb Lock (damit Lock nicht blockiert)
+        if promoted_id and interaction.guild:
+            try:
+                m = interaction.guild.get_member(promoted_id)
+                if m:
+                    await m.send(f"✅ Du wurdest bei einer Gruppensuche von der Warteschlange zu den Teilnehmern hochgestuft.\nPost-ID: {mid}")
+            except Exception:
+                pass
+
+        await interaction.followup.send("🚪 Du wurdest entfernt.", ephemeral=True)
 
     async def _on_ping_participants(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
@@ -2298,6 +2414,12 @@ class GruppensucheTest(commands.Cog):
         self._sessions: Dict[int, WizardSession] = {}
         # --- Concurrency Locks (per Post / message_id) ---
         self._post_locks: Dict[int, asyncio.Lock] = {}
+        # Lock "Last Used" für Garbage Collection
+        self._post_lock_last_used: Dict[int, dt.datetime] = {}
+
+        # Optionaler GC Task (räumt alte Locks weg)
+        self._locks_gc_task: Optional[asyncio.Task] = self.bot.loop.create_task(
+            self._locks_gc_loop())
         # --- Dashboard Debounce ---
         self._dashboard_refresh_tasks: Dict[int, asyncio.Task] = {}
         self._dashboard_refresh_delay = 2  # Sekunden
@@ -2310,6 +2432,8 @@ class GruppensucheTest(commands.Cog):
         self._edit_notify_delay = 45  # Sekunden
 
     def cog_unload(self):
+        if getattr(self, "_locks_gc_task", None):
+            self._locks_gc_task.cancel()
         if self._startup_task and not self._startup_task.done():
             self._startup_task.cancel()
         if self._reminder_task and not self._reminder_task.done():
@@ -2355,11 +2479,41 @@ class GruppensucheTest(commands.Cog):
             del self._sessions[user_id]
 
     def _lock_for(self, message_id: int) -> asyncio.Lock:
-        lock = self._post_locks.get(int(message_id))
+        mid = int(message_id)
+        lock = self._post_locks.get(mid)
         if lock is None:
             lock = asyncio.Lock()
-            self._post_locks[int(message_id)] = lock
+            self._post_locks[mid] = lock
+        # Last used updaten
+        self._post_lock_last_used[mid] = discord.utils.utcnow()
         return lock
+
+    def _cleanup_post_lock(self, message_id: int) -> None:
+        mid = int(message_id)
+        self._post_locks.pop(mid, None)
+        self._post_lock_last_used.pop(mid, None)
+
+    async def _locks_gc_loop(self) -> None:
+        # Räumt alte Locks weg, damit die Map nicht wächst.
+        await self.bot.wait_until_red_ready()
+        await self.bot.wait_until_ready()
+
+        while True:
+            try:
+                now = discord.utils.utcnow()
+
+                # Alles, was seit 6h nicht genutzt wurde, kann weg
+                cutoff = now - dt.timedelta(hours=6)
+
+                stale = [
+                    mid for mid, last in self._post_lock_last_used.items() if last < cutoff]
+                for mid in stale:
+                    self._cleanup_post_lock(mid)
+
+            except Exception:
+                pass
+
+            await asyncio.sleep(60 * 60)  # 1h
 
     async def _go_back(self, interaction: discord.Interaction, session: WizardSession, target: str, **kwargs):
         # Edit-Mode Back bleibt wie bei euch über build_back_button geregelt.
@@ -3439,6 +3593,36 @@ class GruppensucheTest(commands.Cog):
         e.set_footer(text="Klicke auf „Ich bin dabei“, um dich einzutragen.")
         e.timestamp = discord.utils.utcnow()
         return e
+
+    async def _refresh_public_post(self, *, guild: discord.Guild, channel: discord.abc.Messageable, message_id: int) -> None:
+        """Baut Embed + View neu und editiert den Public-Post."""
+        mid = int(message_id)
+        data = await self.config.custom("POST", str(mid)).all()
+
+        embed = await self._build_public_embed(guild, data)
+        view = PublicPostView(self, mid)
+
+        msg_obj = await channel.fetch_message(mid)
+        await msg_obj.edit(embed=embed, view=view)
+
+    async def _close_post_atomic(self, *, guild: discord.Guild, channel: discord.abc.Messageable, message_id: int) -> None:
+        mid = int(message_id)
+
+        async with self._lock_for(mid):
+            data = await self.config.custom("POST", str(mid)).all()
+            if bool(data.get("is_closed", False)):
+                return
+
+            await self.config.custom("POST", str(mid)).is_closed.set(True)
+
+            # Post direkt refreshen (zeigt "Geschlossen" + Buttons je nach View-Logik)
+            try:
+                await self._refresh_public_post(guild=guild, channel=channel, message_id=mid)
+            except Exception:
+                pass
+
+        # Lock entfernen (außerhalb)
+        self._cleanup_post_lock(mid)
 
     async def _refresh_public_message(self, data: dict):
         guild = self.bot.get_guild(int(data.get("guild_id", 0)))
