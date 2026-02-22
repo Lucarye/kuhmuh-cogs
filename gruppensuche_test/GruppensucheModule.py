@@ -2693,43 +2693,21 @@ class GruppensucheTest(commands.Cog):
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _edit_or_send_ephemeral(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
-        """
-        ACK-sicherer Wizard-Renderer:
-        - Wenn wir bereits eine Ephemeral-Message haben (interaction.message ist ephemeral): diese Message direkt editieren.
-        - Wenn Interaction noch offen ist: response.edit_message verwenden.
-        - Wenn Interaction bereits responded/deferred ist: edit_original_response verwenden.
-        - Nur wenn alles fehlschlägt: followup.send (als echter Fallback).
-        """
         msg = getattr(interaction, "message", None)
 
-        # 1) Best Case: Wir sind auf einer Ephemeral-Component-Message -> diese direkt editieren
-        try:
-            if msg is not None and getattr(msg.flags, "ephemeral", False):
-                await msg.edit(embed=embed, view=view)
-                return
-        except Exception:
-            pass
+        # 🔒 Wenn Interaction vom PUBLIC POST kommt → NIEMALS editieren!
+        if msg is not None and not getattr(msg.flags, "ephemeral", False):
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            return
 
-        # 2) Wenn Interaction noch NICHT responded ist: normal edit_message antworten
+        # Normalfall: Wizard-Ephemeral wird editiert
         try:
             if not interaction.response.is_done():
                 await interaction.response.edit_message(embed=embed, view=view)
-                return
+            else:
+                await interaction.edit_original_response(embed=embed, view=view)
         except Exception:
-            pass
-
-        # 3) Wenn deferred/responded: Original Response (das Wizard-Ephemeral) editieren
-        try:
-            await interaction.edit_original_response(embed=embed, view=view)
-            return
-        except Exception:
-            pass
-
-        # 4) Letzter Fallback: neues Ephemeral (sollte praktisch nie mehr passieren)
-        try:
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-        except Exception:
-            pass
 
     async def _ephemeral_notice(
         self,
@@ -4244,27 +4222,30 @@ class GruppensucheTest(commands.Cog):
             edit_message_id=message_id,
             category=str(data.get("category")),
             day_date_iso=str(data.get("day_date_iso")),
-            difficulty=str(data.get("difficulty")) if data.get(
-                "category") == "muhhelfer" else None,
+            difficulty=str(data.get("difficulty")) if data.get("category") == "muhhelfer" else None,
             boss_runs=dict(data.get("boss_runs") or {}),
-            spot_key=str(data.get("spot_key")) if data.get(
-                "category") == "spots" else None,
+            spot_key=str(data.get("spot_key")) if data.get("category") == "spots" else None,
             max_players=int(data.get("max_players", 2)),
-            scroll_amount=str(data.get("scroll_amount")) if data.get(
-                "category") == "pilafe" else None,
+            scroll_amount=str(data.get("scroll_amount")) if data.get("category") == "pilafe" else None,
             duration_text=data.get("duration_text"),
             start_text=data.get("start_text"),
             req_text=data.get("req_text"),
             notes=data.get("notes"),
-            olun_tier=str(data.get("olun_tier")) if str(
-                data.get("spot_key")) == "olun" else None,
+            olun_tier=str(data.get("olun_tier")) if str(data.get("spot_key")) == "olun" else None,
             atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
         )
 
         session.wizard_interaction = interaction
         self._sessions[interaction.user.id] = session
 
-        await self._send_edit_menu(interaction, session)
+        view = EditMenuView(self, session, data)
+
+        # WICHTIG: NIE edit_message hier!
+        await interaction.response.send_message(
+            embed=view.embed(),
+            view=view,
+            ephemeral=True
+        )
 
     async def _send_edit_menu(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
