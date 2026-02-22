@@ -1694,9 +1694,10 @@ class AtoraxxionRunView(WizardBaseView):
         full_btn.callback = self._pick_full
         self.add_item(full_btn)
 
-        # Weiter (Row 1)
+        next_label = "Speichern" if self.session.mode == "edit" else "Weiter"
+
         next_btn = discord.ui.Button(
-            label="Weiter",
+            label=next_label,
             style=discord.ButtonStyle.success,
             row=1,
         )
@@ -3352,6 +3353,9 @@ class GruppensucheTest(commands.Cog):
             )
 
         elif cat == "altar":
+            req_text = data.get("req_text") or ""
+            req_line = f"**Gewünschte AP:** {req_text}\n" if req_text else "**Gewünschte AP:** —\n"
+
             header = (
                 f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Altar des Blutes\n"
@@ -3370,9 +3374,13 @@ class GruppensucheTest(commands.Cog):
         elif cat == "atoraxxion":
             runs = _normalize_atoraxxion_runs(data)
 
+            req_text = data.get("req_text") or ""
+            req_line = f"**Gewünschte AP:** {req_text}\n" if req_text else "**Gewünschte AP:** —\n"
+
             header = (
                 f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Atoraxxion\n"
+                + req_line +
                 f"**Max. Teilnehmer:** {max_players}\n\n"
             )
 
@@ -4600,9 +4608,12 @@ class GruppensucheTest(commands.Cog):
 
         await self._send_edit_menu(interaction, session)
 
-    async def _apply_edit_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession):
-        if not session.edit_message_id:
-            return
+        async def _apply_edit_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession):
+            # ACK sichern (verhindert "Interaktion fehlgeschlagen")
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.InteractionResponded:
+                pass
 
         data = await self._get_search(session.edit_message_id)
         if data is None:
