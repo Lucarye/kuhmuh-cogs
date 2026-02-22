@@ -258,10 +258,20 @@ class Gruppenübersicht(commands.Cog):
     # =========================
 
     def _get_gruppensuche_cog_live(self):
-        return self.bot.get_cog("Gruppensuche")
+        # Robust gegen unterschiedliche Cog-Namen (Test/Live/Umbenennung)
+        return (
+            self.bot.get_cog("Gruppensuche")
+            or self.bot.get_cog("GruppensucheTest")
+            or self.bot.get_cog("Gruppensuche_test")
+        )
 
     def _get_gruppensuche_cog_test(self):
-        return self.bot.get_cog("GruppensucheTest")
+        # Robust gegen unterschiedliche Cog-Namen (Test/Live/Umbenennung)
+        return (
+            self.bot.get_cog("Gruppensuche_test")
+            or self.bot.get_cog("GruppensucheTest")
+            or self.bot.get_cog("Gruppensuche")
+        )
 
     async def _get_searches_from(self, guild: discord.Guild, source: str) -> Dict[str, dict]:
         cog = self._get_gruppensuche_cog_live(
@@ -545,6 +555,8 @@ class Gruppenübersicht(commands.Cog):
         muh_schwer: List[dict] = []
         spots: List[dict] = []
         pilafe: List[dict] = []
+        atoraxxion: List[dict] = []
+        altar: List[dict] = []
 
         for d in items:
             cat = str(d.get("category") or "")
@@ -558,6 +570,10 @@ class Gruppenübersicht(commands.Cog):
                 spots.append(d)
             elif cat == "pilafe":
                 pilafe.append(d)
+            elif cat == "atoraxxion":
+                atoraxxion.append(d)
+            elif cat == "altar":
+                altar.append(d)
 
         title = "Gruppenübersicht - LIVE" if which == "live" else "Gruppenübersicht - TEST"
 
@@ -603,12 +619,17 @@ class Gruppenübersicht(commands.Cog):
             cat = str(d.get("category") or "")
             spot_key = str(d.get("spot_key") or "")
             olun_tier = str(d.get("olun_tier") or "")
-            spot_icon = _spot_emoji(
-                spot_key, olun_tier=olun_tier) if cat == "spots" else ""
+            spot_icon = _spot_emoji(spot_key, olun_tier=olun_tier) if cat == "spots" else ""
+            cat_icon = "🏛️" if cat == "atoraxxion" else ("🩸" if cat == "altar" else "")
 
-            prefix = f"{spot_icon} " if spot_icon else ""
+            prefix = ""
+            if spot_icon:
+                prefix = f"{spot_icon} "
+            elif cat_icon:
+                prefix = f"{cat_icon} "
+
             return (
-                f"• **{day_str}** | **{start_text}** | {duration_text} | Req: **{req}**\n"
+                f"• {prefix}**{day_str}** | **{start_text}** | {duration_text} | Req: **{req}**\n"
                 f"  {status} | {count}{wl} → {jump}"
             )
 
@@ -709,6 +730,8 @@ class Gruppenübersicht(commands.Cog):
             )
 
         add_section(f"{PILAFE_EMOJI} Pila Fe ({len(pilafe)})", pilafe)
+        add_section(f"🏛️ Atoraxxion ({len(atoraxxion)})", atoraxxion)
+        add_section(f"🩸 Altar des Blutes ({len(altar)})", altar)
 
         # Letztes echtes Update (datengetrieben) statt "immer jetzt"
         last_ts = 0
