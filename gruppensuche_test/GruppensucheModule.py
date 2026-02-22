@@ -2100,14 +2100,14 @@ class ConfirmView(discord.ui.View):
             await self._safe_edit_self(interaction, "Suche wird geschlossen…", view=None)
             await self.cog._close_search(interaction, self.message_id)
             await self._safe_edit_self(interaction, "Suche wurde geschlossen.", view=None)
-            await self.cog._cleanup_post_lock(self.message_id)
+            self.cog._cleanup_post_lock(self.message_id)
             return
 
         # delete
         await self._safe_edit_self(interaction, "Suche wird gelöscht…", view=None)
         await self.cog._delete_search(interaction, self.message_id)
         await self._safe_edit_self(interaction, "Suche wurde gelöscht.", view=None)
-        await self.cog._cleanup_post_lock(self.message_id)
+        self.cog._cleanup_post_lock(self.message_id)
 
 
 class PublicPostView(discord.ui.View):
