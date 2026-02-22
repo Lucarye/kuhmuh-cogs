@@ -3539,27 +3539,34 @@ class GruppensucheTest(commands.Cog):
             )
 
             all_keys = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
-            if set(runs) == all_keys:
-                selection_block = (
-                    "**Auswahl:** Kompletter Run\n\n"
-                    "**Dungeons:**\n"
-                    "• Vahmalkea\n"
-                    "• Sycrakea\n"
-                    "• Yolunakea\n"
-                    "• Orzekea\n\n"
-                )
-            elif runs:
-                dungeon_map = {
-                    "vahmalkea": "Vahmalkea",
-                    "sycrakea": "Sycrakea",
-                    "yolunakea": "Yolunakea",
-                    "orzekea": "Orzekea",
-                }
-                lines_sel = "\n".join(
-                    [f"• {dungeon_map.get(k, k)}" for k in runs])
-                selection_block = f"**Auswahl:** Teil-Run\n\n**Dungeons:**\n{lines_sel}\n\n"
+            ordered = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
+
+            dungeon_map = {
+                "vahmalkea": "Vahmalkea",
+                "sycrakea": "Sycrakea",
+                "yolunakea": "Yolunakea",
+                "orzekea": "Orzekea",
+            }
+
+            # Runs stabil & in fixer Reihenfolge (wie im Spiel / UI)
+            runs_set = {str(k).lower() for k in (runs or [])}
+            runs_ordered = [k for k in ordered if k in runs_set]
+
+            # Run-Typ + Zählung
+            if runs_ordered and set(runs_ordered) == all_keys:
+                run_label = "Kompletter Run"
+            elif runs_ordered:
+                run_label = "Teil-Run"
             else:
-                selection_block = "**Auswahl:** —\n\n"
+                run_label = "—"
+
+            run_count = len(runs_ordered)
+
+            # Anzeige: eine klare Run-Zeile + darunter Dungeons fett
+            selection_block = f"**🏛️ Run:** {run_label} ({run_count}/4)\n\n"
+            if runs_ordered:
+                lines_sel = "\n".join([f"• **{dungeon_map[k]}**" for k in runs_ordered])
+                selection_block += f"**Dungeons:**\n{lines_sel}\n\n"
 
             e.description = (
                 header
