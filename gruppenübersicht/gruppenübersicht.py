@@ -583,7 +583,7 @@ class Gruppenübersicht(commands.Cog):
             tkey = _extract_time_sort_key(start_text)
             cat = str(d.get("category") or "")
 
-            # Spots: extra sort nach Spot (miru -> gyfin -> neu)
+            # Spots: extra sort nach Spot
             if cat == "spots":
                 spot = str(d.get("spot_key") or "")
                 return (day_iso, tkey[0], tkey[1], 0, _spot_order_key(spot))
@@ -594,25 +594,58 @@ class Gruppenübersicht(commands.Cog):
 
         muh_normal: List[dict] = []
         muh_schwer: List[dict] = []
-        spots: List[dict] = []
+
+        # Spots getrennt
+        spots_miru: List[dict] = []
+        spots_gyfin: List[dict] = []
+        spots_olun_normal: List[dict] = []
+        spots_olun_d1: List[dict] = []
+        spots_olun_d2: List[dict] = []
+
         pilafe: List[dict] = []
         atoraxxion: List[dict] = []
         altar: List[dict] = []
 
         for d in items:
             cat = str(d.get("category") or "")
+
             if cat == "muhhelfer":
                 diff = str(d.get("difficulty") or "normal")
                 if diff == "schwer":
                     muh_schwer.append(d)
                 else:
                     muh_normal.append(d)
+
             elif cat == "spots":
-                spots.append(d)
+                sk = str(d.get("spot_key") or "").strip().lower()
+
+                if sk == "mirumok":
+                    spots_miru.append(d)
+
+                elif sk == "gyfin":
+                    spots_gyfin.append(d)
+
+                elif sk == "olun":
+                    tier = str(d.get("olun_tier") or "").strip().lower()
+
+                    if tier in ("", "normal", "base"):
+                        spots_olun_normal.append(d)
+                    elif tier in ("dehkia1", "dehkia_1", "d1", "1"):
+                        spots_olun_d1.append(d)
+                    elif tier in ("dehkia2", "dehkia_2", "d2", "2"):
+                        spots_olun_d2.append(d)
+                    else:
+                        spots_olun_normal.append(d)
+
+                else:
+                    spots_miru.append(d)
+
             elif cat == "pilafe":
                 pilafe.append(d)
+
             elif cat == "atoraxxion":
                 atoraxxion.append(d)
+
             elif cat == "altar":
                 altar.append(d)
 
