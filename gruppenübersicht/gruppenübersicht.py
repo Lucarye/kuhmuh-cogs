@@ -112,6 +112,7 @@ def _extract_time_sort_key(start_text: str) -> Tuple[int, int]:
 
     return (99, 99)
 
+
 def _fmt_day(day_iso: str) -> str:
     """
     Kompat: wird vom Dashboard genutzt.
@@ -147,12 +148,14 @@ def _jump_link(d: dict) -> str:
 
     # Wenn _jump_url existiert -> verwenden
     try:
-        return _jump_url(guild_id, channel_id, message_id)  # type: ignore[name-defined]
+        # type: ignore[name-defined]
+        return _jump_url(guild_id, channel_id, message_id)
     except Exception:
         # Fallback: klassischer Jump-URL
         if not guild_id:
             return "—"
         return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
+
 
 def _has_role(member: discord.Member, role_id: Optional[int]) -> bool:
     if not role_id:
@@ -184,6 +187,7 @@ def _spot_emoji(spot_key: str, *, olun_tier: str = "") -> str:
 
     return CHEER_EMOJI
 
+
 def _normalize_atoraxxion_runs(data: dict) -> List[str]:
     """
     Liefert eine normalisierte Liste der gewählten Atoraxxion-Dungeons.
@@ -210,6 +214,7 @@ def _normalize_atoraxxion_runs(data: dict) -> List[str]:
     order = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
     runs.sort(key=lambda x: order.index(x) if x in order else 999)
     return runs
+
 
 class DMOptButton(discord.ui.Button):
     def __init__(self, which: str):
@@ -682,6 +687,16 @@ class Gruppenübersicht(commands.Cog):
             description="Hier siehst du alle aktiven Gruppensuchen.\n✉️ Button: DM Reminders an/aus.",
         )
 
+        e.add_field(
+            name="ℹ️ Info",
+            value=(
+                "• 🟢 Offen  • 🔴 Voll/Geschlossen\n"
+                "• „➜ #channel …“ ist der Jump-Link zum Post\n"
+                "• Anzeige immer für die nächsten **7 Tage**"
+            ),
+            inline=False,
+        )
+
         def fmt_line(d: dict, include_day: bool = True) -> str:
             # line1: Status + Teilnehmer + Channel + Jump
             max_players = int(d.get("max_players", 2) or 2)
@@ -690,7 +705,8 @@ class Gruppenübersicht(commands.Cog):
             is_full = len(participants) >= max_players
 
             status_icon = "🔴" if is_closed else ("🔴" if is_full else "🟢")
-            status_label = "Geschlossen" if is_closed else ("Voll" if is_full else "Offen")
+            status_label = "Geschlossen" if is_closed else (
+                "Voll" if is_full else "Offen")
 
             chan_name = d.get("channel_name") or "—"
             jump = _jump_link(d)
@@ -743,7 +759,8 @@ class Gruppenübersicht(commands.Cog):
             parts.append(start_text)
             parts.append(duration_text)
 
-            line2 = f"  {spot_info}" + " | ".join(parts) + f" | Req: {req}{pilafe_info}{atorun_info}"
+            line2 = f"  {spot_info}" + \
+                " | ".join(parts) + f" | Req: {req}{pilafe_info}{atorun_info}"
 
             return f"{line1}\n{line2}"
 
@@ -792,19 +809,24 @@ class Gruppenübersicht(commands.Cog):
                 pass
             return (1, 99999999, "unknown")
 
-
         def _day_label(d: dict) -> str:
             return _fmt_day(d.get("day_date_iso"))
 
+        # =========================
+        # 7-Tage-Layout (immer anzeigen)
+        # =========================
 
-        # --- flache Liste bauen: (day_label, category_title, item_dict) ---
+        # --- flache Liste bauen: (day_iso, category_title, item_dict) ---
         entries: list[tuple[str, str, dict]] = []
 
         def add_entries(cat_title: str, arr: list[dict]):
             for x in arr:
-                entries.append((_day_label(x), cat_title, x))
+                day_iso = str(x.get("day_date_iso") or "").strip()
+                if not day_iso:
+                    continue
+                entries.append((day_iso, cat_title, x))
 
-        # Nur Listen hinzufügen (leer ist ok; wird später gefiltert)
+        # Nur Listen hinzufügen (leer ist ok)
         add_entries("🐮 Muhhelfer – Normal", muh_normal)
         add_entries("🐮 Muhhelfer – Schwer", muh_schwer)
 
@@ -818,53 +840,61 @@ class Gruppenübersicht(commands.Cog):
         add_entries("🏛️ Atoraxxion", atoraxxion)
         add_entries("🩸 Altar des Blutes", altar)
 
-        # --- nach Tag sortieren, dann nach Kategorie ---
-        # (wir sortieren über das dict selbst, nicht nur über label)
-        entries_sorted = sorted(entries, key=lambda t: _day_key(t[2]))
+        # --- sort: nach Datum, dann nach Uhrzeit (über items selbst) ---
+        def _day_key_iso(day_iso: str) -> tuple:
+            try:
+                dd = dt.date.fromisoformat(day_iso)
+                return (0, dd.toordinal(), day_iso)
+            except Exception:
+                return (1, 99999999, day_iso)
 
-        # --- group by day_label ---
+        entries_sorted = sorted(entries, key=lambda t: _day_key_iso(t[0]))
+
+        # --- group by day_iso ---
         by_day: dict[str, list[tuple[str, dict]]] = {}
-        for day_label, cat_title, item in entries_sorted:
-            by_day.setdefault(day_label, []).append((cat_title, item))
+        for day_iso, cat_title, item in entries_sorted:
+            by_day.setdefault(day_iso, []).append((cat_title, item))
 
-        # --- render ---
-        # Alles in description (kein „—“ mehr; Sektionen nur wenn es Einträge gibt)
+        # --- render: immer heute..heute+6 ---
+        day_range = [today + dt.timedelta(days=i) for i in range(7)]
+
         chunks: list[str] = []
 
-        if not entries_sorted:
-            chunks.append("— Keine aktiven Gruppensuchen —")
-        else:
-            for day_label, day_items in by_day.items():
-                # pro Tag: erst Tag-Header
-                chunks.append(f"**{day_label}**")
+        for day_d in day_range:
+            day_iso = day_d.isoformat()
+            day_label = _format_day(day_d)
 
-                # innerhalb des Tages: nach Kategorie gruppieren
-                cat_map: dict[str, list[dict]] = {}
-                for cat_title, item in day_items:
-                    cat_map.setdefault(cat_title, []).append(item)
+            chunks.append(f"**{day_label}**")
 
-                for cat_title, items in cat_map.items():
-                    if not items:
-                        continue
+            day_items = by_day.get(day_iso, [])
 
-                    chunks.append(f"__{cat_title} ({len(items)})__")
-
-                    # Lines (ohne day in line2, weil Day schon im Header steht)
-                    lines = [fmt_line(x, include_day=False) for x in items]
-
-                    # Begrenzen/Chunking (Discord Embed Description max ~4096)
-                    # Wir fügen solange an, bis es eng wird
-                    for ln in lines:
-                        # +1 wegen newline
-                        if sum(len(s) + 1 for s in chunks) + len(ln) + 1 > 3800:
-                            # Falls zu groß, abbrechen (oder später paging)
-                            chunks.append("… (gekürzt)")
-                            break
-                        chunks.append(ln)
-
+            if not day_items:
+                chunks.append("— Keine Gruppensuchen —")
                 chunks.append("")  # Leerzeile zwischen Tagen
+                continue
 
-        # final description
+            # innerhalb des Tages: nach Kategorie gruppieren
+            cat_map: dict[str, list[dict]] = {}
+            for cat_title, item in day_items:
+                cat_map.setdefault(cat_title, []).append(item)
+
+            for cat_title, items_cat in cat_map.items():
+                if not items_cat:
+                    continue
+
+                chunks.append(f"__{cat_title} ({len(items_cat)})__")
+
+                # Lines (ohne Day in line2, weil Day schon im Header steht)
+                lines = [fmt_line(x, include_day=False) for x in items_cat]
+
+                for ln in lines:
+                    if sum(len(s) + 1 for s in chunks) + len(ln) + 1 > 3800:
+                        chunks.append("… (gekürzt)")
+                        break
+                    chunks.append(ln)
+
+            chunks.append("")  # Leerzeile zwischen Tagen
+
         e.description = "\n".join([c for c in chunks if c is not None])
 
         # Letztes echtes Update (datengetrieben) statt "immer jetzt"
@@ -874,10 +904,6 @@ class Gruppenübersicht(commands.Cog):
                 last_ts = max(last_ts, int(d.get("updated_at") or 0))
             except Exception:
                 pass
-
-        if not items:
-            e.add_field(name="Keine Eintraege",
-                        value="Aktuell gibt es **keine** Gruppensuchen ab heute.", inline=False)
 
         if last_ts > 0:
             t = dt.datetime.fromtimestamp(last_ts)
