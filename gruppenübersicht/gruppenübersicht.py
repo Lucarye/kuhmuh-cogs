@@ -623,91 +623,69 @@ class Gruppenübersicht(commands.Cog):
             description="Hier siehst du alle aktiven Gruppensuchen.\n✉️ Button: DM Reminders an/aus.",
         )
 
-        def fmt_line(d: dict) -> str:
-            # ---------- Basiswerte ----------
-            day_iso = d.get("day_date_iso")
-            try:
-                if day_iso:
-                    day_d = dt.date.fromisoformat(str(day_iso))
-                    day_str = _format_day(day_d)
-                else:
-                    day_str = "—"
-            except Exception:
-                day_str = str(day_iso or "—")
+        def fmt_line(d: dict, include_day: bool = True) -> str:
+            # line1: Status + Teilnehmer + Channel + Jump
+            max_players = int(d.get("max_players", 2) or 2)
+            participants = list(d.get("participants") or [])
+            is_closed = bool(d.get("is_closed", False))
+            is_full = len(participants) >= max_players
+
+            status_icon = "🔴" if is_closed else ("🔴" if is_full else "🟢")
+            status_label = "Geschlossen" if is_closed else ("Voll" if is_full else "Offen")
+
+            chan_name = d.get("channel_name") or "—"
+            jump = _jump_link(d)
+
+            line1 = f"{status_icon} **{status_label} | {len(participants)}/{max_players}** ➜ #{chan_name} {jump}"
+
+            # line2: Meta (ohne Inline-Code, damit Emojis rendern!)
+            day_str = _fmt_day(d.get("day_date_iso")) if include_day else ""
 
             start_text = str(d.get("start_text") or "—")
             duration_text = str(d.get("duration_text") or "—")
 
-            # Req-Text (wenn vorhanden)
-            req = str(d.get("req_text") or "—")
+            req = d.get("req_text")
+            req = str(req).strip() if req else "—"
 
-            # Status / Count / Jump
-            participants = list(d.get("participants") or [])
-            waitlist = list(d.get("waitlist") or [])
-            max_players = int(d.get("max_players", 2))
-
-            is_closed = bool(d.get("is_closed", False))
-            is_full = len(participants) >= max_players
-
-            if is_closed:
-                status = "🔴 Geschlossen"
-            else:
-                status = "🔴 Voll" if is_full else "🟢 Offen"
-
-            count = f"{len(participants)}/{max_players}"
-            wl = f" | WL: {len(waitlist)}" if len(waitlist) > 0 else ""
-
-            jump = _jump_link(d)
-
-            # ---------- Kategorie-spezifische Kurzinfos ----------
             cat = str(d.get("category") or "").lower()
+            spot_key = str(d.get("spot_key") or "").lower()
 
-            # Spot-Icon (nur für spots)
             spot_info = ""
             if cat == "spots":
-                spot_key = str(d.get("spot_key") or "")
-                olun_tier = str(d.get("olun_tier") or "")
-                spot_icon = _spot_emoji(spot_key, olun_tier=olun_tier)
-                if spot_icon:
-                    spot_info = f"{spot_icon} "
+                if spot_key == "mirumok":
+                    spot_info = f"{MIRUMOK_EMOJI} "
+                elif spot_key == "gyfin":
+                    spot_info = f"{GYFIN_EMOJI} "
+                elif spot_key == "olun":
+                    spot_info = f"{OLUN_EMOJI} "
+                else:
+                    spot_info = ""
 
-            # PilaFe Menge (optional)
             pilafe_info = ""
             if cat == "pilafe":
-                amount = str(d.get("scroll_amount") or "—")
+                amount = d.get("scroll_amount") or "—"
                 pilafe_info = f" | Menge: {amount}"
 
-            # Atoraxxion Run-Zusammenfassung (optional)
             atorun_info = ""
             if cat == "atoraxxion":
-                runs = d.get("atoraxxion_runs") or []
-
-                # runs kann list/tuple/set sein oder als string gespeichert sein -> robust machen
-                if isinstance(runs, str):
-                    tmp = runs.strip()
-                    if tmp.startswith("[") and tmp.endswith("]"):
-                        tmp = tmp[1:-1]
-                    parts = [p.strip().strip("'").strip('"') for p in tmp.split(",") if p.strip()]
-                    runs = parts
-                if isinstance(runs, (set, tuple)):
-                    runs = list(runs)
-                if not isinstance(runs, list):
-                    runs = []
-
-                # Normalisieren / zählen
+                runs = _normalize_atoraxxion_runs(d)
                 all_keys = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
-                runs_norm = [str(x).lower() for x in runs if str(x).strip()]
-                runs_set = set(runs_norm)
+                if set(runs) == all_keys:
+                    atorun_info = " | 🏛️ Run: Kompletter Run (4/4)"
+                elif runs:
+                    atorun_info = f" | 🏛️ Run: Teil-Run ({len(runs)}/4)"
+                else:
+                    atorun_info = " | 🏛️ Run: —"
 
-                if runs_set:
-                    if runs_set == all_keys:
-                        atorun_info = " | 🏛️ Run: Kompletter Run (4/4)"
-                    else:
-                        atorun_info = f" | 🏛️ Run: Teil-Run ({len(runs_set)}/4)"
+            # IMPORTANT: kein `...` Inline-Code → Emojis bleiben Emojis
+            parts = []
+            if day_str:
+                parts.append(day_str)
+            parts.append(start_text)
+            parts.append(duration_text)
 
-            # ---------- Layout (Variante B) ----------
-            line1 = f"• **{status} | {count}{wl}** → {jump}"
-            line2 = f"  `{spot_info}{day_str} | {start_text} | {duration_text} | Req: {req}{pilafe_info}{atorun_info}`"
+            line2 = f"  {spot_info}" + " | ".join(parts) + f" | Req: {req}{pilafe_info}{atorun_info}"
+
             return f"{line1}\n{line2}"
 
         def _section_sort_key(d: dict) -> tuple:
@@ -742,100 +720,93 @@ class Gruppenübersicht(commands.Cog):
 
             return (day, minutes)
 
-        def add_section(title: str, arr: List[dict], empty_text: str = "—"):
-            if not arr:
-                e.add_field(name=title, value=empty_text, inline=False)
-                return
+        def _day_key(d: dict) -> tuple:
+            """
+            Sort-Key: echte Datumssortierung, Unbekannt nach hinten.
+            """
+            iso = d.get("day_date_iso")
+            try:
+                if iso:
+                    dd = dt.date.fromisoformat(str(iso))
+                    return (0, dd.toordinal(), str(iso))
+            except Exception:
+                pass
+            return (1, 99999999, "unknown")
 
-            arr_sorted = sorted(arr, key=_section_sort_key)
-            lines = [fmt_line(x) for x in arr_sorted]
 
-            chunk = ""
-            chunks: List[str] = []
-            for line in lines:
-                if len(chunk) + len(line) + 1 > 1000:
-                    chunks.append(chunk)
-                    chunk = line
-                else:
-                    chunk = f"{chunk}\n{line}".strip()
-            if chunk:
-                chunks.append(chunk)
+        def _day_label(d: dict) -> str:
+            return _fmt_day(d.get("day_date_iso"))
 
-            for idx, ch in enumerate(chunks):
-                field_name = title if idx == 0 else f"{title} (weiter)"
-                spaced_value = ch + "\n\u200b"
-                e.add_field(name=field_name, value=spaced_value, inline=False)
 
-        add_section(
-            f"{MUHKUH_EMOJI} Muhhelfer – Normal ({len(muh_normal)})", muh_normal)
-        add_section(
-            f"{MUHKUH_EMOJI} Muhhelfer – Schwer ({len(muh_schwer)})", muh_schwer)
+        # --- flache Liste bauen: (day_label, category_title, item_dict) ---
+        entries: list[tuple[str, str, dict]] = []
 
-        # --- Gruppenspots nach Spot aufteilen ---
-        spots_miru: List[dict] = []
-        spots_gyfin: List[dict] = []
+        def add_entries(cat_title: str, arr: list[dict]):
+            for x in arr:
+                entries.append((_day_label(x), cat_title, x))
 
-        spots_olun_normal: List[dict] = []
-        spots_olun_d1: List[dict] = []
-        spots_olun_d2: List[dict] = []
+        # Nur Listen hinzufügen (leer ist ok; wird später gefiltert)
+        add_entries("🐮 Muhhelfer – Normal", muh_normal)
+        add_entries("🐮 Muhhelfer – Schwer", muh_schwer)
 
-        spots_other: List[dict] = []
+        add_entries("🌲 Gruppenspots – Mirumok", spots_miru)
+        add_entries("🌀 Gruppenspots – Gyfin", spots_gyfin)
+        add_entries("🌿 Gruppenspots – Olun Normal", spots_olun_normal)
+        add_entries("🌿 Gruppenspots – Olun Dehkia 1", spots_olun_d1)
+        add_entries("🌿 Gruppenspots – Olun Dehkia 2", spots_olun_d2)
 
-        for d in spots:
-            sk = _norm_spot_key(d.get("spot_key"))
+        add_entries(f"{PILAFE_EMOJI} Pila Fe", pilafe)
+        add_entries("🏛️ Atoraxxion", atoraxxion)
+        add_entries("🩸 Altar des Blutes", altar)
 
-            if sk == "mirumok":
-                spots_miru.append(d)
+        # --- nach Tag sortieren, dann nach Kategorie ---
+        # (wir sortieren über das dict selbst, nicht nur über label)
+        entries_sorted = sorted(entries, key=lambda t: _day_key(t[2]))
 
-            elif sk == "gyfin":
-                spots_gyfin.append(d)
+        # --- group by day_label ---
+        by_day: dict[str, list[tuple[str, dict]]] = {}
+        for day_label, cat_title, item in entries_sorted:
+            by_day.setdefault(day_label, []).append((cat_title, item))
 
-            elif sk == "olun":
-                tier = str(d.get("olun_tier") or "normal").strip().lower()
-                if tier == "dehkia2":
-                    spots_olun_d2.append(d)
-                elif tier == "dehkia1":
-                    spots_olun_d1.append(d)
-                else:
-                    spots_olun_normal.append(d)
+        # --- render ---
+        # Alles in description (kein „—“ mehr; Sektionen nur wenn es Einträge gibt)
+        chunks: list[str] = []
 
-            else:
-                spots_other.append(d)
+        if not entries_sorted:
+            chunks.append("— Keine aktiven Gruppensuchen —")
+        else:
+            for day_label, day_items in by_day.items():
+                # pro Tag: erst Tag-Header
+                chunks.append(f"**{day_label}**")
 
-        add_section(
-            f"{MIRUMOK_EMOJI} Gruppenspots – Mirumok ({len(spots_miru)})",
-            spots_miru
-        )
+                # innerhalb des Tages: nach Kategorie gruppieren
+                cat_map: dict[str, list[dict]] = {}
+                for cat_title, item in day_items:
+                    cat_map.setdefault(cat_title, []).append(item)
 
-        add_section(
-            f"{GYFIN_EMOJI} Gruppenspots – Gyfin ({len(spots_gyfin)})",
-            spots_gyfin
-        )
+                for cat_title, items in cat_map.items():
+                    if not items:
+                        continue
 
-        add_section(
-            f"{OLUN_EMOJI} Gruppenspots – Olun Normal ({len(spots_olun_normal)})",
-            spots_olun_normal
-        )
+                    chunks.append(f"__{cat_title} ({len(items)})__")
 
-        add_section(
-            f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 1 ({len(spots_olun_d1)})",
-            spots_olun_d1
-        )
+                    # Lines (ohne day in line2, weil Day schon im Header steht)
+                    lines = [fmt_line(x, include_day=False) for x in items]
 
-        add_section(
-            f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 2 ({len(spots_olun_d2)})",
-            spots_olun_d2
-        )
+                    # Begrenzen/Chunking (Discord Embed Description max ~4096)
+                    # Wir fügen solange an, bis es eng wird
+                    for ln in lines:
+                        # +1 wegen newline
+                        if sum(len(s) + 1 for s in chunks) + len(ln) + 1 > 3800:
+                            # Falls zu groß, abbrechen (oder später paging)
+                            chunks.append("… (gekürzt)")
+                            break
+                        chunks.append(ln)
 
-        if spots_other:
-            add_section(
-                f"{CHEER_EMOJI} Gruppenspots – Sonstige ({len(spots_other)})",
-                spots_other
-            )
+                chunks.append("")  # Leerzeile zwischen Tagen
 
-        add_section(f"{PILAFE_EMOJI} Pila Fe ({len(pilafe)})", pilafe)
-        add_section(f"🏛️ Atoraxxion ({len(atoraxxion)})", atoraxxion)
-        add_section(f"🩸 Altar des Blutes ({len(altar)})", altar)
+        # final description
+        e.description = "\n".join([c for c in chunks if c is not None])
 
         # Letztes echtes Update (datengetrieben) statt "immer jetzt"
         last_ts = 0
