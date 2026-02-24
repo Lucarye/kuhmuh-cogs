@@ -112,6 +112,47 @@ def _extract_time_sort_key(start_text: str) -> Tuple[int, int]:
 
     return (99, 99)
 
+def _fmt_day(day_iso: str) -> str:
+    """
+    Kompat: wird vom Dashboard genutzt.
+    Erwartet ISO-String (YYYY-MM-DD) und gibt formatierten Tag zurück.
+    """
+    day_iso = str(day_iso or "").strip()
+    if not day_iso:
+        return "—"
+    try:
+        day_d = dt.date.fromisoformat(day_iso)
+        # Nutze vorhandene Formatierung, falls vorhanden
+        try:
+            return _format_day(day_d)  # type: ignore[name-defined]
+        except Exception:
+            # Fallback, falls _format_day nicht existiert
+            return day_d.strftime("%a, %d.%m.")
+    except Exception:
+        return day_iso
+
+
+def _jump_link(d: dict) -> str:
+    """
+    Kompat: wird vom Dashboard genutzt.
+    Baut einen Jump-Link zur Nachricht.
+    Erwartet mindestens channel_id + message_id (guild_id optional).
+    """
+    guild_id = int(d.get("guild_id") or 0)
+    channel_id = int(d.get("channel_id") or 0)
+    message_id = int(d.get("message_id") or 0)
+
+    if not channel_id or not message_id:
+        return "—"
+
+    # Wenn _jump_url existiert -> verwenden
+    try:
+        return _jump_url(guild_id, channel_id, message_id)  # type: ignore[name-defined]
+    except Exception:
+        # Fallback: klassischer Jump-URL
+        if not guild_id:
+            return "—"
+        return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
 def _has_role(member: discord.Member, role_id: Optional[int]) -> bool:
     if not role_id:
