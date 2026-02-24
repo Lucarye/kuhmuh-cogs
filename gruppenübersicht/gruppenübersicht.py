@@ -634,6 +634,7 @@ class Gruppenübersicht(commands.Cog):
                     day_str = "—"
             except Exception:
                 day_str = str(day_iso or "—")
+
             start_text = str(d.get("start_text") or "—")
             duration_text = str(d.get("duration_text") or "—")
 
@@ -680,9 +681,9 @@ class Gruppenübersicht(commands.Cog):
             atorun_info = ""
             if cat == "atoraxxion":
                 runs = d.get("atoraxxion_runs") or []
+
                 # runs kann list/tuple/set sein oder als string gespeichert sein -> robust machen
                 if isinstance(runs, str):
-                    # z.B. "['vahmalkea','sycrakea']" oder "vahmalkea,sycrakea"
                     tmp = runs.strip()
                     if tmp.startswith("[") and tmp.endswith("]"):
                         tmp = tmp[1:-1]
@@ -705,47 +706,48 @@ class Gruppenübersicht(commands.Cog):
                         atorun_info = f" | 🏛️ Run: Teil-Run ({len(runs_set)}/4)"
 
             # ---------- Layout (Variante B) ----------
-            # Zeile 1: Status + Count + Jump (sehr schnell erfassbar)
-            # Zeile 2: Details kompakt, visuell "leichter"
             line1 = f"• **{status} | {count}{wl}** → {jump}"
             line2 = f"  `{spot_info}{day_str} | {start_text} | {duration_text} | Req: {req}{pilafe_info}{atorun_info}`"
             return f"{line1}\n{line2}"
 
-            def _sort_key(d: dict) -> tuple:
-                # 1) Tag (day_date_iso) ist primär
-                day_iso = str(d.get("day_date_iso") or "")
-                try:
-                    day = dt.date.fromisoformat(day_iso)
-                except Exception:
-                    # Unparsebar -> ans Ende
-                    day = dt.date.max
+        def _section_sort_key(d: dict) -> tuple:
+            """
+            Sortierung innerhalb einer Section:
+            1) Tag (day_date_iso) primär
+            2) Uhrzeit aus start_text als Tie-Breaker (wenn parsebar)
+            """
+            day_iso = str(d.get("day_date_iso") or "")
+            try:
+                day = dt.date.fromisoformat(day_iso)
+            except Exception:
+                day = dt.date.max  # unparsebar -> ans Ende
 
-                # 2) Optionaler Tie-Breaker: Uhrzeit aus start_text (wenn parsebar)
-                start_text = str(d.get("start_text") or "").strip().lower()
-                minutes = 24 * 60 + 1  # default: ganz ans Ende innerhalb des Tages
+            start_text = str(d.get("start_text") or "").strip().lower()
+            minutes = 24 * 60 + 1  # default: ganz ans Ende innerhalb des Tages
 
-                # Beispiele: "15 Uhr", "15:30", "15.30"
-                m = re.search(r"\b(\d{1,2})\s*[:.]\s*(\d{2})\b", start_text)
+            # "15:30" / "15.30"
+            m = re.search(r"\b(\d{1,2})\s*[:.]\s*(\d{2})\b", start_text)
+            if m:
+                h = int(m.group(1))
+                mm = int(m.group(2))
+                if 0 <= h <= 23 and 0 <= mm <= 59:
+                    minutes = h * 60 + mm
+            else:
+                # "15 Uhr"
+                m = re.search(r"\b(\d{1,2})\s*uhr\b", start_text)
                 if m:
                     h = int(m.group(1))
-                    mm = int(m.group(2))
-                    if 0 <= h <= 23 and 0 <= mm <= 59:
-                        minutes = h * 60 + mm
-                else:
-                    m = re.search(r"\b(\d{1,2})\s*uhr\b", start_text)
-                    if m:
-                        h = int(m.group(1))
-                        if 0 <= h <= 23:
-                            minutes = h * 60
+                    if 0 <= h <= 23:
+                        minutes = h * 60
 
-                return (day, minutes)
+            return (day, minutes)
 
         def add_section(title: str, arr: List[dict], empty_text: str = "—"):
             if not arr:
                 e.add_field(name=title, value=empty_text, inline=False)
                 return
 
-            arr_sorted = sorted(arr, key=_sort_key)
+            arr_sorted = sorted(arr, key=_section_sort_key)
             lines = [fmt_line(x) for x in arr_sorted]
 
             chunk = ""
@@ -761,14 +763,8 @@ class Gruppenübersicht(commands.Cog):
 
             for idx, ch in enumerate(chunks):
                 field_name = title if idx == 0 else f"{title} (weiter)"
-                # ⬇️ am Ende einen unsichtbaren Abstand anhängen
                 spaced_value = ch + "\n\u200b"
-
-                e.add_field(
-                    name=field_name,
-                    value=spaced_value,
-                    inline=False
-                )
+                e.add_field(name=field_name, value=spaced_value, inline=False)
 
         add_section(
             f"{MUHKUH_EMOJI} Muhhelfer – Normal ({len(muh_normal)})", muh_normal)
