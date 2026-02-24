@@ -869,7 +869,7 @@ class Gruppenübersicht(commands.Cog):
             day_iso = day_d.isoformat()
             day_label = _format_day(day_d)
 
-            chunks.append(f"## {day_label}")
+            chunks.append(f"### {day_label}")
 
             day_items = by_day.get(day_iso, [])
 
