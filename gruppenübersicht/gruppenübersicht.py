@@ -687,15 +687,6 @@ class Gruppenübersicht(commands.Cog):
             description="Hier siehst du alle aktiven Gruppensuchen.\n✉️ Button: DM Reminders an/aus.",
         )
 
-        e.add_field(
-            name="ℹ️ Info",
-            value=(
-                "• 🟢 Offen  • 🔴 Voll/Geschlossen\n"
-                "• „➜ #channel …“ ist der Jump-Link zum Post\n"
-                "• Anzeige immer für die nächsten **7 Tage**"
-            ),
-            inline=False,
-        )
 
         def fmt_line(d: dict, include_day: bool = True) -> str:
             # line1: Status + Teilnehmer + Channel + Jump
@@ -705,26 +696,30 @@ class Gruppenübersicht(commands.Cog):
             is_full = len(participants) >= max_players
 
             status_icon = "🔴" if is_closed else ("🔴" if is_full else "🟢")
-            status_label = "Geschlossen" if is_closed else (
-                "Voll" if is_full else "Offen")
+            status_label = "Geschlossen" if is_closed else ("Voll" if is_full else "Offen")
 
             chan_name = d.get("channel_name") or "—"
             jump = _jump_link(d)
 
             line1 = f"{status_icon} **{status_label} | {len(participants)}/{max_players}** ➜ #{chan_name} {jump}"
 
-            # line2: Meta (ohne Inline-Code, damit Emojis rendern!)
-            day_str = _fmt_day(d.get("day_date_iso")) if include_day else ""
+            # helpers: "—" / leer -> None
+            def _clean(val: object) -> Optional[str]:
+                s = str(val or "").strip()
+                if not s or s == "—":
+                    return None
+                return s
 
-            start_text = str(d.get("start_text") or "—")
-            duration_text = str(d.get("duration_text") or "—")
+            day_str = _fmt_day(d.get("day_date_iso")) if include_day else None
+            start_text = _clean(d.get("start_text"))
+            duration_text = _clean(d.get("duration_text"))
 
-            req = d.get("req_text")
-            req = str(req).strip() if req else "—"
+            req = _clean(d.get("req_text"))
 
             cat = str(d.get("category") or "").lower()
             spot_key = str(d.get("spot_key") or "").lower()
 
+            # spot emoji nur wenn spots
             spot_info = ""
             if cat == "spots":
                 if spot_key == "mirumok":
@@ -733,13 +728,13 @@ class Gruppenübersicht(commands.Cog):
                     spot_info = f"{GYFIN_EMOJI} "
                 elif spot_key == "olun":
                     spot_info = f"{OLUN_EMOJI} "
-                else:
-                    spot_info = ""
 
+            # optional infos nur wenn vorhanden
             pilafe_info = ""
             if cat == "pilafe":
-                amount = d.get("scroll_amount") or "—"
-                pilafe_info = f" | Menge: {amount}"
+                amount = _clean(d.get("scroll_amount"))
+                if amount:
+                    pilafe_info = f" | Menge: {amount}"
 
             atorun_info = ""
             if cat == "atoraxxion":
@@ -749,18 +744,28 @@ class Gruppenübersicht(commands.Cog):
                     atorun_info = " | 🏛️ Run: Kompletter Run (4/4)"
                 elif runs:
                     atorun_info = f" | 🏛️ Run: Teil-Run ({len(runs)}/4)"
-                else:
-                    atorun_info = " | 🏛️ Run: —"
+                # wenn nix gewählt wurde -> gar nichts anzeigen (kein "—")
 
-            # IMPORTANT: kein `...` Inline-Code → Emojis bleiben Emojis
-            parts = []
+            # line2: nur Teile anzeigen, die existieren
+            parts: list[str] = []
             if day_str:
                 parts.append(day_str)
-            parts.append(start_text)
-            parts.append(duration_text)
+            if start_text:
+                parts.append(start_text)
+            if duration_text:
+                parts.append(duration_text)
 
-            line2 = f"  {spot_info}" + \
-                " | ".join(parts) + f" | Req: {req}{pilafe_info}{atorun_info}"
+            # wenn absolut keine Meta da ist (sehr selten), dann line2 weglassen
+            if not parts and not req and not pilafe_info and not atorun_info and not spot_info:
+                return line1
+
+            line2 = "  " + spot_info + " | ".join(parts)
+
+            # Req nur anzeigen wenn gesetzt
+            if req:
+                line2 += f" | Req: {req}"
+
+            line2 += f"{pilafe_info}{atorun_info}"
 
             return f"{line1}\n{line2}"
 
@@ -827,14 +832,14 @@ class Gruppenübersicht(commands.Cog):
                 entries.append((day_iso, cat_title, x))
 
         # Nur Listen hinzufügen (leer ist ok)
-        add_entries("🐮 Muhhelfer – Normal", muh_normal)
-        add_entries("🐮 Muhhelfer – Schwer", muh_schwer)
+        add_entries(f"{MUHKUH_EMOJI} Muhhelfer – Normal", muh_normal)
+        add_entries(f"{MUHKUH_EMOJI} Muhhelfer – Schwer", muh_schwer)
 
-        add_entries("🌲 Gruppenspots – Mirumok", spots_miru)
-        add_entries("🌀 Gruppenspots – Gyfin", spots_gyfin)
-        add_entries("🌿 Gruppenspots – Olun Normal", spots_olun_normal)
-        add_entries("🌿 Gruppenspots – Olun Dehkia 1", spots_olun_d1)
-        add_entries("🌿 Gruppenspots – Olun Dehkia 2", spots_olun_d2)
+        add_entries(f"{MIRUMOK_EMOJI} Gruppenspots – Mirumok", spots_miru)
+        add_entries(f"{GYFIN_EMOJI} Gruppenspots – Gyfin", spots_gyfin)
+        add_entries(f"{OLUN_EMOJI} Gruppenspots – Olun Normal", spots_olun_normal)
+        add_entries(f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 1", spots_olun_d1)
+        add_entries(f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 2", spots_olun_d2)
 
         add_entries(f"{PILAFE_EMOJI} Pila Fe", pilafe)
         add_entries("🏛️ Atoraxxion", atoraxxion)
@@ -860,6 +865,13 @@ class Gruppenübersicht(commands.Cog):
 
         chunks: list[str] = []
 
+        info_prefix = (
+            "ℹ️ **Info**\n"
+            "• 🟢 Offen  • 🔴 Voll/Geschlossen\n"
+            "• „➜ #channel …“ ist der Jump-Link zum Post\n"
+            "• Anzeige immer für die nächsten **7 Tage**\n\n"
+        )
+
         for day_d in day_range:
             day_iso = day_d.isoformat()
             day_label = _format_day(day_d)
@@ -869,7 +881,7 @@ class Gruppenübersicht(commands.Cog):
             day_items = by_day.get(day_iso, [])
 
             if not day_items:
-                chunks.append("— Keine Gruppensuchen —")
+                chunks.append("_Keine Gruppensuchen_")
                 chunks.append("")  # Leerzeile zwischen Tagen
                 continue
 
