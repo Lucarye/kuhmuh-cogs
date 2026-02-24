@@ -184,6 +184,32 @@ def _spot_emoji(spot_key: str, *, olun_tier: str = "") -> str:
 
     return CHEER_EMOJI
 
+def _normalize_atoraxxion_runs(data: dict) -> List[str]:
+    """
+    Liefert eine normalisierte Liste der gewählten Atoraxxion-Dungeons.
+    Erwartet 'atoraxxion_runs' als Liste (neu) oder 'atoraxxion_run' als String (alt).
+    Ergebnis-Keys: vahmalkea, sycrakea, yolunakea, orzekea
+    """
+    # Neu: Liste
+    raw = data.get("atoraxxion_runs")
+
+    runs: List[str] = []
+    if isinstance(raw, list):
+        runs = [str(x).strip().lower() for x in raw if str(x).strip()]
+
+    # Alt: einzelner String
+    if not runs:
+        one = data.get("atoraxxion_run")
+        if one:
+            runs = [str(one).strip().lower()]
+
+    allowed = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
+    runs = [r for r in runs if r in allowed]
+
+    # Stabil / deterministisch sortieren (UI + Dashboard konsistent)
+    order = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
+    runs.sort(key=lambda x: order.index(x) if x in order else 999)
+    return runs
 
 class DMOptButton(discord.ui.Button):
     def __init__(self, which: str):
