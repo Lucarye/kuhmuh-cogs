@@ -583,55 +583,84 @@ class Gruppenübersicht(commands.Cog):
         )
 
         def fmt_line(d: dict) -> str:
-            day_iso = str(d.get("day_date_iso") or "")
-            try:
-                day_d = dt.date.fromisoformat(day_iso)
-                day_str = _format_day(day_d)
-            except Exception:
-                day_str = day_iso or "—"
+            # ---------- Basiswerte ----------
+            day_str = _fmt_day(d.get("day_date_iso"))
+            start_text = str(d.get("start_text") or "—")
+            duration_text = str(d.get("duration_text") or "—")
 
-            start_text = d.get("start_text") or "—"
-            duration_text = d.get("duration_text") or "—"
+            # Req-Text (wenn vorhanden)
+            req = str(d.get("req_text") or "—")
 
-            max_players = int(d.get("max_players") or 2)
+            # Status / Count / Jump
             participants = list(d.get("participants") or [])
             waitlist = list(d.get("waitlist") or [])
+            max_players = int(d.get("max_players", 2))
 
             is_closed = bool(d.get("is_closed", False))
             is_full = len(participants) >= max_players
-            status = "🔴 Geschlossen" if is_closed else (
-                "🔴 Voll" if is_full else "🟢 Offen")
 
-            req_text = d.get("req_text") or ""
-            req_default = _default_req_for(d)
-            req = req_text or req_default or "—"
+            if is_closed:
+                status = "🔴 Geschlossen"
+            else:
+                status = "🔴 Voll" if is_full else "🟢 Offen"
 
-            channel_id = int(d.get("channel_id") or 0)
-            message_id = int(d.get("message_id") or 0)
-            jump = _jump_url(guild.id, channel_id, message_id)
-
-            # 3/5 Anzeige
             count = f"{len(participants)}/{max_players}"
-
-            # Warteschlange nur wenn > 0
             wl = f" | WL: {len(waitlist)}" if len(waitlist) > 0 else ""
 
-            cat = str(d.get("category") or "")
-            spot_key = str(d.get("spot_key") or "")
-            olun_tier = str(d.get("olun_tier") or "")
-            spot_icon = _spot_emoji(spot_key, olun_tier=olun_tier) if cat == "spots" else ""
-            cat_icon = "🏛️" if cat == "atoraxxion" else ("🩸" if cat == "altar" else "")
+            jump = _jump_link(d)
 
-            prefix = ""
-            if spot_icon:
-                prefix = f"{spot_icon} "
-            elif cat_icon:
-                prefix = f"{cat_icon} "
+            # ---------- Kategorie-spezifische Kurzinfos ----------
+            cat = str(d.get("category") or "").lower()
 
-            return (
-                f"• {prefix}**{day_str}** | **{start_text}** | {duration_text} | Req: **{req}**\n"
-                f"  {status} | {count}{wl} → {jump}"
-            )
+            # Spot-Icon (nur für spots)
+            spot_info = ""
+            if cat == "spots":
+                spot_key = str(d.get("spot_key") or "")
+                olun_tier = str(d.get("olun_tier") or "")
+                spot_icon = _spot_emoji(spot_key, olun_tier=olun_tier)
+                if spot_icon:
+                    spot_info = f"{spot_icon} "
+
+            # PilaFe Menge (optional)
+            pilafe_info = ""
+            if cat == "pilafe":
+                amount = str(d.get("scroll_amount") or "—")
+                pilafe_info = f" | Menge: {amount}"
+
+            # Atoraxxion Run-Zusammenfassung (optional)
+            atorun_info = ""
+            if cat == "atoraxxion":
+                runs = d.get("atoraxxion_runs") or []
+                # runs kann list/tuple/set sein oder als string gespeichert sein -> robust machen
+                if isinstance(runs, str):
+                    # z.B. "['vahmalkea','sycrakea']" oder "vahmalkea,sycrakea"
+                    tmp = runs.strip()
+                    if tmp.startswith("[") and tmp.endswith("]"):
+                        tmp = tmp[1:-1]
+                    parts = [p.strip().strip("'").strip('"') for p in tmp.split(",") if p.strip()]
+                    runs = parts
+                if isinstance(runs, (set, tuple)):
+                    runs = list(runs)
+                if not isinstance(runs, list):
+                    runs = []
+
+                # Normalisieren / zählen
+                all_keys = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
+                runs_norm = [str(x).lower() for x in runs if str(x).strip()]
+                runs_set = set(runs_norm)
+
+                if runs_set:
+                    if runs_set == all_keys:
+                        atorun_info = " | 🏛️ Run: Kompletter Run (4/4)"
+                    else:
+                        atorun_info = f" | 🏛️ Run: Teil-Run ({len(runs_set)}/4)"
+
+            # ---------- Layout (Variante B) ----------
+            # Zeile 1: Status + Count + Jump (sehr schnell erfassbar)
+            # Zeile 2: Details kompakt, visuell "leichter"
+            line1 = f"• **{status} | {count}{wl}** → {jump}"
+            line2 = f"  `{spot_info}{day_str} | {start_text} | {duration_text} | Req: {req}{pilafe_info}{atorun_info}`"
+            return f"{line1}\n{line2}"
 
         def add_section(title: str, arr: List[dict], empty_text: str = "—"):
             if not arr:
