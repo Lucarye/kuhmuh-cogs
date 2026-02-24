@@ -701,7 +701,27 @@ class Gruppenübersicht(commands.Cog):
             chan_name = d.get("channel_name") or "—"
             jump = _jump_link(d)
 
-            line1 = f"{status_icon} **{status_label} | {len(participants)}/{max_players}** ➜ #{chan_name} {jump}"
+            # Meta kompakt in Zeile 1
+            meta_parts: list[str] = []
+
+            if start_text:
+                meta_parts.append(start_text)
+            if duration_text:
+                meta_parts.append(duration_text)
+            if req:
+                meta_parts.append(f"Req: {req}")
+
+            # pilafe_info / atorun_info kommen bei dir schon mit " | ..." -> clean anhängen
+            if pilafe_info:
+                meta_parts.append(pilafe_info.replace(" | ", "", 1))
+            if atorun_info:
+                meta_parts.append(atorun_info.replace(" | ", "", 1))
+
+            meta = " | ".join(meta_parts)
+            if meta:
+                meta = f" — {meta}"
+
+            line1 = f"{status_icon} **{status_label} | {len(participants)}/{max_players}**{meta} ➜ #{chan_name} {jump}"
 
             # helpers: "—" / leer -> None
             def _clean(val: object) -> Optional[str]:
@@ -760,7 +780,7 @@ class Gruppenübersicht(commands.Cog):
 
             line2 += f"{pilafe_info}{atorun_info}"
 
-            return f"{line1}\n{line2}"
+            return line1
 
         def _section_sort_key(d: dict) -> tuple:
             """
@@ -900,7 +920,7 @@ class Gruppenübersicht(commands.Cog):
 
             chunks.append("")  # Leerzeile zwischen Tagen
 
-        e.description = "\n".join([c for c in chunks if c is not None])
+        e.description = info_prefix + "\n".join([c for c in chunks if c is not None])
 
         # Letztes echtes Update (datengetrieben) statt "immer jetzt"
         last_ts = 0
