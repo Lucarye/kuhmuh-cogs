@@ -584,7 +584,15 @@ class Gruppenübersicht(commands.Cog):
 
         def fmt_line(d: dict) -> str:
             # ---------- Basiswerte ----------
-            day_str = _fmt_day(d.get("day_date_iso"))
+            day_iso = d.get("day_date_iso")
+            try:
+                if day_iso:
+                    day_d = dt.date.fromisoformat(str(day_iso))
+                    day_str = _format_day(day_d)
+                else:
+                    day_str = "—"
+            except Exception:
+                day_str = str(day_iso or "—")
             start_text = str(d.get("start_text") or "—")
             duration_text = str(d.get("duration_text") or "—")
 
