@@ -711,12 +711,42 @@ class Gruppenübersicht(commands.Cog):
             line2 = f"  `{spot_info}{day_str} | {start_text} | {duration_text} | Req: {req}{pilafe_info}{atorun_info}`"
             return f"{line1}\n{line2}"
 
+            def _sort_key(d: dict) -> tuple:
+                # 1) Tag (day_date_iso) ist primär
+                day_iso = str(d.get("day_date_iso") or "")
+                try:
+                    day = dt.date.fromisoformat(day_iso)
+                except Exception:
+                    # Unparsebar -> ans Ende
+                    day = dt.date.max
+
+                # 2) Optionaler Tie-Breaker: Uhrzeit aus start_text (wenn parsebar)
+                start_text = str(d.get("start_text") or "").strip().lower()
+                minutes = 24 * 60 + 1  # default: ganz ans Ende innerhalb des Tages
+
+                # Beispiele: "15 Uhr", "15:30", "15.30"
+                m = re.search(r"\b(\d{1,2})\s*[:.]\s*(\d{2})\b", start_text)
+                if m:
+                    h = int(m.group(1))
+                    mm = int(m.group(2))
+                    if 0 <= h <= 23 and 0 <= mm <= 59:
+                        minutes = h * 60 + mm
+                else:
+                    m = re.search(r"\b(\d{1,2})\s*uhr\b", start_text)
+                    if m:
+                        h = int(m.group(1))
+                        if 0 <= h <= 23:
+                            minutes = h * 60
+
+                return (day, minutes)
+
         def add_section(title: str, arr: List[dict], empty_text: str = "—"):
             if not arr:
                 e.add_field(name=title, value=empty_text, inline=False)
                 return
 
-            lines = [fmt_line(x) for x in arr]
+            arr_sorted = sorted(arr, key=_sort_key)
+            lines = [fmt_line(x) for x in arr_sorted]
 
             chunk = ""
             chunks: List[str] = []
