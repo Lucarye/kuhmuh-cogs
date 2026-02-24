@@ -689,7 +689,14 @@ class Gruppenübersicht(commands.Cog):
 
 
         def fmt_line(d: dict, include_day: bool = True) -> str:
-            # line1: Status + Teilnehmer + Channel + Jump
+            # helpers: "—" / leer -> None
+            def _clean(val: object) -> Optional[str]:
+                s = str(val or "").strip()
+                if not s or s == "—":
+                    return None
+                return s
+
+            # Grunddaten (erst definieren, dann benutzen -> kein UnboundLocalError)
             max_players = int(d.get("max_players", 2) or 2)
             participants = list(d.get("participants") or [])
             is_closed = bool(d.get("is_closed", False))
@@ -701,86 +708,52 @@ class Gruppenübersicht(commands.Cog):
             chan_name = d.get("channel_name") or "—"
             jump = _jump_link(d)
 
-            # Meta kompakt in Zeile 1
+            day_str = _fmt_day(d.get("day_date_iso")) if include_day else None
+            start_text = _clean(d.get("start_text"))
+            duration_text = _clean(d.get("duration_text"))
+            req = _clean(d.get("req_text"))
+
+            cat = str(d.get("category") or "").lower()
+
+            # Extra-Infos (nur wenn vorhanden)
+            pilafe_extra: Optional[str] = None
+            if cat == "pilafe":
+                amount = _clean(d.get("scroll_amount"))
+                if amount:
+                    pilafe_extra = f"Menge: {amount}"
+
+            atorun_extra: Optional[str] = None
+            if cat == "atoraxxion":
+                runs = _normalize_atoraxxion_runs(d)
+                all_keys = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
+                if set(runs) == all_keys:
+                    atorun_extra = "🏛️ Run: Kompletter Run (4/4)"
+                elif runs:
+                    atorun_extra = f"🏛️ Run: Teil-Run ({len(runs)}/4)"
+                # wenn nix gewählt -> gar nichts anzeigen
+
+            # Meta in 1 Zeile bündeln
             meta_parts: list[str] = []
 
+            # (Day optional – bei dir i.d.R. False, weil Day als ### Header kommt)
+            if day_str:
+                meta_parts.append(day_str)
             if start_text:
                 meta_parts.append(start_text)
             if duration_text:
                 meta_parts.append(duration_text)
             if req:
                 meta_parts.append(f"Req: {req}")
-
-            # pilafe_info / atorun_info kommen bei dir schon mit " | ..." -> clean anhängen
-            if pilafe_info:
-                meta_parts.append(pilafe_info.replace(" | ", "", 1))
-            if atorun_info:
-                meta_parts.append(atorun_info.replace(" | ", "", 1))
+            if pilafe_extra:
+                meta_parts.append(pilafe_extra)
+            if atorun_extra:
+                meta_parts.append(atorun_extra)
 
             meta = " | ".join(meta_parts)
-            if meta:
-                meta = f" — {meta}"
+            meta = f" — {meta}" if meta else ""
 
-            line1 = f"{status_icon} **{status_label} | {len(participants)}/{max_players}**{meta} ➜ #{chan_name} {jump}"
-
-            # helpers: "—" / leer -> None
-            def _clean(val: object) -> Optional[str]:
-                s = str(val or "").strip()
-                if not s or s == "—":
-                    return None
-                return s
-
-            day_str = _fmt_day(d.get("day_date_iso")) if include_day else None
-            start_text = _clean(d.get("start_text"))
-            duration_text = _clean(d.get("duration_text"))
-
-            req = _clean(d.get("req_text"))
-
-            cat = str(d.get("category") or "").lower()
-            spot_key = str(d.get("spot_key") or "").lower()
-
-            # Spot-Emoji kommt bereits über den Category-Header -> hier nicht nochmal anzeigen
-            spot_info = ""
-
-            # optional infos nur wenn vorhanden
-            pilafe_info = ""
-            if cat == "pilafe":
-                amount = _clean(d.get("scroll_amount"))
-                if amount:
-                    pilafe_info = f" | Menge: {amount}"
-
-            atorun_info = ""
-            if cat == "atoraxxion":
-                runs = _normalize_atoraxxion_runs(d)
-                all_keys = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
-                if set(runs) == all_keys:
-                    atorun_info = " | 🏛️ Run: Kompletter Run (4/4)"
-                elif runs:
-                    atorun_info = f" | 🏛️ Run: Teil-Run ({len(runs)}/4)"
-                # wenn nix gewählt wurde -> gar nichts anzeigen (kein "—")
-
-            # line2: nur Teile anzeigen, die existieren
-            parts: list[str] = []
-            if day_str:
-                parts.append(day_str)
-            if start_text:
-                parts.append(start_text)
-            if duration_text:
-                parts.append(duration_text)
-
-            # wenn absolut keine Meta da ist (sehr selten), dann line2 weglassen
-            if not parts and not req and not pilafe_info and not atorun_info and not spot_info:
-                return line1
-
-            line2 = "  " + spot_info + " | ".join(parts)
-
-            # Req nur anzeigen wenn gesetzt
-            if req:
-                line2 += f" | Req: {req}"
-
-            line2 += f"{pilafe_info}{atorun_info}"
-
-            return line1
+            # WICHTIG: kein Spot-Emoji hier -> kommt im Category-Header, verhindert Doppel-Emoji
+            return f"{status_icon} **{status_label} | {len(participants)}/{max_players}**{meta} ➜ #{chan_name} {jump}"
 
         def _section_sort_key(d: dict) -> tuple:
             """
