@@ -719,15 +719,8 @@ class Gruppenübersicht(commands.Cog):
             cat = str(d.get("category") or "").lower()
             spot_key = str(d.get("spot_key") or "").lower()
 
-            # spot emoji nur wenn spots
+            # Spot-Emoji kommt bereits über den Category-Header -> hier nicht nochmal anzeigen
             spot_info = ""
-            if cat == "spots":
-                if spot_key == "mirumok":
-                    spot_info = f"{MIRUMOK_EMOJI} "
-                elif spot_key == "gyfin":
-                    spot_info = f"{GYFIN_EMOJI} "
-                elif spot_key == "olun":
-                    spot_info = f"{OLUN_EMOJI} "
 
             # optional infos nur wenn vorhanden
             pilafe_info = ""
@@ -876,7 +869,7 @@ class Gruppenübersicht(commands.Cog):
             day_iso = day_d.isoformat()
             day_label = _format_day(day_d)
 
-            chunks.append(f"**{day_label}**")
+            chunks.append(f"## {day_label}")
 
             day_items = by_day.get(day_iso, [])
 
