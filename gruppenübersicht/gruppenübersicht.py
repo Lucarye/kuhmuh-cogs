@@ -869,36 +869,45 @@ class Gruppenübersicht(commands.Cog):
                 continue
 
             # innerhalb des Tages: nach Kategorie gruppieren
+            # innerhalb des Tages: nach Kategorie gruppieren
             cat_map: dict[str, list[dict]] = {}
             for cat_title, item in day_items:
                 cat_map.setdefault(cat_title, []).append(item)
 
-                def _status_sort_key(x: dict):
-                    max_players = int(x.get("max_players", 2) or 2)
-                    participants = list(x.get("participants") or [])
-                    is_closed = bool(x.get("is_closed", False))
-                    is_full = len(participants) >= max_players
 
-                    # Offen (0) → Voll (1) → Geschlossen (2)
-                    if not is_closed and not is_full:
-                        status_order = 0
-                    elif not is_closed and is_full:
-                        status_order = 1
-                    else:
-                        status_order = 2
+            # ---------- Status Sort Key (einmal definieren) ----------
+            def _status_sort_key(x: dict) -> tuple:
+                max_players = int(x.get("max_players", 2) or 2)
+                participants = list(x.get("participants") or [])
+                is_closed = bool(x.get("is_closed", False))
+                is_full = len(participants) >= max_players
 
-                    tkey = _extract_time_sort_key(str(x.get("start_text") or ""))
-                    return (status_order, tkey[0], tkey[1])
+                # Reihenfolge:
+                # 0 = Offen
+                # 1 = Voll
+                # 2 = Geschlossen
+                if is_closed:
+                    state = 2
+                elif is_full:
+                    state = 1
+                else:
+                    state = 0
 
-                items_cat.sort(key=_status_sort_key)
+                # Zeit als Zweitsortierung
+                start_text = str(x.get("start_text") or "")
+                tkey = _extract_time_sort_key(start_text)
 
+                return (state, tkey[0], tkey[1])
+
+
+            # ---------- Rendering ----------
             for cat_title, items_cat in cat_map.items():
-                if not items_cat:
-                    continue
+
+                # 🔹 Sortierung hier — jetzt existiert items_cat garantiert
+                items_cat.sort(key=_status_sort_key)
 
                 chunks.append(f"__{cat_title} ({len(items_cat)})__")
 
-                # Lines (ohne Day in line2, weil Day schon im Header steht)
                 lines = [fmt_line(x, include_day=False) for x in items_cat]
 
                 for ln in lines:
@@ -906,8 +915,6 @@ class Gruppenübersicht(commands.Cog):
                         chunks.append("… (gekürzt)")
                         break
                     chunks.append(ln)
-
-            chunks.append("")  # Leerzeile zwischen Tagen
 
         e.description = info_prefix + "\n".join([c for c in chunks if c is not None])
 
