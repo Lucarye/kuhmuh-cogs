@@ -95,7 +95,6 @@ EASTER_EGG_TEXT_POOL = [
 ]
 
 
-
 GUILD_ID = 1198649628787212458
 
 AKVK_NORMAL = "301 / 385"
@@ -418,6 +417,7 @@ def _format_day(d: dt.date) -> str:
     wd = WEEKDAYS_DE[d.weekday()]
     return f"{wd}, {d.day:02d}.{d.month:02d}."
 
+
 def _fmt_thousands_de(val: object) -> str:
     """
     Formatiert Integers wie 4000 -> '4.000'
@@ -437,6 +437,7 @@ def _fmt_thousands_de(val: object) -> str:
         return out + ("+" if plus else "")
 
     return s
+
 
 def _safe_int(s: str) -> Optional[int]:
     try:
@@ -887,7 +888,8 @@ class DetailsModal(discord.ui.Modal):
             placeholder="z.B. 1000",
             required=is_pilafe and session.mode == "create",
             max_length=30,
-            default=_fmt_thousands_de(current_amount) if str(current_amount or "").strip() else None
+            default=_fmt_thousands_de(current_amount) if str(
+                current_amount or "").strip() else None
         )
         self.duration_text = discord.ui.TextInput(
             label="Geplante Dauer",
@@ -2260,108 +2262,26 @@ class PublicPostView(discord.ui.View):
         return data
 
     async def _on_join(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
         if not interaction.guild:
             return
 
         mid = int(self.message_id)
 
-        async with self.cog._lock_for(mid):
-            data = await self.cog.config.custom("POST", str(mid)).all()
+        # AP Modal -> danach in cog._join speichern/refreshen
+        async def _done(modal_interaction: discord.Interaction, ap_val: str):
+            await self.cog._join(modal_interaction, mid, ap_val)
 
-            # geschlossen?
-            if bool(data.get("is_closed", False)):
-                await interaction.followup.send("🔒 Diese Suche ist bereits geschlossen.", ephemeral=True)
-                return
-
-            max_players = int(data.get("max_players", 2))
-            participants: List[int] = list(data.get("participants") or [])
-            waitlist: List[int] = list(data.get("waitlist") or [])
-
-            uid = int(interaction.user.id)
-
-            # schon drin?
-            if uid in participants:
-                await interaction.followup.send("✅ Du bist bereits bei den Teilnehmern eingetragen.", ephemeral=True)
-                return
-            if uid in waitlist:
-                await interaction.followup.send("🕒 Du bist bereits in der Warteschlange.", ephemeral=True)
-                return
-
-            # eintragen (Teilnehmer oder Warteliste)
-            if len(participants) < max_players:
-                participants.append(uid)
-                msg = "✅ Eingetragen (Teilnehmer)."
-            else:
-                waitlist.append(uid)
-                msg = "🕒 Eingetragen (Warteschlange)."
-
-            await self.cog.config.custom("POST", str(mid)).participants.set(participants)
-            await self.cog.config.custom("POST", str(mid)).waitlist.set(waitlist)
-
-            # Post aktualisieren (embed + view) atomar nach Update
-            guild = interaction.guild
-            embed = await self.cog._build_public_embed(guild, {**data, "participants": participants, "waitlist": waitlist})
-            view = PublicPostView(self.cog, mid)
-
-            try:
-                if interaction.channel:
-                    await self.cog._refresh_public_post(guild=interaction.guild, channel=interaction.channel, message_id=mid)
-            except Exception:
-                pass
-
-        await interaction.followup.send(msg, ephemeral=True)
+        try:
+            await interaction.response.send_modal(JoinApModal(self.cog, _done))
+        except discord.InteractionResponded:
+            await interaction.followup.send_modal(JoinApModal(self.cog, _done))
 
     async def _on_leave(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
         if not interaction.guild:
             return
 
         mid = int(self.message_id)
-        uid = int(interaction.user.id)
-
-        promoted_id: Optional[int] = None
-
-        async with self.cog._lock_for(mid):
-            data = await self.cog.config.custom("POST", str(mid)).all()
-
-            participants: List[int] = list(data.get("participants") or [])
-            waitlist: List[int] = list(data.get("waitlist") or [])
-
-            changed = False
-
-            if uid in participants:
-                participants.remove(uid)
-                changed = True
-
-                # Promotion aus Warteliste (atomar!)
-                if waitlist:
-                    promoted_id = int(waitlist.pop(0))
-                    participants.append(promoted_id)
-
-            elif uid in waitlist:
-                waitlist.remove(uid)
-                changed = True
-
-            if not changed:
-                await interaction.followup.send("ℹ️ Du bist nicht eingetragen.", ephemeral=True)
-                return
-
-            await self.cog.config.custom("POST", str(mid)).participants.set(participants)
-            await self.cog.config.custom("POST", str(mid)).waitlist.set(waitlist)
-
-            # Post aktualisieren
-            guild = interaction.guild
-            embed = await self.cog._build_public_embed(guild, {**data, "participants": participants, "waitlist": waitlist})
-            view = PublicPostView(self.cog, mid)
-
-            try:
-                if interaction.channel:
-                    await self.cog._refresh_public_post(guild=interaction.guild, channel=interaction.channel, message_id=mid)
-            except Exception:
-                pass
+        await self.cog._leave(interaction, mid)
 
         # Notify Promotion außerhalb Lock (damit Lock nicht blockiert)
         if promoted_id and interaction.guild:
@@ -3612,7 +3532,8 @@ class GruppensucheTest(commands.Cog):
             # Anzeige: eine klare Run-Zeile + darunter Dungeons fett
             selection_block = f"**🏛️ Run:** {run_label} ({run_count}/4)\n\n"
             if runs_ordered:
-                lines_sel = "\n".join([f"• **{dungeon_map[k]}**" for k in runs_ordered])
+                lines_sel = "\n".join(
+                    [f"• **{dungeon_map[k]}**" for k in runs_ordered])
                 selection_block += f"**Dungeons:**\n{lines_sel}\n\n"
 
             e.description = (
