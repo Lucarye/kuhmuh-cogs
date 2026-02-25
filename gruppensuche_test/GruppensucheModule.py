@@ -392,6 +392,25 @@ def _format_day(d: dt.date) -> str:
     wd = WEEKDAYS_DE[d.weekday()]
     return f"{wd}, {d.day:02d}.{d.month:02d}."
 
+def _fmt_thousands_de(val: object) -> str:
+    """
+    Formatiert Integers wie 4000 -> '4.000'
+    Wenn nicht eindeutig int: gibt original als String zurück.
+    """
+    s = str(val or "").strip()
+    if not s:
+        return "—"
+
+    # nur reine Zahl (optional mit + am Ende) formatieren
+    plus = s.endswith("+")
+    core = s[:-1] if plus else s
+
+    if core.isdigit():
+        n = int(core)
+        out = f"{n:,}".replace(",", ".")
+        return out + ("+" if plus else "")
+
+    return s
 
 def _safe_int(s: str) -> Optional[int]:
     try:
@@ -840,7 +859,7 @@ class DetailsModal(discord.ui.Modal):
             placeholder="z.B. 1000",
             required=is_pilafe and session.mode == "create",
             max_length=30,
-            default=str(current_amount) if current_amount else None,
+            default=_fmt_thousands_de(current_amount)
         )
         self.duration_text = discord.ui.TextInput(
             label="Geplante Dauer",
@@ -3580,7 +3599,7 @@ class GruppensucheTest(commands.Cog):
 
         else:
             # Pila Fe
-            amount = data.get("scroll_amount") or "—"
+            amount = _fmt_thousands_de(data.get("scroll_amount"))
             header = (
                 f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Pila Fe Schriftrollen\n"
