@@ -504,31 +504,9 @@ def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> 
     data["easter_egg_texts"] = egg_map
     return txt
 
-def _normalize_ap_display(ap_val: Optional[str]) -> Optional[str]:
-    """
-    AP Anzeige normalisieren:
-    - wenn Zahl > EASTER_EGG_AP: auf '396+' (oder EASTER_EGG_AP+) setzen
-    - sonst unverändert
-    """
-    if not ap_val:
-        return None
-    s = str(ap_val).strip()
-    m = _AP_NUM_RE.search(s)
-    if not m:
-        return s
-    try:
-        n = int(m.group(1))
-    except Exception:
-        return s
-
-    if n > EASTER_EGG_AP:
-        return f"{EASTER_EGG_AP}+"
-    return s
 
 def _fmt_player_with_ap_and_egg(mention: str, ap_val: Optional[str], egg_text: Optional[str]) -> str:
-    ap_disp = _normalize_ap_display(ap_val)
-    ap_disp = _fmt_thousands_de(ap_disp) if ap_disp else None
-
+    ap_disp = _fmt_thousands_de(ap_val) if ap_val else None
     base = f"{mention} ({ap_disp} AP)" if ap_disp else mention
     if egg_text:
         return f"{base} ✨ {egg_text}"
@@ -536,8 +514,7 @@ def _fmt_player_with_ap_and_egg(mention: str, ap_val: Optional[str], egg_text: O
 
 
 def _fmt_player_with_ap(mention: str, ap_val: Optional[str]) -> str:
-    ap_disp = _normalize_ap_display(ap_val)
-    ap_disp = _fmt_thousands_de(ap_disp) if ap_disp else None
+    ap_disp = _fmt_thousands_de(ap_val) if ap_val else None
     return f"{mention} ({ap_disp} AP)" if ap_disp else mention
 
 
