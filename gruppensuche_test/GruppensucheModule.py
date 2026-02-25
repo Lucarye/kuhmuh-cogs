@@ -66,7 +66,34 @@ EASTER_EGG_TEXT_POOL = [
     "bringt Kuhkraft auf Maximum",
     "hat den Black Spirit überredet",
     "AP ist nicht alles… außer heute 😄",
+    "rein statistisch beeindruckend",
+    "overcap confirmed.",
+    "die Herde beobachtet dich.",
+    "vom Schwarzgeist gesegnet",
+    "hat wohl einem GM geholfen 😉",
+    "trägt die Hörner der Macht",
+    "Softcap? Kenn ich nicht.",
+    "lebt jenseits von Sheet-AP",
+    "hat das Gras cap-optimiert",
+    "ist offiziell im Endgame-Endgame",
+    "steht jetzt im Heu-Archiv",
+    "intern bekannt.",
+    "wir prüfen das nochmal… vielleicht.",
+    "offiziell nicht kommentiert.",
+    "hat die Kuhmuh-Schwelle überschritten",
+    "ist vermutlich noch im Tutorial.",
+    "rein hypothetisch vollkommen angemessen.",
+    "statistisch fragwürdig. Praktisch beeindruckend.",
+    f"Heu-Level: Endstufe {MUHKUH_EMOJI}",
+    "im internen Gras-Register vermerkt",
+    "der Schwarzgeist schaut irritiert 👀",
+    "RNG hat weggesehen 🎲",
+    "Cronsteine wurden geopfert",
+    "über dem empfohlenen Patchlevel",
+    "Sheet-AP ist nur ein Vorschlag",
+    "Legenden beginnen genau so."
 ]
+
 
 
 GUILD_ID = 1198649628787212458
