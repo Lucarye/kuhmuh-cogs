@@ -60,10 +60,9 @@ OLUN_EMOJI = "<:olun:1471826612394655857>"
 EASTER_EGG_AP = 396
 EASTER_EGG_MARK = " ✨"  # oder f" {MUHKUH_EMOJI}" wenn du es cow-themed willst
 
-# ✅ Textpool (rein kosmetisch)
 EASTER_EGG_TEXT_POOL = [
     "hat wohl heimlich +AP im Stall gefunden",
-    "ist offiziell overcapped :muhkuh:",
+    f"ist offiziell overcapped {MUHKUH_EMOJI}",
     "bringt Kuhkraft auf Maximum",
     "hat den Black Spirit überredet",
     "AP ist nicht alles… außer heute 😄",
@@ -505,16 +504,41 @@ def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> 
     data["easter_egg_texts"] = egg_map
     return txt
 
+def _normalize_ap_display(ap_val: Optional[str]) -> Optional[str]:
+    """
+    AP Anzeige normalisieren:
+    - wenn Zahl > EASTER_EGG_AP: auf '396+' (oder EASTER_EGG_AP+) setzen
+    - sonst unverändert
+    """
+    if not ap_val:
+        return None
+    s = str(ap_val).strip()
+    m = _AP_NUM_RE.search(s)
+    if not m:
+        return s
+    try:
+        n = int(m.group(1))
+    except Exception:
+        return s
+
+    if n > EASTER_EGG_AP:
+        return f"{EASTER_EGG_AP}+"
+    return s
 
 def _fmt_player_with_ap_and_egg(mention: str, ap_val: Optional[str], egg_text: Optional[str]) -> str:
-    base = f"{mention} ({ap_val} AP)" if ap_val else mention
+    ap_disp = _normalize_ap_display(ap_val)
+    ap_disp = _fmt_thousands_de(ap_disp) if ap_disp else None
+
+    base = f"{mention} ({ap_disp} AP)" if ap_disp else mention
     if egg_text:
         return f"{base} ✨ {egg_text}"
     return base
 
 
 def _fmt_player_with_ap(mention: str, ap_val: Optional[str]) -> str:
-    return f"{mention} ({ap_val} AP)" if ap_val else mention
+    ap_disp = _normalize_ap_display(ap_val)
+    ap_disp = _fmt_thousands_de(ap_disp) if ap_disp else None
+    return f"{mention} ({ap_disp} AP)" if ap_disp else mention
 
 
 def _parse_time_token(token: str) -> Optional[tuple[int, int]]:
@@ -859,7 +883,7 @@ class DetailsModal(discord.ui.Modal):
             placeholder="z.B. 1000",
             required=is_pilafe and session.mode == "create",
             max_length=30,
-            default=_fmt_thousands_de(current_amount)
+            default=_fmt_thousands_de(current_amount) if str(current_amount or "").strip() else None
         )
         self.duration_text = discord.ui.TextInput(
             label="Geplante Dauer",
