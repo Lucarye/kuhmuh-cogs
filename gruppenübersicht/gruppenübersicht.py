@@ -687,16 +687,15 @@ class Gruppenübersicht(commands.Cog):
             description="Hier siehst du alle aktiven Gruppensuchen.\n✉️ Button: DM Reminders an/aus.",
         )
 
-
         def fmt_line(d: dict, include_day: bool = True) -> str:
-            # helpers: "—" / leer -> None
+            # --- Helper ---
             def _clean(val: object) -> Optional[str]:
                 s = str(val or "").strip()
                 if not s or s == "—":
                     return None
                 return s
 
-            # Grunddaten (erst definieren, dann benutzen -> kein UnboundLocalError)
+            # --- Grunddaten ---
             max_players = int(d.get("max_players", 2) or 2)
             participants = list(d.get("participants") or [])
             is_closed = bool(d.get("is_closed", False))
@@ -708,6 +707,7 @@ class Gruppenübersicht(commands.Cog):
             chan_name = d.get("channel_name") or "—"
             jump = _jump_link(d)
 
+            # --- Meta-Daten zuerst sauber setzen (verhindert UnboundLocalError) ---
             day_str = _fmt_day(d.get("day_date_iso")) if include_day else None
             start_text = _clean(d.get("start_text"))
             duration_text = _clean(d.get("duration_text"))
@@ -715,14 +715,13 @@ class Gruppenübersicht(commands.Cog):
 
             cat = str(d.get("category") or "").lower()
 
-            # Extra-Infos (nur wenn vorhanden)
-            pilafe_extra: Optional[str] = None
+            pilafe_extra = None
             if cat == "pilafe":
                 amount = _clean(d.get("scroll_amount"))
                 if amount:
                     pilafe_extra = f"Menge: {amount}"
 
-            atorun_extra: Optional[str] = None
+            atorun_extra = None
             if cat == "atoraxxion":
                 runs = _normalize_atoraxxion_runs(d)
                 all_keys = {"vahmalkea", "sycrakea", "yolunakea", "orzekea"}
@@ -730,12 +729,10 @@ class Gruppenübersicht(commands.Cog):
                     atorun_extra = "🏛️ Run: Kompletter Run (4/4)"
                 elif runs:
                     atorun_extra = f"🏛️ Run: Teil-Run ({len(runs)}/4)"
-                # wenn nix gewählt -> gar nichts anzeigen
 
-            # Meta in 1 Zeile bündeln
+            # --- Meta in EINER Zeile bündeln ---
             meta_parts: list[str] = []
 
-            # (Day optional – bei dir i.d.R. False, weil Day als ### Header kommt)
             if day_str:
                 meta_parts.append(day_str)
             if start_text:
@@ -752,7 +749,7 @@ class Gruppenübersicht(commands.Cog):
             meta = " | ".join(meta_parts)
             meta = f" — {meta}" if meta else ""
 
-            # WICHTIG: kein Spot-Emoji hier -> kommt im Category-Header, verhindert Doppel-Emoji
+            # WICHTIG: Kein Spot-Emoji hier (steht bereits im Category-Header)
             return f"{status_icon} **{status_label} | {len(participants)}/{max_players}**{meta} ➜ #{chan_name} {jump}"
 
         def _section_sort_key(d: dict) -> tuple:
@@ -875,6 +872,25 @@ class Gruppenübersicht(commands.Cog):
             cat_map: dict[str, list[dict]] = {}
             for cat_title, item in day_items:
                 cat_map.setdefault(cat_title, []).append(item)
+
+                def _status_sort_key(x: dict):
+                    max_players = int(x.get("max_players", 2) or 2)
+                    participants = list(x.get("participants") or [])
+                    is_closed = bool(x.get("is_closed", False))
+                    is_full = len(participants) >= max_players
+
+                    # Offen (0) → Voll (1) → Geschlossen (2)
+                    if not is_closed and not is_full:
+                        status_order = 0
+                    elif not is_closed and is_full:
+                        status_order = 1
+                    else:
+                        status_order = 2
+
+                    tkey = _extract_time_sort_key(str(x.get("start_text") or ""))
+                    return (status_order, tkey[0], tkey[1])
+
+                items_cat.sort(key=_status_sort_key)
 
             for cat_title, items_cat in cat_map.items():
                 if not items_cat:
