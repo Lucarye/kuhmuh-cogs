@@ -1897,16 +1897,25 @@ class PartySizeSelect(discord.ui.Select):
 
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
 
+# 1) PartySizeView: Minimum für Admins auf 1 runterziehen (für ALLES)
 
-# --- PartySizeView: Signatur erweitern ---
+
 class PartySizeView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, current: Optional[int] = None, *, allow_one: bool = False):
+    def __init__(
+        self,
+        cog: "GruppensucheTest",
+        session: WizardSession,
+        current: Optional[int] = None,
+        *,
+        allow_one: bool = False,
+    ):
         super().__init__(cog, session)
+        self.allow_one = bool(allow_one)
 
         mn, mx = _allowed_party_range(session.category or "", session.spot_key)
 
-        # ✅ Admin-only: im Edit-Modus darf min auf 1 runter
-        if allow_one and session.mode == "edit":
+        # ✅ Admin-only: 1 immer erlauben (kategorieneutral)
+        if self.allow_one:
             mn = 1
 
         self.add_item(PartySizeSelect(self, mn, mx, current=current))
@@ -1915,6 +1924,10 @@ class PartySizeView(WizardBaseView):
     def embed(self) -> discord.Embed:
         mn, mx = _allowed_party_range(
             self.session.category or "", self.session.spot_key)
+
+        # ✅ Text soll die gleiche Range zeigen wie das Select
+        if self.allow_one:
+            mn = 1
 
         if self.session.category == "muhhelfer":
             diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
@@ -2039,10 +2052,12 @@ class EditMenuView(WizardBaseView):
 
         current = int(self.post_data.get("max_players", 2))
 
-        member = interaction.user if isinstance(interaction.user, discord.Member) else None
+        member = interaction.user if isinstance(
+            interaction.user, discord.Member) else None
         allow_one = bool(member and _is_admin_only(member))
 
-        view = PartySizeView(self.cog, self.session, current=current, allow_one=allow_one)
+        view = PartySizeView(self.cog, self.session,
+                             current=current, allow_one=allow_one)
         await self.cog._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _details(self, interaction: discord.Interaction):
@@ -2799,7 +2814,12 @@ class GruppensucheTest(commands.Cog):
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _send_party_size(self, interaction: discord.Interaction, session: WizardSession):
-        view = PartySizeView(self, session)
+        member = interaction.user if isinstance(
+            interaction.user, discord.Member) else None
+        allow_one = bool(member and _is_admin_only(member))  # ✅ gilt für alles
+
+        view = PartySizeView(
+            self, session, current=session.max_players, allow_one=allow_one)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _send_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession, back_target: str = BackTarget.START):
@@ -4504,27 +4524,32 @@ class GruppensucheTest(commands.Cog):
     async def _apply_edit_max_players(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
-        # ✅ ACK-safe (falls der Caller nicht deferred hat)
+
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
-        message_id = int(session.edit_message_id)
-        lock = self._lock_for(message_id)
-
-        # Zielwert früh bestimmen (Session kommt aus Select)
         desired_max = int(session.max_players or 0)
 
-        # ✅ Admin-only Absicherung: 1 Teilnehmer nur für Admin-Testzwecke
         member = interaction.user if isinstance(
             interaction.user, discord.Member) else None
-        if desired_max == 1 and not (member and _is_admin_only(member)):
+        allow_one = bool(member and _is_admin_only(member))  # ✅ gilt für alles
+
+        if desired_max == 1 and not allow_one:
             await self._ephemeral_notice(
                 interaction,
                 "1 Teilnehmer ist nur für Admin-Testzwecke erlaubt.",
                 ephemeral=True,
             )
+            return
+
+        mn, mx = _allowed_party_range(session.category or "", session.spot_key)
+        if allow_one:
+            mn = 1
+
+        if desired_max < mn or desired_max > mx:
+            await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.", ephemeral=True)
             return
 
         async with lock:
