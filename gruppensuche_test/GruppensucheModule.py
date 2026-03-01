@@ -3206,26 +3206,6 @@ class GruppensucheTest(commands.Cog):
 
         jump = self._build_jump(guild, data)
 
-        # Änderungen als Lines (vorher -> nachher)
-        lines: list[str] = []
-        for _, obj in pending.items():
-            if not isinstance(obj, dict):
-                continue
-            label = str(obj.get("label") or "Änderung")
-            old = self._truncate(self._norm_text(obj.get("old")), 180)
-            new = self._truncate(self._norm_text(obj.get("new")), 180)
-            if old == new:
-                continue
-            lines.append(f"• **{label}:** {old} → {new}")
-
-        if not lines:
-            # nichts wirklich geändert (oder alles zurückgedreht) -> pending clear
-            en["pending"] = {}
-            en["last_sent_at"] = int(_now_local().timestamp())
-            data["edit_notify"] = en
-            await self._set_search(int(message_id), data)
-            return
-
         # --- Kuhmuh-DM (einheitlich + hübsch + konsistente Emojis) ---
         cat_emoji = _category_emoji(data)
 
@@ -3287,14 +3267,14 @@ class GruppensucheTest(commands.Cog):
             return
 
         header = (
-            f"{cat_emoji} ✏️ **Gruppensuche aktualisiert**\n"
+            f"{cat_emoji} **Die Herde hat etwas angepasst…**\n"
             f"**Typ:** {change_type}\n"
             f"📅 **Tag:** {day_str}\n"
             f"⏰ **Start:** {start_text}\n"
             f"👥 **Frei:** {_fmt_number(free)}\n"
             f"🔗 **Link:** {jump}\n"
         )
-
+        changes_header = "**── Geänderte Werte ──**"
         text = header + "\n" + "\n".join(lines)
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
