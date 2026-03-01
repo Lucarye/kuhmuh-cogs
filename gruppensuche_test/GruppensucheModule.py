@@ -579,6 +579,35 @@ def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> 
     return txt
 
 
+def _sync_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> Optional[str]:
+    """
+    Stellt sicher:
+    - AP triggert -> Text existiert (einmalig würfeln)
+    - AP triggert NICHT -> Text wird entfernt (falls vorhanden)
+    """
+    egg_map = data.get("easter_egg_texts")
+    if not isinstance(egg_map, dict):
+        egg_map = {}
+
+    key = str(int(user_id))
+
+    if _ap_triggers_easter_egg(ap_val):
+        # existiert schon? dann behalten, sonst würfeln
+        if key in egg_map and str(egg_map.get(key) or "").strip():
+            return str(egg_map[key])
+        txt = random.choice(
+            EASTER_EGG_TEXT_POOL) if EASTER_EGG_TEXT_POOL else "✨"
+        egg_map[key] = txt
+        data["easter_egg_texts"] = egg_map
+        return txt
+
+    # triggert nicht -> entfernen
+    if key in egg_map:
+        egg_map.pop(key, None)
+        data["easter_egg_texts"] = egg_map
+    return None
+
+
 def _fmt_player_with_ap_and_egg(mention: str, ap_val: Optional[str], egg_text: Optional[str]) -> str:
     ap_disp = _fmt_thousands_de(ap_val) if ap_val else None
     base = f"{mention} ({ap_disp} AP)" if ap_disp else mention
@@ -912,7 +941,7 @@ class DetailsModal(discord.ui.Modal):
         current_own_ap = self.defaults.get("own_ap") or ""
         self.own_ap = discord.ui.TextInput(
             label="Deine AP (Pflicht)",
-            placeholder="z.B. 305",
+            placeholder="z.B. 301",
             required=True if session.mode == "create" else False,
             max_length=10,
             default=str(current_own_ap) if current_own_ap else None,
@@ -967,7 +996,7 @@ class DetailsModal(discord.ui.Modal):
         if cat in ("atoraxxion", "altar"):
             req_label = "Gewünschte AP (optional)"
             # current_req kommt ggf. aus defaults/req_default (bei atto oft leer) – das ist ok
-            req_placeholder = "z.B. 300+ (oder 305+)" if not current_req else f"Empfohlen: {current_req}"
+            req_placeholder = "z.B. 300+ (oder 301+)" if not current_req else f"Empfohlen: {current_req}"
 
         self.req_text = discord.ui.TextInput(
             label=req_label,
@@ -1016,6 +1045,12 @@ class DetailsModal(discord.ui.Modal):
             # im Edit-Mode optional übernehmen, wenn gesetzt
             if own_ap_val:
                 self.session.own_ap = own_ap_val
+        own_ap_val = str(self.own_ap.value).strip() if hasattr(self, "own_ap") else ""
+
+        # ✅ wenn gesetzt, dann nur Zahlen zulassen (create + edit)
+        if own_ap_val and not own_ap_val.isdigit():
+            await self.cog._ephemeral_notice(interaction, "Bitte nur Zahlen bei AP eintragen (z.B. 301).", ephemeral=True)
+            return
 
         # Session-Felder setzen
         if self.session.category == "pilafe" and self.session.mode == "create":
@@ -1068,7 +1103,7 @@ class JoinApModal(discord.ui.Modal):
 
         self.ap = discord.ui.TextInput(
             label="Deine AP (Pflicht)",
-            placeholder="z.B. 305",
+            placeholder="z.B. 301",
             required=True,
             max_length=10,
         )
@@ -1085,6 +1120,11 @@ class JoinApModal(discord.ui.Modal):
 
         if not val:
             await self.cog._ephemeral_notice(interaction, "AP ist Pflicht.", ephemeral=True)
+            return
+
+        # ✅ NUR Zahlen zulassen
+        if not val.isdigit():
+            await self.cog._ephemeral_notice(interaction, "Bitte nur Zahlen bei AP eintragen (z.B. 301).", ephemeral=True)
             return
 
         await self.on_done(interaction, val)
@@ -3278,7 +3318,6 @@ class GruppensucheTest(commands.Cog):
             await self._set_search(int(message_id), data)
             return
 
-
         header = (
             f"{cat_emoji} **Die Herde hat etwas angepasst…** {MUHKUH_EMOJI}\n\n"
             f"Typ: {change_type}\n"
@@ -4134,17 +4173,50 @@ class GruppensucheTest(commands.Cog):
                 await self._ephemeral_notice(interaction, "Diese Suche ist geschlossen.")
                 return
 
+            ap_val = str(ap_val or "").strip()
+            if not ap_val or not ap_val.isdigit():
+                await self._ephemeral_notice(interaction, "Bitte nur Zahlen bei AP eintragen (z.B. 301).")
+                return
             uid = interaction.user.id
             participants: List[int] = list(data.get("participants") or [])
             waitlist: List[int] = list(data.get("waitlist") or [])
             max_players = int(data.get("max_players", 2))
 
+            # ✅ Wenn schon eingetragen: AP aktualisieren (Teilnehmer ODER Warteschlange)
             if uid in participants:
-                await self._ephemeral_notice(interaction, "Du bist bereits Teilnehmer.")
+                ap_map = data.get("participant_ap") or {}
+                ap_map[str(uid)] = ap_val
+                data["participant_ap"] = ap_map
+
+                # Easteregg: add/remove je nach Threshold
+                if _ap_triggers_easter_egg(ap_val):
+                    _ensure_easter_egg_text(data, uid, ap_val)
+                else:
+                    egg_map = data.get("easter_egg_texts")
+                    if isinstance(egg_map, dict):
+                        egg_map.pop(str(uid), None)
+                        data["easter_egg_texts"] = egg_map
+
+                await self._save_refresh_dispatch(data)
+                await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Teilnehmer).")
                 return
 
             if uid in waitlist:
-                await self._ephemeral_notice(interaction, "Du bist bereits in der Warteschlange.")
+                wl_map = data.get("waitlist_ap") or {}
+                wl_map[str(uid)] = ap_val
+                data["waitlist_ap"] = wl_map
+
+                # Easteregg: add/remove je nach Threshold
+                if _ap_triggers_easter_egg(ap_val):
+                    _ensure_easter_egg_text(data, uid, ap_val)
+                else:
+                    egg_map = data.get("easter_egg_texts")
+                    if isinstance(egg_map, dict):
+                        egg_map.pop(str(uid), None)
+                        data["easter_egg_texts"] = egg_map
+
+                await self._save_refresh_dispatch(data)
+                await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Warteschlange).")
                 return
 
             if len(participants) < max_players:
@@ -4751,6 +4823,9 @@ class GruppensucheTest(commands.Cog):
 
             ap_map[str(owner_id)] = session.own_ap
             data["participant_ap"] = ap_map
+
+            # ✅ Easter-Egg Host: setzen ODER entfernen (bei AP-Korrektur)
+            _sync_easter_egg_text(data, owner_id, session.own_ap)
 
         # ✅ Reminder reset bei Start/Tag-Änderung
         if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day_iso):
