@@ -285,6 +285,7 @@ def _ui_for(category: str) -> dict:
 
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
+
 def _member_from_interaction(interaction: discord.Interaction) -> Optional[discord.Member]:
     if isinstance(interaction.user, discord.Member):
         return interaction.user
@@ -292,12 +293,51 @@ def _member_from_interaction(interaction: discord.Interaction) -> Optional[disco
         return interaction.guild.get_member(int(interaction.user.id))
     return None
 
+
+def _category_emoji(data: dict) -> str:
+    cat = str(data.get("category") or "").lower()
+    spot = str(data.get("spot_key") or "").lower()
+
+    if cat == "muhhelfer":
+        return MUHKUH_EMOJI
+
+    if cat == "pilafe":
+        return PILAFE_EMOJI
+
+    if cat == "atoraxxion":
+        return "🏛️"
+
+    if cat == "altar":
+        return "🩸"
+
+    if cat == "spots":
+        if spot == "mirumok":
+            return MIRUMOK_EMOJI
+        if spot == "gyfin":
+            return GYFIN_EMOJI
+        if spot == "olun":
+            return OLUN_EMOJI
+
+    return MUHKUH_EMOJI
+
+
 def _get_post_lock(self, message_id: int) -> asyncio.Lock:
     lock = self._post_locks.get(message_id)
     if lock is None:
         lock = asyncio.Lock()
         self._post_locks[message_id] = lock
     return lock
+
+
+def _fmt_number(val: Optional[int | str]) -> str:
+    if val is None:
+        return "—"
+
+    try:
+        n = int(val)
+        return f"{n:,}".replace(",", ".")
+    except (ValueError, TypeError):
+        return str(val)
 
 
 def _format_remaining(seconds: int) -> str:
@@ -3186,7 +3226,9 @@ class GruppensucheTest(commands.Cog):
             await self._set_search(int(message_id), data)
             return
 
-        # --- Änderungs-Header (einheitlich, wiedererkennbar) ---
+        # --- Kuhmuh-DM (einheitlich + hübsch + konsistente Emojis) ---
+        cat_emoji = _category_emoji(data)
+
         cat = str(data.get("category", "") or "").lower()
         change_type = "Gruppensuche"
         if cat == "muhhelfer":
@@ -3194,23 +3236,63 @@ class GruppensucheTest(commands.Cog):
             diff_label = "Schwer" if diff == "schwer" else "Normal"
             change_type = f"Muhhelfer ({diff_label})"
         elif cat == "spots":
-            spot = str(data.get("spot_key", "") or "")
+            spot = str(data.get("spot_key", "") or "").lower()
             if spot == "olun":
                 tier = str(data.get("olun_tier", "normal")).lower()
                 tier_label = _olun_tier_label(tier)
-                change_type = f"Spots – Olun ({tier_label})"
+                change_type = f"Gruppenspots – Olun ({tier_label})"
             else:
-                change_type = f"Spots – {_spot_name(spot) if spot else '—'}"
+                change_type = f"Gruppenspots – {_spot_name(spot) if spot else '—'}"
         elif cat == "pilafe":
             change_type = "Pila Fe"
+        elif cat == "atoraxxion":
+            change_type = "Atoraxxion"
+        elif cat == "altar":
+            change_type = "Altar des Blutes"
+
+        def _pretty(v: object) -> str:
+            """Kurze, saubere Anzeige. Zahlen DE-formatiert wenn möglich."""
+            s = self._norm_text(v)
+            # reine Zahlen hübsch formatieren
+            try:
+                if str(s).strip().isdigit():
+                    return _fmt_number(int(s))
+            except Exception:
+                pass
+            return s
+
+        # Änderungen: Label normal, nur neuer Wert fett
+        lines: list[str] = []
+        for _, obj in pending.items():
+            if not isinstance(obj, dict):
+                continue
+
+            label = str(obj.get("label") or "Änderung").strip()
+            old_raw = self._truncate(self._norm_text(obj.get("old")), 180)
+            new_raw = self._truncate(self._norm_text(obj.get("new")), 180)
+
+            old = _pretty(old_raw)
+            new = _pretty(new_raw)
+
+            if old == new:
+                continue
+
+            lines.append(f"• {label}: {old} → **{new}**")
+
+        if not lines:
+            en["pending"] = {}
+            en["last_sent_at"] = int(_now_local().timestamp())
+            data["edit_notify"] = en
+            await self._set_search(int(message_id), data)
+            return
 
         header = (
-            "✏️ **Änderungs-Header**\n"
+            f"{cat_emoji} ✏️ **Gruppensuche aktualisiert**\n"
             f"**Typ:** {change_type}\n"
-            f"**Tag:** {day_str}\n"
-            f"**Start:** {start_text}\n"
-            f"**Frei:** {free}\n"
-            f"**Link:** {jump}\n"
+            f"📅 **Tag:** {day_str}\n"
+            f"⏰ **Start:** {start_text}\n"
+            f"👥 **Frei:** {_fmt_number(free)}\n"
+            f"🔗 **Link:** {jump}\n"
         )
 
         text = header + "\n" + "\n".join(lines)
@@ -4613,7 +4695,8 @@ class GruppensucheTest(commands.Cog):
             new_wait_count = len(list(data.get("waitlist") or []))
 
             changes = [
-                {"key": "max_players", "label": "Max. Teilnehmer", "old": str(old_max), "new": str(new_max)},
+                {"key": "max_players", "label": "Max. Teilnehmer",
+                    "old": str(old_max), "new": str(new_max)},
             ]
 
             if (old_part_count, old_wait_count) != (new_part_count, new_wait_count):
