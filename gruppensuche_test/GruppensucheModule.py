@@ -3267,7 +3267,7 @@ class GruppensucheTest(commands.Cog):
             return
 
         header = (
-            f"{cat_emoji} **Die Herde hat etwas angepasst…**\n"
+            f"{cat_emoji} **Die Herde hat etwas angepasst… {MUHKUH_EMOJI}**\n" + "\n"
             f"**Typ:** {change_type}\n"
             f"📅 **Tag:** {day_str}\n"
             f"⏰ **Start:** {start_text}\n"
@@ -3275,7 +3275,7 @@ class GruppensucheTest(commands.Cog):
             f"🔗 **Link:** {jump}\n"
         )
         changes_header = "**── Geänderte Werte ──**"
-        text = header + "\n" + "\n".join(lines)
+        text = header + "\n" + changes_header + "\n" + "\n".join(lines)
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         failed: list[int] = []
