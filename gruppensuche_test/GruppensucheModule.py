@@ -1898,15 +1898,18 @@ class PartySizeSelect(discord.ui.Select):
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
 
 
+# --- PartySizeView: Signatur erweitern ---
 class PartySizeView(WizardBaseView):
-    def __init__(self, cog: "GruppensucheTest", session: WizardSession, current: Optional[int] = None):
+    def __init__(self, cog: "GruppensucheTest", session: WizardSession, current: Optional[int] = None, *, allow_one: bool = False):
         super().__init__(cog, session)
 
         mn, mx = _allowed_party_range(session.category or "", session.spot_key)
-        self.add_item(PartySizeSelect(self, mn, mx, current=current))
 
-        # ✅ Einheitliches Wizard-Erlebnis:
-        # Nach "Tag" kommt "Max. Teilnehmer" (Party) – daher muss "Zurück" von Party IMMER zurück zu "Tag".
+        # ✅ Admin-only: im Edit-Modus darf min auf 1 runter
+        if allow_one and session.mode == "edit":
+            mn = 1
+
+        self.add_item(PartySizeSelect(self, mn, mx, current=current))
         self.add_item(build_back_button("Tag", BackTarget.DAY, self, row=1))
 
     def embed(self) -> discord.Embed:
@@ -2026,15 +2029,20 @@ class EditMenuView(WizardBaseView):
         self.session.wizard_interaction = interaction
         await self.cog._send_day_selection(interaction, self.session)
 
+    # --- EditMenuView._size: allow_one berechnen und übergeben ---
     async def _size(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
-        # ✅ wichtig
+
         self.session.wizard_interaction = interaction
 
         current = int(self.post_data.get("max_players", 2))
-        view = PartySizeView(self.cog, self.session, current=current)
+
+        member = interaction.user if isinstance(interaction.user, discord.Member) else None
+        allow_one = bool(member and _is_admin_only(member))
+
+        view = PartySizeView(self.cog, self.session, current=current, allow_one=allow_one)
         await self.cog._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _details(self, interaction: discord.Interaction):
