@@ -2283,17 +2283,6 @@ class PublicPostView(discord.ui.View):
         mid = int(self.message_id)
         await self.cog._leave(interaction, mid)
 
-        # Notify Promotion außerhalb Lock (damit Lock nicht blockiert)
-        if promoted_id and interaction.guild:
-            try:
-                m = interaction.guild.get_member(promoted_id)
-                if m:
-                    await m.send(f"✅ Du wurdest bei einer Gruppensuche von der Warteschlange zu den Teilnehmern hochgestuft.\nPost-ID: {mid}")
-            except Exception:
-                pass
-
-        await interaction.followup.send("🚪 Du wurdest entfernt.", ephemeral=True)
-
     async def _on_ping_participants(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
         if not data:
@@ -4833,3 +4822,4 @@ class Gruppensuche(commands.Cog):
         )
 
         await self._send_edit_menu(interaction, session)
+
