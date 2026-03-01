@@ -3243,21 +3243,33 @@ class GruppensucheTest(commands.Cog):
 
         # Änderungen: Label normal, nur neuer Wert fett
         lines: list[str] = []
+        CHANGE_EMOJIS = {
+            "Tag": "📅",
+            "Startzeit": "⏰",
+            "Geplante Dauer": "⌛",
+            "Max. Teilnehmer": "👥",
+            "Gewünschte AP": "⚔️",
+            "Host AP": "💪",
+            "Notiz": "📝",
+            "Run": "🏛️",
+            "Menge": "📜",
+        }
         for _, obj in pending.items():
             if not isinstance(obj, dict):
                 continue
 
-            label = str(obj.get("label") or "Änderung").strip()
-            old_raw = self._truncate(self._norm_text(obj.get("old")), 180)
-            new_raw = self._truncate(self._norm_text(obj.get("new")), 180)
-
-            old = _pretty(old_raw)
-            new = _pretty(new_raw)
+            label = str(obj.get("label") or "Änderung")
+            old = self._truncate(self._norm_text(obj.get("old")), 180)
+            new = self._truncate(self._norm_text(obj.get("new")), 180)
 
             if old == new:
                 continue
 
-            lines.append(f"• {label}: {old} → **{new}**")
+            emoji = CHANGE_EMOJIS.get(label, "•")
+
+            lines.append(
+                f"{emoji} {label}: {old} → **{new}**"
+            )
 
         if not lines:
             en["pending"] = {}
@@ -3266,16 +3278,17 @@ class GruppensucheTest(commands.Cog):
             await self._set_search(int(message_id), data)
             return
 
+
         header = (
-            f"{cat_emoji} **Die Herde hat etwas angepasst… {MUHKUH_EMOJI}**\n" + "\n"
-            f"**Typ:** {change_type}\n"
-            f"📅 **Tag:** {day_str}\n"
-            f"⏰ **Start:** {start_text}\n"
-            f"👥 **Frei:** {_fmt_number(free)}\n"
-            f"🔗 **Link:** {jump}\n"
+            f"{cat_emoji} **Die Herde hat etwas angepasst…** {MUHKUH_EMOJI}\n\n"
+            f"Typ: {change_type}\n"
+            f"📅 Tag: {day_str}\n"
+            f"⏰ Start: {start_text or '—'}\n"
+            f"👥 Frei: {_fmt_number(free)}\n"
+            f"🔗 {jump}\n"
         )
-        changes_header = "**── Geänderte Werte ──**"
-        text = header + "\n" + changes_header + "\n" + "\n".join(lines)
+        changes_header = "\n── Geänderte Werte ──\n"
+        text = header + changes_header + "\n".join(lines)
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         failed: list[int] = []
