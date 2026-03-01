@@ -285,6 +285,12 @@ def _ui_for(category: str) -> dict:
 
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
+def _member_from_interaction(interaction: discord.Interaction) -> Optional[discord.Member]:
+    if isinstance(interaction.user, discord.Member):
+        return interaction.user
+    if interaction.guild:
+        return interaction.guild.get_member(int(interaction.user.id))
+    return None
 
 def _get_post_lock(self, message_id: int) -> asyncio.Lock:
     lock = self._post_locks.get(message_id)
@@ -4525,16 +4531,18 @@ class GruppensucheTest(commands.Cog):
         if not session.edit_message_id:
             return
 
+        # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
+        message_id = int(session.edit_message_id)
         desired_max = int(session.max_players or 0)
 
-        member = interaction.user if isinstance(
-            interaction.user, discord.Member) else None
-        allow_one = bool(member and _is_admin_only(member))  # ✅ gilt für alles
+        # ✅ Admin-only: 1 Teilnehmer nur für Admin-Testzwecke
+        member = _member_from_interaction(interaction)
+        allow_one = bool(member and _is_admin_only(member))
 
         if desired_max == 1 and not allow_one:
             await self._ephemeral_notice(
@@ -4544,6 +4552,7 @@ class GruppensucheTest(commands.Cog):
             )
             return
 
+        # ✅ Range korrekt bestimmen (und Admin-Override sauber berücksichtigen)
         mn, mx = _allowed_party_range(session.category or "", session.spot_key)
         if allow_one:
             mn = 1
@@ -4552,27 +4561,18 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.", ephemeral=True)
             return
 
+        lock = self._lock_for(message_id)
+
         async with lock:
             data = await self._get_search(message_id)
             if data is None:
                 await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
                 return
 
-            # --- alte Werte sichern (für "old -> new") ---
+            # --- alte Werte sichern (für Change-Notify) ---
             old_max = int(data.get("max_players", 2))
             old_part_count = len(list(data.get("participants") or []))
             old_wait_count = len(list(data.get("waitlist") or []))
-
-            # Range prüfen (abhängig von Kategorie/Spot)
-            mn, mx = _allowed_party_range(
-                str(data.get("category", "")),
-                str(data.get("spot_key", "")) if data.get(
-                    "category") == "spots" else None
-            )
-
-            if desired_max < mn or desired_max > mx:
-                await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.", ephemeral=True)
-                return
 
             # --- neue max setzen ---
             data["max_players"] = int(desired_max)
@@ -4613,8 +4613,7 @@ class GruppensucheTest(commands.Cog):
             new_wait_count = len(list(data.get("waitlist") or []))
 
             changes = [
-                {"key": "max_players", "label": "Max. Teilnehmer",
-                    "old": str(old_max), "new": str(new_max)},
+                {"key": "max_players", "label": "Max. Teilnehmer", "old": str(old_max), "new": str(new_max)},
             ]
 
             if (old_part_count, old_wait_count) != (new_part_count, new_wait_count):
