@@ -1136,7 +1136,10 @@ class _ReopenModalView(discord.ui.View):
 
     @discord.ui.button(label="Eingabe korrigieren", style=discord.ButtonStyle.primary, emoji="✏️")
     async def reopen(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(self._modal_factory())
+        try:
+            await interaction.response.send_modal(self._modal_factory())
+        except discord.InteractionResponded:
+            await interaction.followup.send_modal(self._modal_factory())
 
 class EditDetailsModal(discord.ui.Modal):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
@@ -1253,7 +1256,7 @@ class JoinApModal(discord.ui.Modal):
             await interaction.response.send_message(
                 "❌ **AP ungültig.** Erlaubt: `3245`, `3.245`, `3 245`, `3,245`.",
                 ephemeral=True,
-                view=_ReopenModalView(lambda: APAdjustModal(self.cog, self.message_id)),
+                view=_ReopenModalView(lambda: JoinApModal(self.cog, self.on_done)),
             )
             return
 
@@ -2222,6 +2225,7 @@ class EditMenuView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession, post_data: dict):
         super().__init__(cog, session)
         self.post_data = post_data
+        self.message_id = int(session.edit_message_id or 0)
 
         tag_btn = discord.ui.Button(
             label="Tag ändern", style=discord.ButtonStyle.secondary, row=0)
@@ -2252,7 +2256,10 @@ class EditMenuView(WizardBaseView):
 
     @discord.ui.button(label="AP anpassen", style=discord.ButtonStyle.secondary, row=1)
     async def edit_ap(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(APAdjustModal(self.cog, self.message_id))
+        try:
+            await interaction.response.send_modal(APAdjustModal(self.cog, self.message_id))
+        except discord.InteractionResponded:
+            await interaction.followup.send_modal(APAdjustModal(self.cog, self.message_id))
 
     async def _tag(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -2505,25 +2512,41 @@ class PublicPostView(discord.ui.View):
         return data
 
     async def _is_owner_or_mod(self, interaction: discord.Interaction, message_id: int) -> bool:
-        """True, wenn Owner des Posts oder Mod (Admin/Offizier)."""
-        try:
-            data = await self._get_search(int(message_id))
-        except Exception:
-            data = None
-
+        data = await self._get_search(int(message_id))
         if not data:
             return False
 
-        # Owner?
+        uid = int(interaction.user.id)
         owner_id = int(data.get("owner_id") or 0)
-        if owner_id and int(interaction.user.id) == owner_id:
+
+        if uid == owner_id:
             return True
 
-        # Mod (Admin/Offizier)?
-        if interaction.guild and isinstance(interaction.user, discord.Member):
-            return _has_mod_rights(interaction.user)
+        member = interaction.user if isinstance(interaction.user, discord.Member) else None
+        if member and (_is_admin_only(member) or _is_officer_only(member)):
+            return True
 
         return False
+
+
+    async def _open_owner_edit_menu(self, interaction: discord.Interaction, message_id: int, data: dict):
+        session = WizardSession(
+            user_id=int(interaction.user.id),
+            guild_id=int(interaction.guild_id or 0),
+            mode="edit",
+            edit_message_id=int(message_id),
+            category=str(data.get("category") or ""),
+            spot_key=str(data.get("spot_key") or ""),
+        )
+
+        view = EditMenuView(self, session, data)
+        embed = view.embed()
+
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            return
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     async def _on_join(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -2566,15 +2589,10 @@ class PublicPostView(discord.ui.View):
         await self.cog._ping_wait(interaction, self.message_id, data)
 
     async def _on_edit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
         if not interaction.guild:
             return
 
         mid = int(self.message_id)
-
-        # ✅ Owner/Admin/Offizier -> volles Edit-Menü
-        # ✅ Teilnehmer -> AP-only Edit-Menü
         await self.cog._start_edit_flow(interaction, mid)
 
     async def _on_close(self, interaction: discord.Interaction):
@@ -4801,7 +4819,24 @@ class GruppensucheTest(commands.Cog):
     # Edit Flow
     # =========================
 
-    async def _start_edit_flow(self, interaction: discord.Interaction, message_id: int, data: dict):
+    async def _start_edit_flow(self, interaction: discord.Interaction, message_id: int, data: Optional[dict] = None):
+        if data is None:
+            data = await self._get_search(int(message_id))
+
+        if data is None:
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+            return
+        
+        # Owner/Admin/Offizier -> Owner Menü
+        if await self._is_owner_or_mod(interaction, int(message_id)):
+            return await self._open_owner_edit_menu(interaction, int(message_id), data)
+
+        # Teilnehmer / Warteliste -> nur AP-Korrektur
+        try:
+            await interaction.response.send_modal(APAdjustModal(self, int(message_id)))
+        except discord.InteractionResponded:
+            await interaction.followup.send_modal(APAdjustModal(self, int(message_id)))
+        return
         session = WizardSession(
             user_id=interaction.user.id,
             guild_id=interaction.guild_id or 0,
