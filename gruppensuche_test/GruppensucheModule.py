@@ -1057,11 +1057,13 @@ class DetailsModal(discord.ui.Modal):
             return interaction.response.send_message(
                 msg,
                 ephemeral=True,
-                view=_ReopenModalView(lambda: type(self)(self.cog, self.session, defaults=self.defaults)),
+                view=_ReopenModalView(lambda: type(self)(
+                    self.cog, self.session, defaults=self.defaults)),
             )
 
         # ---------- AP ----------
-        own_ap_val = str(self.own_ap.value).strip() if hasattr(self, "own_ap") else ""
+        own_ap_val = str(self.own_ap.value).strip(
+        ) if hasattr(self, "own_ap") else ""
 
         # Create: Pflicht
         if self.session.mode == "create" and not own_ap_val:
@@ -1129,6 +1131,7 @@ class DetailsModal(discord.ui.Modal):
 
         await self.cog._apply_edit_details(base_interaction, self.session)
 
+
 class _ReopenModalView(discord.ui.View):
     def __init__(self, modal_factory, *, timeout: int = 60):
         super().__init__(timeout=timeout)
@@ -1140,6 +1143,7 @@ class _ReopenModalView(discord.ui.View):
             await interaction.response.send_modal(self._modal_factory())
         except discord.InteractionResponded:
             await interaction.followup.send_modal(self._modal_factory())
+
 
 class EditDetailsModal(discord.ui.Modal):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
@@ -1256,7 +1260,8 @@ class JoinApModal(discord.ui.Modal):
             await interaction.response.send_message(
                 "❌ **AP ungültig.** Erlaubt: `3245`, `3.245`, `3 245`, `3,245`.",
                 ephemeral=True,
-                view=_ReopenModalView(lambda: JoinApModal(self.cog, self.on_done)),
+                view=_ReopenModalView(
+                    lambda: JoinApModal(self.cog, self.on_done)),
             )
             return
 
@@ -2510,43 +2515,6 @@ class PublicPostView(discord.ui.View):
             return None
 
         return data
-
-    async def _is_owner_or_mod(self, interaction: discord.Interaction, message_id: int) -> bool:
-        data = await self._get_search(int(message_id))
-        if not data:
-            return False
-
-        uid = int(interaction.user.id)
-        owner_id = int(data.get("owner_id") or 0)
-
-        if uid == owner_id:
-            return True
-
-        member = interaction.user if isinstance(interaction.user, discord.Member) else None
-        if member and (_is_admin_only(member) or _is_officer_only(member)):
-            return True
-
-        return False
-
-
-    async def _open_owner_edit_menu(self, interaction: discord.Interaction, message_id: int, data: dict):
-        session = WizardSession(
-            user_id=int(interaction.user.id),
-            guild_id=int(interaction.guild_id or 0),
-            mode="edit",
-            edit_message_id=int(message_id),
-            category=str(data.get("category") or ""),
-            spot_key=str(data.get("spot_key") or ""),
-        )
-
-        view = EditMenuView(self, session, data)
-        embed = view.embed()
-
-        if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-            return
-
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     async def _on_join(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -4819,6 +4787,45 @@ class GruppensucheTest(commands.Cog):
     # Edit Flow
     # =========================
 
+    async def _open_owner_edit_menu(self, interaction: discord.Interaction, message_id: int, data: dict):
+        session = WizardSession(
+            user_id=int(interaction.user.id),
+            guild_id=int(interaction.guild_id or 0),
+            mode="edit",
+            edit_message_id=int(message_id),
+
+            category=str(data.get("category") or ""),
+            day_date_iso=str(data.get("day_date_iso") or ""),
+            difficulty=str(data.get("difficulty") or "") if str(
+                data.get("category")) == "muhhelfer" else None,
+            boss_runs=dict(data.get("boss_runs") or {}),
+            spot_key=str(data.get("spot_key") or "") if str(
+                data.get("category")) == "spots" else None,
+            olun_tier=str(data.get("olun_tier") or "") if str(
+                data.get("spot_key")) == "olun" else None,
+            max_players=int(data.get("max_players", 2)),
+            scroll_amount=str(data.get("scroll_amount") or "") if str(
+                data.get("category")) == "pilafe" else None,
+            duration_text=data.get("duration_text"),
+            start_text=data.get("start_text"),
+            req_text=data.get("req_text"),
+            notes=data.get("notes"),
+            own_ap=str(data.get("owner_ap") or "") or None,
+            atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
+        )
+
+        session.wizard_interaction = interaction
+        self._sessions[int(interaction.user.id)] = session
+
+        view = EditMenuView(self, session, data)
+        embed = view.embed()
+
+        # Ephemeral senden (ACK-safe)
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
     async def _start_edit_flow(self, interaction: discord.Interaction, message_id: int, data: Optional[dict] = None):
         if data is None:
             data = await self._get_search(int(message_id))
@@ -4826,17 +4833,17 @@ class GruppensucheTest(commands.Cog):
         if data is None:
             await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
             return
-        
+
         # Owner/Admin/Offizier -> Owner Menü
         if await self._is_owner_or_mod(interaction, int(message_id)):
-            return await self._open_owner_edit_menu(interaction, int(message_id), data)
+            await self._open_owner_edit_menu(interaction, int(message_id), data)
+            return
 
         # Teilnehmer / Warteliste -> nur AP-Korrektur
         try:
             await interaction.response.send_modal(APAdjustModal(self, int(message_id)))
         except discord.InteractionResponded:
             await interaction.followup.send_modal(APAdjustModal(self, int(message_id)))
-        return
         session = WizardSession(
             user_id=interaction.user.id,
             guild_id=interaction.guild_id or 0,
