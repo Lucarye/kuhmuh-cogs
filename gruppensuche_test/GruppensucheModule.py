@@ -286,6 +286,31 @@ def _ui_for(category: str) -> dict:
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
+def _parse_int_strict(val: object) -> Optional[int]:
+    """
+    Erlaubt nur Ziffern + gängige Trenner (., , und Leerzeichen).
+    - "3245" -> 3245
+    - "3.245" / "3,245" / "3 245" -> 3245
+    Alles andere (Buchstaben etc.) -> None
+    """
+    s = str(val or "").strip()
+    if not s:
+        return None
+
+    allowed = set("0123456789., ")
+    if any(ch not in allowed for ch in s):
+        return None
+
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        return None
+
+    try:
+        return int(digits)
+    except Exception:
+        return None
+
+
 def _member_from_interaction(interaction: discord.Interaction) -> Optional[discord.Member]:
     if isinstance(interaction.user, discord.Member):
         return interaction.user
@@ -545,15 +570,10 @@ _AP_NUM_RE = re.compile(r"(\d+)")
 
 def _ap_triggers_easter_egg(ap_val: Optional[str]) -> bool:
     """Trigger: AP > 396 (weil 396 max ist)."""
-    if not ap_val:
+    n = _parse_int_strict(ap_val)
+    if n is None:
         return False
-    m = _AP_NUM_RE.search(str(ap_val))
-    if not m:
-        return False
-    try:
-        return int(m.group(1)) > EASTER_EGG_AP
-    except Exception:
-        return False
+    return n > EASTER_EGG_AP
 
 
 def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> Optional[str]:
@@ -939,14 +959,17 @@ class DetailsModal(discord.ui.Modal):
         self.session = session
         self.defaults = defaults or {}
         current_own_ap = self.defaults.get("own_ap") or ""
-        self.own_ap = discord.ui.TextInput(
-            label="Deine AP (Pflicht)",
-            placeholder="z.B. 301",
-            required=True if session.mode == "create" else False,
-            max_length=10,
-            default=str(current_own_ap) if current_own_ap else None,
-        )
-        self.add_item(self.own_ap)
+        # ✅ AP nur im Create-Wizard anzeigen (Edit bekommt AP separat als Button)
+        if session.mode == "create":
+            self.own_ap = discord.ui.TextInput(
+                label="Deine AP",
+                placeholder="z.B. 301 (auch 3.245 / 3 245 / 3,245)",
+                required=True,
+                default=str(session.own_ap or ""),
+                max_length=10,
+            )
+        if hasattr(self, "own_ap"):
+            self.add_item(self.own_ap)
 
         is_pilafe = session.category == "pilafe"
 
@@ -1028,40 +1051,56 @@ class DetailsModal(discord.ui.Modal):
             self.add_item(self.notes)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Modal immer zuerst sauber beantworten -> Modal schließt zuverlässig
+        # ✅ Wichtig: Erst VALIDIEREN, dann defer -> sonst kann man kein Modal "neu öffnen"
+        async def _reopen_modal() -> None:
+            # Modal direkt erneut öffnen (statt "Modal zu + Ephemeral")
+            await interaction.response.send_modal(DetailsModal(self.cog, self.session, defaults=self.defaults))
+
+        # ----------------------------
+        # AP (nur Create-Wizard)
+        # ----------------------------
+        if hasattr(self, "own_ap"):
+            raw_ap = str(self.own_ap.value).strip()
+
+            # Create: Pflicht
+            if self.session.mode == "create" and not raw_ap:
+                await _reopen_modal()
+                return
+
+            if raw_ap:
+                ap_int = _parse_int_strict(raw_ap)  # akzeptiert 3245, 3.245, 3 245, 3,245
+                if ap_int is None:
+                    await _reopen_modal()
+                    return
+                # intern sauber speichern (digits-only)
+                self.session.own_ap = str(ap_int)
+
+        # ----------------------------
+        # Pila Fe: Scroll-Menge (Zahlen-only, aber mit 3.245 / 3 245 / 3,245 erlaubt)
+        # ----------------------------
+        if self.session.category == "pilafe":
+            raw_amt = str(getattr(self, "scroll_amount", None).value).strip() if hasattr(self, "scroll_amount") else ""
+
+            # Create: Pflicht
+            if self.session.mode == "create" and not raw_amt:
+                await _reopen_modal()
+                return
+
+            if raw_amt:
+                amt_int = _parse_int_strict(raw_amt)
+                if amt_int is None:
+                    await _reopen_modal()
+                    return
+                self.session.scroll_amount = str(amt_int)
+            else:
+                # Edit: leer -> alten Wert beibehalten (defaults)
+                self.session.scroll_amount = self.defaults.get("scroll_amount") or None
+
+        # ✅ ab hier "acknowledge" (Modal schließt zuverlässig)
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
-
-        own_ap_val = str(self.own_ap.value).strip(
-        ) if hasattr(self, "own_ap") else ""
-        if self.session.mode == "create":
-            if not own_ap_val:
-                await self.cog._ephemeral_notice(interaction, "AP ist Pflicht.", ephemeral=True)
-                return
-            self.session.own_ap = own_ap_val
-        else:
-            # im Edit-Mode optional übernehmen, wenn gesetzt
-            if own_ap_val:
-                self.session.own_ap = own_ap_val
-        own_ap_val = str(self.own_ap.value).strip() if hasattr(self, "own_ap") else ""
-
-        # ✅ wenn gesetzt, dann nur Zahlen zulassen (create + edit)
-        if own_ap_val and not own_ap_val.isdigit():
-            await self.cog._ephemeral_notice(interaction, "Bitte nur Zahlen bei AP eintragen (z.B. 301).", ephemeral=True)
-            return
-
-        # Session-Felder setzen
-        if self.session.category == "pilafe" and self.session.mode == "create":
-            if not str(self.scroll_amount.value).strip():
-                await self.cog._ephemeral_notice(interaction, "Bei Pila Fe ist die Menge Pflicht.", ephemeral=True)
-                return
-            self.session.scroll_amount = str(self.scroll_amount.value).strip()
-        elif self.session.category == "pilafe":
-            val = str(self.scroll_amount.value).strip()
-            self.session.scroll_amount = val if val else (
-                self.defaults.get("scroll_amount") or None)
 
         duration_val = str(self.duration_text.value).strip()
         start_val = str(self.start_text.value).strip()
@@ -1074,7 +1113,7 @@ class DetailsModal(discord.ui.Modal):
             self.session.req_text = req_val or None
             self.session.notes = notes_val or None
         else:
-            # Edit: Nur überschreiben, wenn User etwas eingibt
+            # Edit: nur überschreiben, wenn User etwas eingibt
             if duration_val != "":
                 self.session.duration_text = duration_val
             if start_val != "":
@@ -1095,6 +1134,100 @@ class DetailsModal(discord.ui.Modal):
         await self.cog._apply_edit_details(base_interaction, self.session)
 
 
+class EditDetailsModal(discord.ui.Modal):
+    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+        super().__init__(title="Details zur Gruppensuche")
+        self.cog = cog
+        self.session = session
+
+        # ⚠️ KEIN own_ap hier!
+
+        self.duration = discord.ui.TextInput(
+            label="Geplante Dauer",
+            placeholder="z.B. 30min, 90min, 2h",
+            required=False,
+            max_length=50,
+            default=str(session.duration_text or ""),
+        )
+        self.start = discord.ui.TextInput(
+            label="Startzeit",
+            placeholder="z.B. jetzt, 20Uhr, später",
+            required=False,
+            max_length=60,
+            default=str(session.start_text or ""),
+        )
+        self.desired_ap = discord.ui.TextInput(
+            label="Gewünschte AP (optional)",
+            placeholder="z.B. 300+ (oder 301+)",
+            required=False,
+            max_length=32,
+            default=str(session.req_text or ""),
+        )
+        self.note = discord.ui.TextInput(
+            label="Optionale Notizen",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=800,
+            default=str(session.note_text or ""),
+        )
+
+        self.add_item(self.duration)
+        self.add_item(self.start)
+        self.add_item(self.desired_ap)
+        self.add_item(self.note)
+
+        # PilaFe: Scroll-Menge (editierbar) -> nur wenn Kategorie pilafe
+        if (session.category or "").lower() == "pilafe":
+            self.scroll_amount = discord.ui.TextInput(
+                label="Menge an Schriftrollen",
+                placeholder="z.B. 1000",
+                required=True,
+                max_length=16,
+                default=str(session.scroll_amount or ""),
+            )
+            self.add_item(self.scroll_amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # numeric check: scroll_amount (falls vorhanden)
+        if hasattr(self, "scroll_amount"):
+            amt = _parse_int_strict(getattr(self, "scroll_amount").value)
+            if amt is None:
+                await interaction.response.send_modal(EditDetailsModal(self.cog, self.session))
+                return
+            self.session.scroll_amount = int(amt)
+
+        self.session.duration_text = str(self.duration.value or "").strip()
+        self.session.start_text = str(self.start.value or "").strip()
+        self.session.req_text = str(self.desired_ap.value or "").strip()
+        self.session.note_text = str(self.note.value or "").strip()
+
+        await self.cog._apply_edit_details(interaction, self.session)
+
+
+class APAdjustModal(discord.ui.Modal):
+    def __init__(self, cog: "GruppensucheTest", message_id: int):
+        super().__init__(title="AP anpassen")
+        self.cog = cog
+        self.message_id = int(message_id)
+
+        self.ap_value = discord.ui.TextInput(
+            label="Deine AP (nur Zahlen)",
+            placeholder="z.B. 301 oder 3.245",
+            required=True,
+            max_length=16,
+        )
+        self.add_item(self.ap_value)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ap_val = _parse_int_strict(self.ap_value.value)
+        if ap_val is None:
+            # Modal direkt erneut öffnen (so “fühlt” es sich wie ein Feld-Fehler an)
+            await interaction.response.send_modal(APAdjustModal(self.cog, self.message_id))
+            return
+
+        await self.cog._apply_ap_adjust(interaction, self.message_id, ap_val)
+
+
 class JoinApModal(discord.ui.Modal):
     def __init__(self, cog, on_done):
         super().__init__(title="AP bei Anmeldung")
@@ -1103,31 +1236,22 @@ class JoinApModal(discord.ui.Modal):
 
         self.ap = discord.ui.TextInput(
             label="Deine AP (Pflicht)",
-            placeholder="z.B. 301",
+            placeholder="z.B. 301 oder 3.245",
             required=True,
-            max_length=10,
+            max_length=16,
         )
         self.add_item(self.ap)
 
     async def on_submit(self, interaction: discord.Interaction):
-        val = str(self.ap.value).strip()
+        raw = str(self.ap.value).strip()
+        ap_int = _parse_int_strict(raw)
 
-        # ✅ immer sofort acknowledgen (Modal zuverlässig schließen)
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except discord.InteractionResponded:
-            pass
-
-        if not val:
-            await self.cog._ephemeral_notice(interaction, "AP ist Pflicht.", ephemeral=True)
+        if ap_int is None:
+            await interaction.response.send_modal(JoinApModal(self.cog, self.on_done))
             return
 
-        # ✅ NUR Zahlen zulassen
-        if not val.isdigit():
-            await self.cog._ephemeral_notice(interaction, "Bitte nur Zahlen bei AP eintragen (z.B. 301).", ephemeral=True)
-            return
-
-        await self.on_done(interaction, val)
+        # on_done erwartet aktuell "ap_val" als str
+        await self.on_done(interaction, str(ap_int))
 
 
 # =========================
@@ -2120,6 +2244,10 @@ class EditMenuView(WizardBaseView):
         back_btn.callback = self._back
         self.add_item(back_btn)
 
+    @discord.ui.button(label="AP anpassen", style=discord.ButtonStyle.secondary, row=1)
+    async def edit_ap(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(APAdjustModal(self.cog, self.message_id))
+
     async def _tag(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
@@ -2370,6 +2498,23 @@ class PublicPostView(discord.ui.View):
 
         return data
 
+    async def _is_owner_or_mod(self, interaction: discord.Interaction, message_id: int) -> bool:
+        data = await self._get_search(int(message_id))
+        if not data:
+            return False
+
+        uid = int(interaction.user.id)
+        owner_id = int(data.get("owner_id") or 0)
+        if uid == owner_id:
+            return True
+
+        member = interaction.user if isinstance(
+            interaction.user, discord.Member) else None
+        if member and (_is_admin_only(member) or _is_officer_only(member)):
+            return True
+
+        return False
+
     async def _on_join(self, interaction: discord.Interaction):
         if not interaction.guild:
             return
@@ -2411,10 +2556,24 @@ class PublicPostView(discord.ui.View):
         await self.cog._ping_wait(interaction, self.message_id, data)
 
     async def _on_edit(self, interaction: discord.Interaction):
-        data = await self._ensure_owner_or_mod(interaction)
-        if not data:
+        if not interaction.guild:
             return
-        await self.cog._start_edit_flow(interaction, self.message_id, data)
+
+        mid = int(self.message_id)
+
+        # ✅ Teilnehmer (nicht Owner/Mod) -> NUR AP-Modal
+        is_owner_or_mod = await self.cog._is_owner_or_mod(interaction, mid)
+        if not is_owner_or_mod:
+            await interaction.response.send_modal(APAdjustModal(self.cog, mid, int(interaction.user.id)))
+            return
+
+        # ✅ Owner/Mod -> Edit-Menü (Ephemeral)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        await self.cog._send_owner_edit_menu(interaction, mid)
 
     async def _on_close(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
@@ -4187,6 +4346,7 @@ class GruppensucheTest(commands.Cog):
                 ap_map = data.get("participant_ap") or {}
                 ap_map[str(uid)] = ap_val
                 data["participant_ap"] = ap_map
+                self._sync_easter_egg_text(data, uid, int(ap_val))
 
                 # Easteregg: add/remove je nach Threshold
                 if _ap_triggers_easter_egg(ap_val):
@@ -4321,6 +4481,50 @@ class GruppensucheTest(commands.Cog):
         # ✅ Promotion-Notify NACH Lock (verhindert Lock-Blocking bei DMs)
         if promoted_id:
             await self._notify_promotion(data, promoted_id)
+
+    async def _apply_ap_adjust(self, interaction: discord.Interaction, message_id: int, ap_val: int):
+        # ✅ ACK-safe (Modal liefert i.d.R. schon response via send_modal / on_submit)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        lock = self._lock_for(int(message_id))
+        uid = int(interaction.user.id)
+
+        async with lock:
+            data = await self._get_search(int(message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+                return
+
+            participants: List[int] = list(data.get("participants") or [])
+            waitlist: List[int] = list(data.get("waitlist") or [])
+
+            is_participant = uid in participants
+            is_wait = uid in waitlist
+
+            if not is_participant and not is_wait:
+                await self._ephemeral_notice(interaction, "Du bist nicht eingetragen.", ephemeral=True)
+                return
+
+            ap_map = data.get("participant_ap") or {}
+            wl_map = data.get("waitlist_ap") or {}
+
+            ap_clean = str(int(ap_val))  # ap_val kommt als int rein, wird aber als str gespeichert
+
+            if is_participant:
+                ap_map[str(uid)] = ap_clean
+            else:
+                wl_map[str(uid)] = ap_clean
+
+            data["participant_ap"] = ap_map
+            data["waitlist_ap"] = wl_map
+
+            # ✅ Easteregg add/remove passend zur neuen AP
+            _sync_easter_egg_text(data, uid, ap_clean)
+
+        await self._ephemeral_notice(interaction, "✅ AP wurde aktualisiert.", ephemeral=True)
 
     async def _notify_promotion(self, data: dict, promoted_id: int):
         guild = self.bot.get_guild(int(data.get("guild_id", 0)))
