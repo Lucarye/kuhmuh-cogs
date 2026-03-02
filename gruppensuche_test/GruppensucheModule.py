@@ -963,7 +963,7 @@ class DetailsModal(discord.ui.Modal):
         if session.mode == "create":
             self.own_ap = discord.ui.TextInput(
                 label="Deine AP",
-                placeholder="z.B. 301 (auch 3.245 / 3 245 / 3,245)",
+                placeholder="z.B. 301",
                 required=True,
                 default=str(session.own_ap or ""),
                 max_length=10,
@@ -1068,7 +1068,8 @@ class DetailsModal(discord.ui.Modal):
                 return
 
             if raw_ap:
-                ap_int = _parse_int_strict(raw_ap)  # akzeptiert 3245, 3.245, 3 245, 3,245
+                # akzeptiert 3245, 3.245, 3 245, 3,245
+                ap_int = _parse_int_strict(raw_ap)
                 if ap_int is None:
                     await _reopen_modal()
                     return
@@ -1079,7 +1080,8 @@ class DetailsModal(discord.ui.Modal):
         # Pila Fe: Scroll-Menge (Zahlen-only, aber mit 3.245 / 3 245 / 3,245 erlaubt)
         # ----------------------------
         if self.session.category == "pilafe":
-            raw_amt = str(getattr(self, "scroll_amount", None).value).strip() if hasattr(self, "scroll_amount") else ""
+            raw_amt = str(getattr(self, "scroll_amount", None).value).strip(
+            ) if hasattr(self, "scroll_amount") else ""
 
             # Create: Pflicht
             if self.session.mode == "create" and not raw_amt:
@@ -1094,7 +1096,8 @@ class DetailsModal(discord.ui.Modal):
                 self.session.scroll_amount = str(amt_int)
             else:
                 # Edit: leer -> alten Wert beibehalten (defaults)
-                self.session.scroll_amount = self.defaults.get("scroll_amount") or None
+                self.session.scroll_amount = self.defaults.get(
+                    "scroll_amount") or None
 
         # ✅ ab hier "acknowledge" (Modal schließt zuverlässig)
         try:
@@ -1212,7 +1215,7 @@ class APAdjustModal(discord.ui.Modal):
 
         self.ap_value = discord.ui.TextInput(
             label="Deine AP (nur Zahlen)",
-            placeholder="z.B. 301 oder 3.245",
+            placeholder="z.B. 301",
             required=True,
             max_length=16,
         )
@@ -1236,7 +1239,7 @@ class JoinApModal(discord.ui.Modal):
 
         self.ap = discord.ui.TextInput(
             label="Deine AP (Pflicht)",
-            placeholder="z.B. 301 oder 3.245",
+            placeholder="z.B. 301",
             required=True,
             max_length=16,
         )
@@ -2499,19 +2502,23 @@ class PublicPostView(discord.ui.View):
         return data
 
     async def _is_owner_or_mod(self, interaction: discord.Interaction, message_id: int) -> bool:
-        data = await self._get_search(int(message_id))
+        """True, wenn Owner des Posts oder Mod (Admin/Offizier)."""
+        try:
+            data = await self._get_search(int(message_id))
+        except Exception:
+            data = None
+
         if not data:
             return False
 
-        uid = int(interaction.user.id)
+        # Owner?
         owner_id = int(data.get("owner_id") or 0)
-        if uid == owner_id:
+        if owner_id and int(interaction.user.id) == owner_id:
             return True
 
-        member = interaction.user if isinstance(
-            interaction.user, discord.Member) else None
-        if member and (_is_admin_only(member) or _is_officer_only(member)):
-            return True
+        # Mod (Admin/Offizier)?
+        if interaction.guild and isinstance(interaction.user, discord.Member):
+            return _has_mod_rights(interaction.user)
 
         return False
 
@@ -2556,24 +2563,23 @@ class PublicPostView(discord.ui.View):
         await self.cog._ping_wait(interaction, self.message_id, data)
 
     async def _on_edit(self, interaction: discord.Interaction):
-        if not interaction.guild:
-            return
-
-        mid = int(self.message_id)
-
-        # ✅ Teilnehmer (nicht Owner/Mod) -> NUR AP-Modal
-        is_owner_or_mod = await self.cog._is_owner_or_mod(interaction, mid)
-        if not is_owner_or_mod:
-            await interaction.response.send_modal(APAdjustModal(self.cog, mid, int(interaction.user.id)))
-            return
-
-        # ✅ Owner/Mod -> Edit-Menü (Ephemeral)
+        # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
-        await self.cog._send_owner_edit_menu(interaction, mid)
+        if not interaction.guild:
+            return
+
+        mid = int(self.message_id)
+
+        is_owner_or_mod = await self.cog._is_owner_or_mod(interaction, mid)
+
+        if is_owner_or_mod:
+            await self.cog._open_owner_edit_menu(interaction, mid)
+        else:
+            await self.cog._open_participant_ap_only_menu(interaction, mid)
 
     async def _on_close(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
@@ -3261,6 +3267,21 @@ class GruppensucheTest(commands.Cog):
         # Debounced Refresh starten
         self._schedule_dashboard_refresh(int(guild_id))
 
+    async def _is_owner_or_mod(self, interaction: discord.Interaction, message_id: int) -> bool:
+        data = await self._get_search(int(message_id))
+        if not data:
+            return False
+
+        uid = int(interaction.user.id)
+        owner_id = int(data.get("owner_id") or 0)
+        if uid == owner_id:
+            return True
+
+        member = _member_from_interaction(interaction)
+        if member and _has_mod_rights(member):
+            return True
+
+        return False
     # =========================
     # Edit Notifications (DM, debounced)
     # =========================
@@ -4346,7 +4367,7 @@ class GruppensucheTest(commands.Cog):
                 ap_map = data.get("participant_ap") or {}
                 ap_map[str(uid)] = ap_val
                 data["participant_ap"] = ap_map
-                self._sync_easter_egg_text(data, uid, int(ap_val))
+                _sync_easter_egg_text(data, uid, ap_val)
 
                 # Easteregg: add/remove je nach Threshold
                 if _ap_triggers_easter_egg(ap_val):
@@ -4483,7 +4504,7 @@ class GruppensucheTest(commands.Cog):
             await self._notify_promotion(data, promoted_id)
 
     async def _apply_ap_adjust(self, interaction: discord.Interaction, message_id: int, ap_val: int):
-        # ✅ ACK-safe (Modal liefert i.d.R. schon response via send_modal / on_submit)
+        # ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
@@ -4511,7 +4532,8 @@ class GruppensucheTest(commands.Cog):
             ap_map = data.get("participant_ap") or {}
             wl_map = data.get("waitlist_ap") or {}
 
-            ap_clean = str(int(ap_val))  # ap_val kommt als int rein, wird aber als str gespeichert
+            # wir speichern AP konsistent als digits-only string
+            ap_clean = str(int(ap_val))
 
             if is_participant:
                 ap_map[str(uid)] = ap_clean
@@ -4523,6 +4545,9 @@ class GruppensucheTest(commands.Cog):
 
             # ✅ Easteregg add/remove passend zur neuen AP
             _sync_easter_egg_text(data, uid, ap_clean)
+
+            # ✅ speichern + public post aktualisieren + dashboard refresh
+            await self._save_refresh_dispatch(data)
 
         await self._ephemeral_notice(interaction, "✅ AP wurde aktualisiert.", ephemeral=True)
 
