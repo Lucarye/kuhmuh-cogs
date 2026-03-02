@@ -1051,53 +1051,46 @@ class DetailsModal(discord.ui.Modal):
             self.add_item(self.notes)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # ✅ Wichtig: Erst VALIDIEREN, dann defer -> sonst kann man kein Modal "neu öffnen"
-        async def _reopen_modal() -> None:
-            # Modal direkt erneut öffnen (statt "Modal zu + Ephemeral")
-            await interaction.response.send_modal(DetailsModal(self.cog, self.session, defaults=self.defaults))
+        # ✅ NICHT sofort defer() – erst validieren!
 
-        # ----------------------------
-        # AP (nur Create-Wizard)
-        # ----------------------------
-        if hasattr(self, "own_ap"):
-            raw_ap = str(self.own_ap.value).strip()
+        def _invalid_number(msg: str):
+            return interaction.response.send_message(
+                msg,
+                ephemeral=True,
+                view=_ReopenModalView(lambda: type(self)(self.cog, self.session, defaults=self.defaults)),
+            )
 
-            # Create: Pflicht
-            if self.session.mode == "create" and not raw_ap:
-                await _reopen_modal()
+        # ---------- AP ----------
+        own_ap_val = str(self.own_ap.value).strip() if hasattr(self, "own_ap") else ""
+
+        # Create: Pflicht
+        if self.session.mode == "create" and not own_ap_val:
+            await _invalid_number("❌ **AP ist Pflicht.** Bitte nur Zahlen eintragen (z.B. `301`).")
+            return
+
+        # Wenn gesetzt: Zahlenformat prüfen
+        if own_ap_val:
+            ap_int = _parse_int_strict(own_ap_val)
+            if ap_int is None:
+                await _invalid_number("❌ **AP ungültig.** Erlaubt: `3245`, `3.245`, `3 245`, `3,245`.")
                 return
+            # ✅ Speichern wie bisher als digits-only string (kompatibel zu deinem Restcode)
+            self.session.own_ap = str(ap_int)
 
-            if raw_ap:
-                # akzeptiert 3245, 3.245, 3 245, 3,245
-                ap_int = _parse_int_strict(raw_ap)
-                if ap_int is None:
-                    await _reopen_modal()
-                    return
-                # intern sauber speichern (digits-only)
-                self.session.own_ap = str(ap_int)
-
-        # ----------------------------
-        # Pila Fe: Scroll-Menge (Zahlen-only, aber mit 3.245 / 3 245 / 3,245 erlaubt)
-        # ----------------------------
+        # ---------- PilaFe Menge ----------
         if self.session.category == "pilafe":
-            raw_amt = str(getattr(self, "scroll_amount", None).value).strip(
-            ) if hasattr(self, "scroll_amount") else ""
+            raw = str(self.scroll_amount.value).strip()
 
-            # Create: Pflicht
-            if self.session.mode == "create" and not raw_amt:
-                await _reopen_modal()
+            if self.session.mode == "create" and not raw:
+                await _invalid_number("❌ **Bei Pila Fe ist die Menge Pflicht.**")
                 return
 
-            if raw_amt:
-                amt_int = _parse_int_strict(raw_amt)
-                if amt_int is None:
-                    await _reopen_modal()
+            if raw:
+                amt = _parse_int_strict(raw)
+                if amt is None:
+                    await _invalid_number("❌ **Menge ungültig.** Erlaubt: `10`, `1.000`, `1 000`, `1,000`.")
                     return
-                self.session.scroll_amount = str(amt_int)
-            else:
-                # Edit: leer -> alten Wert beibehalten (defaults)
-                self.session.scroll_amount = self.defaults.get(
-                    "scroll_amount") or None
+                self.session.scroll_amount = str(amt)
 
         # ✅ ab hier "acknowledge" (Modal schließt zuverlässig)
         try:
@@ -1136,6 +1129,14 @@ class DetailsModal(discord.ui.Modal):
 
         await self.cog._apply_edit_details(base_interaction, self.session)
 
+class _ReopenModalView(discord.ui.View):
+    def __init__(self, modal_factory, *, timeout: int = 60):
+        super().__init__(timeout=timeout)
+        self._modal_factory = modal_factory
+
+    @discord.ui.button(label="Eingabe korrigieren", style=discord.ButtonStyle.primary, emoji="✏️")
+    async def reopen(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(self._modal_factory())
 
 class EditDetailsModal(discord.ui.Modal):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
@@ -1248,13 +1249,15 @@ class JoinApModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         raw = str(self.ap.value).strip()
         ap_int = _parse_int_strict(raw)
-
         if ap_int is None:
-            await interaction.response.send_modal(JoinApModal(self.cog, self.on_done))
+            await interaction.response.send_message(
+                "❌ **AP ungültig.** Erlaubt: `3245`, `3.245`, `3 245`, `3,245`.",
+                ephemeral=True,
+                view=_ReopenModalView(lambda: APAdjustModal(self.cog, self.message_id)),
+            )
             return
 
-        # on_done erwartet aktuell "ap_val" als str
-        await self.on_done(interaction, str(ap_int))
+        await self.cog._apply_ap_adjust(interaction, self.message_id, ap=str(ap_int))
 
 
 # =========================
@@ -2563,23 +2566,16 @@ class PublicPostView(discord.ui.View):
         await self.cog._ping_wait(interaction, self.message_id, data)
 
     async def _on_edit(self, interaction: discord.Interaction):
-        # ✅ ACK-safe
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except discord.InteractionResponded:
-            pass
+        await interaction.response.defer(ephemeral=True)
 
         if not interaction.guild:
             return
 
         mid = int(self.message_id)
 
-        is_owner_or_mod = await self.cog._is_owner_or_mod(interaction, mid)
-
-        if is_owner_or_mod:
-            await self.cog._open_owner_edit_menu(interaction, mid)
-        else:
-            await self.cog._open_participant_ap_only_menu(interaction, mid)
+        # ✅ Owner/Admin/Offizier -> volles Edit-Menü
+        # ✅ Teilnehmer -> AP-only Edit-Menü
+        await self.cog._start_edit_flow(interaction, mid)
 
     async def _on_close(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
