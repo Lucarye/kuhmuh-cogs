@@ -1265,7 +1265,7 @@ class JoinApModal(discord.ui.Modal):
             )
             return
 
-        await self.cog._apply_ap_adjust(interaction, self.message_id, ap=str(ap_int))
+        await self.on_done(interaction, str(ap_int))
 
 
 # =========================
