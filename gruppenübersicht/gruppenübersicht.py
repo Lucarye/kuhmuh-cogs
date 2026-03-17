@@ -406,13 +406,29 @@ class Gruppenübersicht(commands.Cog):
             pass
 
     async def force_refresh_all(self, guild_id: int):
-        if int(guild_id) != GUILD_ID:
-            return
-        guild = self.bot.get_guild(GUILD_ID)
+        log.info(
+            f"[KUHMUH][DASHBOARD][FORCE REFRESH][START] guild_id={guild_id}"
+        )
+
+        guild = self.bot.get_guild(guild_id)
         if not guild:
+            log.warning(
+                f"[KUHMUH][DASHBOARD][FORCE REFRESH][NO GUILD] guild_id={guild_id}"
+            )
             return
-        await self._refresh_dashboard(guild, which="live")
-        await self._refresh_dashboard(guild, which="test")
+
+        try:
+            await self._refresh_dashboard(guild, which="live")
+            await self._refresh_dashboard(guild, which="test")
+
+            log.info(
+                f"[KUHMUH][DASHBOARD][FORCE REFRESH][DONE] guild_id={guild_id}"
+            )
+
+        except Exception as e:
+            log.exception(
+                f"[KUHMUH][DASHBOARD][FORCE REFRESH][ERROR] guild_id={guild_id} error={e}"
+            )
 
     async def cog_load(self):
         # 1) Persistent Views registrieren
@@ -608,6 +624,9 @@ class Gruppenübersicht(commands.Cog):
     # =========================
 
     async def _refresh_dashboard(self, guild: discord.Guild, which: str):
+        log.info(
+            f"[KUHMUH][DASHBOARD][REFRESH][START] guild_id={guild.id} which={which}"
+        )
         ch_id, msg_id = await self._get_dashboard_target(guild, which)
         if not ch_id or not msg_id:
             return
@@ -680,10 +699,17 @@ class Gruppenübersicht(commands.Cog):
                 sig = hashlib.sha256(raw).hexdigest()
 
                 if self._last_sig.get(which) == sig:
+                    log.info(
+                        f"[KUHMUH][DASHBOARD][REFRESH][SKIP NO CHANGES] guild_id={guild.id} which={which}"
+                    )
                     return  # kein Edit nötig
 
                 await msg.edit(embed=embed, view=view)
                 self._last_sig[which] = sig
+
+                log.info(
+                    f"[KUHMUH][DASHBOARD][REFRESH][EDIT DONE] guild_id={guild.id} which={which}"
+                )
 
             except Exception:
                 try:
