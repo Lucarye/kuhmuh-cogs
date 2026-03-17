@@ -606,20 +606,20 @@ class Gruppenübersicht(commands.Cog):
             except Exception:
                 pass
 
-            try:
-                await self._log_event(
-                    guild,
-                    "warn",
-                    "Dashboard",
-                    "Target Channel Missing",
-                    (
-                        f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
-                        "Der gespeicherte Dashboard-Channel ist nicht mehr verfügbar.\n"
-                        "Das Dashboard konnte nicht automatisch repariert werden."
-                    ),
-                )
-            except Exception:
-                pass
+                try:
+                    await self._log_event(
+                        guild,
+                        "warn",
+                        "Dashboard",
+                        "Target Channel Missing",
+                        (
+                            f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
+                            "Der gespeicherte Dashboard-Channel ist nicht mehr verfügbar.\n"
+                            "Das Dashboard konnte nicht automatisch repariert werden."
+                        ),
+                    )
+                except Exception:
+                    pass
             return
 
         lock = self._dash_locks.get(which)
@@ -645,8 +645,7 @@ class Gruppenübersicht(commands.Cog):
                         (
                             f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
                             "Die gespeicherte Dashboard-Nachricht konnte nicht geladen werden.\n"
-                            "Das Dashboard konnte nicht automatisch repariert werden.\n\n"
-                            "Bitte `/dashboard` neu ausführen."
+                            "Das Dashboard konnte nicht automatisch repariert werden."
                         ),
                         channel=ch,
                     )
@@ -688,8 +687,7 @@ class Gruppenübersicht(commands.Cog):
                         (
                             f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
                             "Die bestehende Dashboard-Nachricht konnte nicht bearbeitet werden.\n"
-                            "Das Dashboard konnte nicht automatisch repariert werden.\n\n"
-                            "Bitte `/dashboard` neu ausführen."
+                            "Das Dashboard konnte nicht automatisch repariert werden."
                         ),
                         channel=ch,
                     )
