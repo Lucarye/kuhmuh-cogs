@@ -465,6 +465,9 @@ class KuhmuhUpdate(commands.Cog):
             await interaction.followup.send("❌ Konnte keine öffentliche Nachricht posten (Rechte?).", ephemeral=True)
             return
 
+        with contextlib.suppress(Exception):
+            await interaction.delete_original_response()
+
         async with self._update_lock:
             results: List[StepResult] = []
 
