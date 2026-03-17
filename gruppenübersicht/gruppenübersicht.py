@@ -330,21 +330,48 @@ class Gruppenübersicht(commands.Cog):
         if not isinstance(ch, discord.TextChannel):
             return
 
-        emoji_map = {
-            "info": "ℹ️",
-            "warn": "⚠️",
-            "error": "❌",
-        }
-        emoji = emoji_map.get(level.lower(), "ℹ️")
+        level_name = str(level or "info").lower()
+
+        if level_name == "error":
+            title = "❌ Kuhmuh Fehler"
+            color = discord.Color.red()
+        elif level_name == "warn":
+            title = "⚠️ Kuhmuh Warnung"
+            color = discord.Color.orange()
+        else:
+            title = "ℹ️ Kuhmuh System Log"
+            color = discord.Color.blue()
+
+        desc_upper = description.upper()
+        if "TEST-DASHBOARD" in desc_upper:
+            bereich = "TEST"
+        elif "LIVE-DASHBOARD" in desc_upper:
+            bereich = "LIVE"
+        else:
+            bereich = "—"
+
+        if bereich in ("TEST", "LIVE"):
+            cmd_hint = f"/dashboard bereich:{bereich} aktion:Posten / Verschieben"
+            final_description = (
+                f"{description}\n\n"
+                f"Bitte `{cmd_hint}` ausführen.\n\n"
+                "Technische Details siehe Serverkonsole."
+            )
+        else:
+            final_description = (
+                f"{description}\n\n"
+                "Technische Details siehe Serverkonsole."
+            )
 
         embed = discord.Embed(
-            title=f"{emoji} Kuhmuh System Log",
-            description=description + "\n\nTechnische Details siehe Serverkonsole.",
-            color=discord.Color.orange() if level.lower() != "error" else discord.Color.red(),
+            title=title,
+            description=final_description,
+            color=color,
         )
 
         embed.add_field(name="Modul", value=module, inline=True)
         embed.add_field(name="Event", value=event, inline=True)
+        embed.add_field(name="Bereich", value=bereich, inline=True)
         embed.add_field(name="Server", value=guild.name, inline=True)
 
         if channel:
@@ -353,7 +380,7 @@ class Gruppenübersicht(commands.Cog):
         embed.set_footer(text="Kuhmuh Bot • Systemmeldung")
 
         content = None
-        if level.lower() == "error" and DEV_ROLE_ID:
+        if level_name == "error" and DEV_ROLE_ID:
             content = f"<@&{DEV_ROLE_ID}>"
 
         try:
