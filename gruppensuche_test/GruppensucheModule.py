@@ -3361,6 +3361,20 @@ class GruppensucheTest(commands.Cog):
                 message_id=message_id,
                 guild_id=guild.id,
             )
+            try:
+                await self._log_event(
+                    guild,
+                    "warn",
+                    "Gruppensuche",
+                    "Search Entry Missing",
+                    (
+                        "Ein Gruppensuche-Datensatz konnte nicht gefunden werden.\n\n"
+                        "Der Post existiert möglicherweise noch, der zugehörige Storage-Eintrag fehlt jedoch.\n"
+                        "Bitte Post und Storage prüfen."
+                    ),
+                )
+            except Exception:
+                pass
 
         return data
 
@@ -4054,29 +4068,120 @@ class GruppensucheTest(commands.Cog):
         guild = self.bot.get_guild(int(data.get("guild_id", 0)))
         if guild is None:
             return
+
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         if not isinstance(channel, discord.TextChannel):
+            self._log_warning(
+                "REFRESH",
+                "public post refresh aborted because channel is unavailable",
+                guild_id=guild.id,
+                channel_id=int(data.get("channel_id", 0)),
+                message_id=int(data.get("message_id", 0)),
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Public Post Refresh Failed",
+                    (
+                        "Ein Gruppensuche-Post konnte nicht aktualisiert werden.\n\n"
+                        "Der Ziel-Channel war nicht verfügbar.\n"
+                        "Bitte Post und Channel prüfen."
+                    ),
+                )
+            except Exception:
+                pass
             return
 
         mid = int(data.get("message_id", 0))
         if mid == 0:
+            self._log_warning(
+                "REFRESH",
+                "public post refresh aborted because message id is missing",
+                guild_id=guild.id,
+                channel_id=channel.id,
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Public Post Refresh Failed",
+                    (
+                        "Ein Gruppensuche-Post konnte nicht aktualisiert werden.\n\n"
+                        "Die gespeicherte Message-ID fehlt.\n"
+                        "Bitte Post und Storage prüfen."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
             return
 
         try:
             msg = await channel.fetch_message(mid)
         except Exception:
+            self._log_warning(
+                "REFRESH",
+                "public post refresh failed because message fetch failed",
+                guild_id=guild.id,
+                channel_id=channel.id,
+                message_id=mid,
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Public Post Refresh Failed",
+                    (
+                        "Ein Gruppensuche-Post konnte nicht aktualisiert werden.\n\n"
+                        "Die gespeicherte Nachricht konnte nicht geladen werden.\n"
+                        "Bitte prüfen, ob der Post noch existiert."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
             return
 
         embed = await self._build_public_embed(guild, data)
 
-        if bool(data.get("is_closed", False)):
-            view = ClosedPostView(self, mid)
-            await msg.edit(embed=embed, view=view)
-            return
+        try:
+            if bool(data.get("is_closed", False)):
+                view = ClosedPostView(self, mid)
+                await msg.edit(embed=embed, view=view)
+                return
 
-        view = PublicPostView(self, mid)
-        await self._apply_dynamic_button_labels(view, data)
-        await msg.edit(embed=embed, view=view)
+            view = PublicPostView(self, mid)
+            await self._apply_dynamic_button_labels(view, data)
+            await msg.edit(embed=embed, view=view)
+
+        except Exception:
+            self._log_warning(
+                "REFRESH",
+                "public post refresh failed during message edit",
+                guild_id=guild.id,
+                channel_id=channel.id,
+                message_id=mid,
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Public Post Refresh Failed",
+                    (
+                        "Ein Gruppensuche-Post konnte nicht aktualisiert werden.\n\n"
+                        "Die bestehende Nachricht konnte nicht bearbeitet werden.\n"
+                        "Bitte Post und Bot-Rechte prüfen."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
+            return
 
     async def _apply_dynamic_button_labels(self, view: discord.ui.View, data: dict):
         label = "Rollen-Ping"
@@ -4307,6 +4412,22 @@ class GruppensucheTest(commands.Cog):
                 owner_id=owner_id,
                 category=session.category,
             )
+
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Create Failed",
+                    (
+                        "Eine Gruppensuche konnte nicht vollständig erstellt werden.\n\n"
+                        "Der Bot hat versucht, den Vorgang zurückzurollen, damit kein unvollständiger Post bestehen bleibt."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
+
             # Rollback:
             # Wenn der Discord-Post schon existiert, aber Save/Edit scheitert,
             # versuchen wir die Nachricht wieder zu entfernen, damit kein "toter" Post stehen bleibt.
@@ -5036,6 +5157,23 @@ class GruppensucheTest(commands.Cog):
                 "delete aborted because guild is unavailable",
                 message_id=message_id,
             )
+            try:
+                bot_guild = self.bot.get_guild(GUILD_ID)
+                if bot_guild is not None:
+                    await self._log_event(
+                        bot_guild,
+                        "error",
+                        "Gruppensuche",
+                        "Delete Failed",
+                        (
+                            "Eine Gruppensuche konnte nicht sicher gelöscht werden.\n\n"
+                            "Der Guild-Kontext war nicht verfügbar.\n"
+                            "Der Storage-Eintrag wurde nicht entfernt."
+                        ),
+                    )
+            except Exception:
+                pass
+
             await self._ephemeral_notice(
                 interaction,
                 "❌ Die Suche konnte nicht sicher gelöscht werden (Guild nicht verfügbar).",
@@ -5052,6 +5190,21 @@ class GruppensucheTest(commands.Cog):
                 guild_id=guild.id,
                 channel_id=int(data.get("channel_id", 0)),
             )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Delete Failed",
+                    (
+                        "Eine Gruppensuche konnte nicht sicher gelöscht werden.\n\n"
+                        "Der Ziel-Channel war nicht verfügbar.\n"
+                        "Der Storage-Eintrag wurde nicht entfernt."
+                    ),
+                )
+            except Exception:
+                pass
+
             await self._ephemeral_notice(
                 interaction,
                 "❌ Die Suche konnte nicht sicher gelöscht werden (Channel nicht gefunden).",
@@ -5072,6 +5225,22 @@ class GruppensucheTest(commands.Cog):
                 guild_id=guild.id,
                 channel_id=channel.id,
             )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Delete Failed",
+                    (
+                        "Eine Gruppensuche konnte nicht vollständig gelöscht werden.\n\n"
+                        "Die Discord-Nachricht konnte nicht entfernt werden.\n"
+                        "Der Storage-Eintrag wurde deshalb bewusst beibehalten."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
+
             await self._ephemeral_notice(
                 interaction,
                 "❌ Die Suche konnte nicht vollständig gelöscht werden. Der Post wurde nicht entfernt.",
