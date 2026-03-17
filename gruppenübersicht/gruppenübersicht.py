@@ -333,10 +333,10 @@ class Gruppenübersicht(commands.Cog):
         level_name = str(level or "info").lower()
 
         if level_name == "error":
-            title = "❌ Kuhmuh Fehler"
+            title = "❌ Kuhmuh System Fehler"
             color = discord.Color.red()
         elif level_name == "warn":
-            title = "⚠️ Kuhmuh Warnung"
+            title = "⚠️ Kuhmuh System Warnung"
             color = discord.Color.orange()
         else:
             title = "ℹ️ Kuhmuh System Log"
