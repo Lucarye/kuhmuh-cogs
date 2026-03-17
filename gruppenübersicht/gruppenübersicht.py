@@ -54,6 +54,9 @@ ROLE_NO_DM_ID_TEST = 1466761625158684817  # Gruppensuche DM-Funktion TEST
 ADMIN_ROLE_ID: Optional[int] = 1452050940952838214
 OFFIZIER_ROLE_ID: Optional[int] = 1198652039312453723
 
+LOG_CHANNEL_ID: int = 1460298038269575282
+DEV_ROLE_ID: int = 1445018518562017373
+
 
 def _now_local() -> dt.datetime:
     return dt.datetime.now()
@@ -701,8 +704,12 @@ class Gruppenübersicht(commands.Cog):
         searches_changed = False
         now_ts = int(dt.datetime.now(dt.timezone.utc).timestamp())
 
-        for mid_str, data in (searches or {}).items():
+        searches_dict = dict(searches or {})
+
+        for mid_str, original_data in list(searches_dict.items()):
             try:
+                data = dict(original_data)
+
                 day_iso = data.get("day_date_iso")
                 if not day_iso:
                     continue
@@ -725,7 +732,7 @@ class Gruppenübersicht(commands.Cog):
                     if not missing_since:
                         data["missing_since"] = now_ts
                         data["missing_logged"] = True
-                        searches[mid_str] = data
+                        searches_dict[mid_str] = data
                         searches_changed = True
 
                         self._log_warning(
@@ -736,7 +743,7 @@ class Gruppenübersicht(commands.Cog):
                         )
 
                     elif missing_since and (now_ts - missing_since) >= (MISSING_POST_CLEANUP_MINUTES * 60):
-                        searches.pop(mid_str, None)
+                        searches_dict.pop(mid_str, None)
                         searches_changed = True
 
                         self._log_info(
@@ -753,7 +760,7 @@ class Gruppenübersicht(commands.Cog):
                     if not missing_since:
                         data["missing_since"] = now_ts
                         data["missing_logged"] = True
-                        searches[mid_str] = data
+                        searches_dict[mid_str] = data
                         searches_changed = True
 
                         self._log_warning(
@@ -764,7 +771,7 @@ class Gruppenübersicht(commands.Cog):
                         )
 
                     elif missing_since and (now_ts - missing_since) >= (MISSING_POST_CLEANUP_MINUTES * 60):
-                        searches.pop(mid_str, None)
+                        searches_dict.pop(mid_str, None)
                         searches_changed = True
 
                         self._log_info(
@@ -779,7 +786,7 @@ class Gruppenübersicht(commands.Cog):
                 if missing_since or missing_logged:
                     data.pop("missing_since", None)
                     data.pop("missing_logged", None)
-                    searches[mid_str] = data
+                    searches_dict[mid_str] = data
                     searches_changed = True
 
                 items.append(d2)
@@ -793,7 +800,7 @@ class Gruppenübersicht(commands.Cog):
                 if search_cog:
                     async with search_cog.config.guild(guild).searches() as s:
                         s.clear()
-                        s.update(searches)
+                        s.update(searches_dict)
             except Exception:
                 pass
 
