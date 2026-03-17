@@ -2677,6 +2677,7 @@ class GruppensucheTest(commands.Cog):
             self._locks_gc_loop())
         # --- Dashboard Debounce ---
         self._dashboard_refresh_tasks: Dict[int, asyncio.Task] = {}
+        self._dashboard_refresh_pending: Dict[int, bool] = {}
         self._dashboard_refresh_delay = 2  # Sekunden
         self._startup_task: Optional[asyncio.Task] = self.bot.loop.create_task(
             self._startup_register_views())
@@ -3678,29 +3679,34 @@ class GruppensucheTest(commands.Cog):
         await self._set_search(int(message_id), data)
 
     def _schedule_dashboard_refresh(self, guild_id: int):
-        # Wenn schon ein Task läuft → abbrechen
-        old_task = self._dashboard_refresh_tasks.get(guild_id)
-        if old_task and not old_task.done():
-            old_task.cancel()
+        guild_id = int(guild_id)
+        self._dashboard_refresh_pending[guild_id] = True
 
         log.info(f"[KUHMUH][DASHBOARD][DISPATCH][SCHEDULE] guild_id={guild_id}")
 
-        async def _debounced():
+        existing = self._dashboard_refresh_tasks.get(guild_id)
+        if existing and not existing.done():
+            return
+
+        async def _runner():
             try:
-                await asyncio.sleep(self._dashboard_refresh_delay)
+                while self._dashboard_refresh_pending.get(guild_id, False):
+                    self._dashboard_refresh_pending[guild_id] = False
 
-                log.info(f"[KUHMUH][DASHBOARD][DISPATCH][START] guild_id={guild_id}")
+                    await asyncio.sleep(self._dashboard_refresh_delay)
 
-                dash = self.bot.get_cog("Gruppenübersicht")
-                if dash is None:
-                    log.warning(f"[KUHMUH][DASHBOARD][DISPATCH][NO COG] guild_id={guild_id}")
-                    return
+                    log.info(f"[KUHMUH][DASHBOARD][DISPATCH][START] guild_id={guild_id}")
 
-                log.info(f"[KUHMUH][DASHBOARD][DISPATCH][COG FOUND] guild_id={guild_id}")
+                    dash = self.bot.get_cog("Gruppenübersicht")
+                    if dash is None:
+                        log.warning(f"[KUHMUH][DASHBOARD][DISPATCH][NO COG] guild_id={guild_id}")
+                        return
 
-                await dash.force_refresh_all(int(guild_id))
+                    log.info(f"[KUHMUH][DASHBOARD][DISPATCH][COG FOUND] guild_id={guild_id}")
 
-                log.info(f"[KUHMUH][DASHBOARD][DISPATCH][DONE] guild_id={guild_id}")
+                    await dash.force_refresh_all(guild_id)
+
+                    log.info(f"[KUHMUH][DASHBOARD][DISPATCH][DONE] guild_id={guild_id}")
 
             except asyncio.CancelledError:
                 log.info(f"[KUHMUH][DASHBOARD][DISPATCH][CANCELLED] guild_id={guild_id}")
@@ -3709,8 +3715,11 @@ class GruppensucheTest(commands.Cog):
                 log.exception(
                     f"[KUHMUH][DASHBOARD][DISPATCH][ERROR] guild_id={guild_id} error={e}"
                 )
+            finally:
+                self._dashboard_refresh_tasks.pop(guild_id, None)
+                self._dashboard_refresh_pending.pop(guild_id, None)
 
-        task = self.bot.loop.create_task(_debounced())
+        task = self.bot.loop.create_task(_runner())
         self._dashboard_refresh_tasks[guild_id] = task
 
     async def _save_refresh_dispatch(self, data: dict):
