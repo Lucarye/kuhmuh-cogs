@@ -278,6 +278,46 @@ class KuhmuhUpdate(commands.Cog):
         low = text.casefold()
         return any(re.search(p, low) for p in patterns)
 
+    def _compact_detail_line(self, step_name: str, text: str) -> str:
+        if not text:
+            return ""
+
+        safe = text.replace("```", "'''").strip()
+        if not safe:
+            return ""
+
+        lines = [line.strip() for line in safe.splitlines() if line.strip()]
+        if not lines:
+            return ""
+
+        if step_name == "Install":
+            for line in lines:
+                if "Successfully installed" in line:
+                    return line
+            return lines[0]
+
+        if step_name == "Repo Update":
+            for line in lines:
+                if "already up to date" in line.casefold():
+                    return line
+                if "updated" in line.casefold():
+                    return line
+            return lines[0]
+
+        if step_name == "Uninstall":
+            for line in lines:
+                if "Successfully uninstalled" in line:
+                    return line
+            return lines[0]
+
+        if step_name == "Load":
+            for line in lines:
+                if line.casefold().startswith("loaded "):
+                    return line
+            return lines[0]
+
+        return lines[0]
+
     async def _build_status_embed(
         self,
         cog_name: str,
@@ -363,13 +403,15 @@ class KuhmuhUpdate(commands.Cog):
             repo = v.get("repo_name", "")
             if not name:
                 continue
+            if _normalize_key(name) == "kuhmuhupdate":
+                continue
             if cur and cur not in name.casefold():
                 continue
             items.append(app_commands.Choice(name=f"{name} ({repo})", value=key))
 
         items.sort(key=lambda c: c.name.casefold())
         return items[:25]
-
+    
     # ==========================
     # /update run
     # ==========================
@@ -380,29 +422,34 @@ class KuhmuhUpdate(commands.Cog):
     @app_commands.describe(cog="Cog auswählen (gespeichert)")
     @app_commands.autocomplete(cog=_ac_stored_cogs)
     async def update_run(self, interaction: discord.Interaction, cog: str) -> None:
-        await interaction.response.send_message("✅ Update gestartet… Ergebnis wird im Channel gepostet.", ephemeral=True)
+        await interaction.response.defer()
 
         ok, err = await self._require_admin(interaction)
         if not ok:
-            await interaction.followup.send(err, ephemeral=True)
+            with contextlib.suppress(Exception):
+                await interaction.channel.send(err)  # type: ignore
             return
 
         stored = await self._get_stored_cogs()
         sel = stored.get(cog)
         if not sel:
-            await interaction.followup.send("⚠️ Auswahl nicht gefunden (Liste evtl. geändert).", ephemeral=True)
+            with contextlib.suppress(Exception):
+                await interaction.channel.send("⚠️ Auswahl nicht gefunden (Liste evtl. geändert).")  # type: ignore
             return
 
         if self._update_lock.locked():
-            await interaction.followup.send("⏭️ Ein Update läuft bereits. Bitte warten.", ephemeral=True)
+            with contextlib.suppress(Exception):
+                await interaction.channel.send("⏭️ Ein Update läuft bereits. Bitte warten.")  # type: ignore
             return
 
         if not interaction.channel:
-            await interaction.followup.send("❌ Kein Channel-Kontext.", ephemeral=True)
             return
 
         cog_name_real = sel["cog_name"]
         repo_name_real = sel["repo_name"]
+
+        if _normalize_key(cog_name_real) == "kuhmuhupdate":
+            return
 
         started = _now_utc()
         t0 = dt.datetime.now(dt.timezone.utc)
@@ -479,17 +526,22 @@ class KuhmuhUpdate(commands.Cog):
         limit = int(await self.config.embed_detail_limit() or 400)
         for r in results:
             if r.details:
-                snippet = _clamp_text(r.details.replace("```", "'''"), limit)
+                compact = self._compact_detail_line(r.name, r.details)
+                snippet = _clamp_text(compact, limit)
                 if snippet:
                     r.summary = f"{r.summary}\n```text\n{snippet}\n```"
 
-        embed_final = await self._build_status_embed(cog_name, repo_name, started, interaction.user, results, duration)
+        embed_final = await self._build_status_embed(
+            cog_name,
+            repo_name,
+            started,
+            interaction.user,
+            results,
+            duration,
+        )
 
         with contextlib.suppress(Exception):
             await public_msg.edit(embed=embed_final)
-
-        with contextlib.suppress(Exception):
-            await interaction.followup.send("✅ Update abgeschlossen.", ephemeral=True)
 
     # ==========================
     # /update manage add
