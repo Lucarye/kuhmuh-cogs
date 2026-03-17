@@ -3683,17 +3683,32 @@ class GruppensucheTest(commands.Cog):
         if old_task and not old_task.done():
             old_task.cancel()
 
+        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][SCHEDULE] guild_id={guild_id}")
+
         async def _debounced():
             try:
                 await asyncio.sleep(self._dashboard_refresh_delay)
 
+                log.info(f"[KUHMUH][DASHBOARD][DISPATCH][START] guild_id={guild_id}")
+
                 dash = self.bot.get_cog("Gruppenübersicht")
-                if dash:
-                    await dash.force_refresh_all(int(guild_id))
+                if dash is None:
+                    log.warning(f"[KUHMUH][DASHBOARD][DISPATCH][NO COG] guild_id={guild_id}")
+                    return
+
+                log.info(f"[KUHMUH][DASHBOARD][DISPATCH][COG FOUND] guild_id={guild_id}")
+
+                await dash.force_refresh_all(int(guild_id))
+
+                log.info(f"[KUHMUH][DASHBOARD][DISPATCH][DONE] guild_id={guild_id}")
+
             except asyncio.CancelledError:
+                log.info(f"[KUHMUH][DASHBOARD][DISPATCH][CANCELLED] guild_id={guild_id}")
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                log.exception(
+                    f"[KUHMUH][DASHBOARD][DISPATCH][ERROR] guild_id={guild_id} error={e}"
+                )
 
         task = self.bot.loop.create_task(_debounced())
         self._dashboard_refresh_tasks[guild_id] = task
