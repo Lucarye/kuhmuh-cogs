@@ -14,7 +14,10 @@ import discord  # pyright: ignore[reportMissingImports]
 # pyright: ignore[reportMissingImports]
 from redbot.core import commands, Config
 import random
+import logging
 
+
+log = logging.getLogger("red.kuhmuh.gruppensuche")
 
 # =========================
 # IDs / Konfiguration
@@ -22,6 +25,9 @@ import random
 
 TEST_CHANNEL_ID = 1199322485297000528
 TEST_ROLE_ID = 1445018518562017373
+
+LOG_CHANNEL_ID: int = 1460298038269575282
+DEV_ALERT_ROLE_ID: int = 1445018518562017373
 
 ROLE_NORMAL_ID = 1424768638157852682
 ROLE_SCHWER_ID = 1424769286790054050
@@ -32,6 +38,7 @@ ROLE_OLUN_DEHKIA2_ID = 1471825918480875626
 
 ROLE_MIRUMOK_ID = 1459832247405248707
 ROLE_GYFIN_ID = 1459832490603708590
+ROLE_EDANIA_ID = 1483214699754688562
 
 ROLE_PILAFE_ID = 1458832343149318269
 ROLE_ALTAR_ID = 1459833455369130140
@@ -56,6 +63,7 @@ MIRUMOK_EMOJI = "<:Mirumok:1461101498954940428>"
 GYFIN_EMOJI = "<:Gyfin:1461102103266066502>"
 CHEER_EMOJI = "<:blackspiritcheer:1199730129476268183>"
 OLUN_EMOJI = "<:olun:1471826612394655857>"
+EDANIA_EMOJI = "<:edania:1483216698625753088>"
 
 EASTER_EGG_AP = 396
 EASTER_EGG_MARK = " ✨"  # oder f" {MUHKUH_EMOJI}" wenn du es cow-themed willst
@@ -91,6 +99,7 @@ EASTER_EGG_TEXT_POOL = [
     "Cronsteine wurden geopfert",
     "über dem empfohlenen Patchlevel",
     "Sheet-AP ist nur ein Vorschlag",
+    "ist wohl die Katze über die Tastatur gelaufen..",
     "Legenden beginnen genau so."
 ]
 
@@ -114,6 +123,7 @@ SPOTS: List[Tuple[str, str]] = [
     ("mirumok", "Mirumok"),
     ("gyfin", "Gyfin"),
     ("olun", "Olun"),
+    ("edania", "Edania"),
 ]
 
 
@@ -121,6 +131,7 @@ SPOT_REQ: Dict[str, str] = {
     "mirumok": "350 / 427",
     "gyfin": "370 / 440",
     "olun": "",  # bleibt leer, weil tier-basiert (siehe OLUN_REQ)
+    "edania": "385 / 450",
 }
 
 OLUN_REQ: Dict[str, str] = {
@@ -133,6 +144,7 @@ SPOT_TOTAL_AP: Dict[str, str] = {
     "mirumok": "Total AP 1565 - 1595",
     "gyfin": "Total AP 1650 - 1680",
     "olun": "",  # bleibt leer, weil tier-basiert (siehe OLUN_TOTAL_AP)
+    "edania": "Total AP 1850 - 1880",
 }
 
 OLUN_TOTAL_AP: Dict[str, str] = {
@@ -140,6 +152,7 @@ OLUN_TOTAL_AP: Dict[str, str] = {
     "dehkia1": "Total AP 1320 - 1350",
     "dehkia2": "Total AP 1460 - 1490",
 }
+
 
 ATORAXXION_DUNGEONS: List[Tuple[str, str]] = [
     ("vahmalkea", "Vahmalkea"),
@@ -196,6 +209,7 @@ def _olun_tier_label(tier: str) -> str:
 SPOT_PING_ROLE: Dict[str, int] = {
     "mirumok": ROLE_MIRUMOK_ID,
     "gyfin": ROLE_GYFIN_ID,
+    "edania": ROLE_EDANIA_ID,
 }
 
 # =========================
@@ -208,6 +222,8 @@ FEATURE_SPOTS = True
 FEATURE_SPOTS_GYFIN = True
 FEATURE_SPOTS_MIRUMOK = True
 FEATURE_SPOTS_OLUN = True
+FEATURE_SPOTS_EDANIA = True
+
 
 FEATURE_PILAFE = True
 FEATURE_ALTAR = True              # <- vorbereitet, aber nicht im Menü
@@ -238,6 +254,8 @@ def _spots_title(session: "WizardSession") -> str:
         emoji = GYFIN_EMOJI
     elif spot == "olun":
         emoji = OLUN_EMOJI
+    elif spot == "edania":
+        emoji = EDANIA_EMOJI
     else:
         emoji = CHEER_EMOJI
 
@@ -342,6 +360,8 @@ def _category_emoji(data: dict) -> str:
             return GYFIN_EMOJI
         if spot == "olun":
             return OLUN_EMOJI
+        if spot == "edania":
+            return EDANIA_EMOJI
 
     return MUHKUH_EMOJI
 
@@ -399,6 +419,71 @@ def _party_size_help_text(min_n: int, max_n: int) -> str:
         f"Beispiel: **{max_n}** = du + **{max_n - 1}** weitere."
     )
 
+def _log_console(self, level: str, module: str, event: str, **kwargs):
+    base = f"[KUHMUH][{module.upper()}][{event.upper()}][{level.upper()}]"
+
+    if kwargs:
+        details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+        log.warning(f"{base} {details}")
+    else:
+        log.warning(base)
+
+
+async def _log_event(
+    self,
+    guild: discord.Guild,
+    level: str,
+    module: str,
+    event: str,
+    description: str,
+    *,
+    channel: Optional[discord.TextChannel] = None,
+):
+    # --- Console Log ---
+    self._log_console(level, module, event, guild_id=guild.id)
+
+    # --- Discord Channel holen ---
+    ch = guild.get_channel(LOG_CHANNEL_ID)
+    if not isinstance(ch, discord.TextChannel):
+        return
+
+    # --- Emoji je nach Level ---
+    emoji_map = {
+        "info": "ℹ️",
+        "warn": "⚠️",
+        "error": "❌",
+    }
+    emoji = emoji_map.get(level.lower(), "ℹ️")
+
+    # --- Embed bauen ---
+    embed = discord.Embed(
+        title=f"{emoji} Kuhmuh System Log",
+        description=description + "\n\nTechnische Details siehe Serverkonsole.",
+        color=discord.Color.orange() if level != "error" else discord.Color.red(),
+    )
+
+    embed.add_field(name="Modul", value=module, inline=True)
+    embed.add_field(name="Event", value=event, inline=True)
+    embed.add_field(name="Server", value=guild.name, inline=True)
+
+    if channel:
+        embed.add_field(name="Channel", value=channel.mention, inline=True)
+
+    embed.set_footer(text="Kuhmuh Bot • Systemmeldung")
+
+    # --- Ping bei ERROR ---
+    content = None
+    if level.lower() == "error" and DEV_ALERT_ROLE_ID:
+        content = f"<@&{DEV_ALERT_ROLE_ID}>"
+
+    try:
+        await ch.send(
+            content=content,
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(roles=True),
+        )
+    except Exception:
+        pass
 
 class BackTarget:
     START = "start"          # Kategorieauswahl
@@ -1074,7 +1159,7 @@ class DetailsModal(discord.ui.Modal):
         if own_ap_val:
             ap_int = _parse_int_strict(own_ap_val)
             if ap_int is None:
-                await _invalid_number("❌ **AP ungültig.** Erlaubt: `3245`, `3.245`, `3 245`, `3,245`.")
+                await _invalid_number("❌ **AP ungültig.** Beispiele: `300`, `396`, `250`, ...")
                 return
             # ✅ Speichern wie bisher als digits-only string (kompatibel zu deinem Restcode)
             self.session.own_ap = str(ap_int)
@@ -1179,7 +1264,7 @@ class EditDetailsModal(discord.ui.Modal):
             style=discord.TextStyle.paragraph,
             required=False,
             max_length=800,
-            default=str(session.note_text or ""),
+            default=str(session.notes or ""),
         )
 
         self.add_item(self.duration)
@@ -1210,7 +1295,7 @@ class EditDetailsModal(discord.ui.Modal):
         self.session.duration_text = str(self.duration.value or "").strip()
         self.session.start_text = str(self.start.value or "").strip()
         self.session.req_text = str(self.desired_ap.value or "").strip()
-        self.session.note_text = str(self.note.value or "").strip()
+        self.session.notes = str(self.note.value or "").strip()
 
         await self.cog._apply_edit_details(interaction, self.session)
 
@@ -1298,13 +1383,12 @@ class StartSelect(discord.ui.Select):
             ))
 
         # Spots nur wenn Master an + mindestens ein Spot an
-        if FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN):
+        if FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN or FEATURE_SPOTS_EDANIA):
             options.append(discord.SelectOption(
-                label="Gruppenspots (Mirumok / Gyfin / Olun)",
+                label="Gruppenspots (Mirumok / Gyfin / Olun / Edania)",
                 value="spots",
                 emoji=CHEER_EMOJI,
             ))
-
         if FEATURE_PILAFE:
             options.append(discord.SelectOption(
                 label="Pila Fe Schriftrollen",
@@ -1373,12 +1457,13 @@ class StartView(WizardBaseView):
 
         # Gruppenspots (Master + mindestens ein Spot aktiv)
         spots_enabled = FEATURE_SPOTS and (
-            FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN)
+            FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN or FEATURE_SPOTS_EDANIA)
         if spots_enabled:
-            lines.append("• **Gruppenspots (Mirumok / Gyfin / Olun)**")
+            lines.append(
+                "• **Gruppenspots (Mirumok / Gyfin / Olun / Edania)**")
         else:
             lines.append(
-                "• ~~Gruppenspots (Mirumok / Gyfin / Olun)~~ *(Wartung)*")
+                "• ~~Gruppenspots (Mirumok / Gyfin / Olun / Edania)~~ *(Wartung)*")
 
         # Pila Fe
         if FEATURE_PILAFE:
@@ -1762,6 +1847,8 @@ class SpotSelectView(WizardBaseView):
             active_spots.append("gyfin")
         if FEATURE_SPOTS_OLUN:
             active_spots.append("olun")
+        if FEATURE_SPOTS_EDANIA:
+            active_spots.append("edania")
 
         # Keine Spots aktiv -> zurück ins Start-Menü
         if not active_spots:
@@ -1790,6 +1877,12 @@ class SpotSelectView(WizardBaseView):
                 label="Olun", style=discord.ButtonStyle.primary, row=0)
             olun_btn.callback = self._pick_olun
             self.add_item(olun_btn)
+
+        if FEATURE_SPOTS_EDANIA:
+            edania_btn = discord.ui.Button(
+                label="Edania", style=discord.ButtonStyle.primary, row=0)
+            edania_btn.callback = self._pick_edania
+            self.add_item(edania_btn)
 
         self.add_item(build_back_button(
             "Kategorie", BackTarget.START, self, row=1))
@@ -1833,6 +1926,11 @@ class SpotSelectView(WizardBaseView):
                 f"• Dehkia 2 → Empfohlen mind. {OLUN_REQ['dehkia2']} | {OLUN_TOTAL_AP['dehkia2']}\n"
             )
 
+        if FEATURE_SPOTS_EDANIA:
+            lines.append(
+                f"**Edania**\n• Empfohlen mind. {SPOT_REQ['edania']}\n• {SPOT_TOTAL_AP['edania']}\n"
+            )
+
         # Wenn nur einer aktiv ist, Text sauber halten
         desc = "\n".join(lines).strip()
 
@@ -1847,6 +1945,16 @@ class SpotSelectView(WizardBaseView):
             return
         self.session.spot_key = "olun"
         self.session.olun_tier = None  # wichtig: Stufe danach wählen
+        await self.cog._goto_next(interaction, self.session, Step.SPOT)
+
+    async def _pick_edania(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+        if not FEATURE_SPOTS_EDANIA:
+            await self.cog._ephemeral_notice(interaction, "Edania ist aktuell deaktiviert.", ephemeral=True)
+            return
+        self.session.spot_key = "edania"
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
 
@@ -2655,6 +2763,21 @@ class GruppensucheTest(commands.Cog):
                 t.cancel()
         self._edit_notify_tasks.clear()
 
+    def _log_info(self, category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.info(f"[Kuhmuh-Gruppensuche][{category}] {message}{suffix}")
+
+    def _log_warning(self, category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.warning(f"[Kuhmuh-Gruppensuche][{category}] {message}{suffix}")
+
+    def _log_error(self, category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.error(f"[Kuhmuh-Gruppensuche][{category}] {message}{suffix}")
+
     async def _startup_register_views(self):
         await self.bot.wait_until_red_ready()
         await self.bot.wait_until_ready()
@@ -2886,7 +3009,7 @@ class GruppensucheTest(commands.Cog):
             if not FEATURE_SPOTS:
                 session.category = None
                 return Step.START
-            if not (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN):
+            if not (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN or FEATURE_SPOTS_EDANIA):
                 session.category = None
                 return Step.START
             # falls Spot schon gesetzt, aber Flag ist aus:
@@ -2897,6 +3020,9 @@ class GruppensucheTest(commands.Cog):
                 session.spot_key = None
                 return Step.SPOT
             if session.spot_key == "olun" and not FEATURE_SPOTS_OLUN:
+                session.spot_key = None
+                return Step.SPOT
+            if session.spot_key == "edania" and not FEATURE_SPOTS_EDANIA:
                 session.spot_key = None
                 return Step.SPOT
 
@@ -3037,6 +3163,8 @@ class GruppensucheTest(commands.Cog):
             active.append("gyfin")
         if FEATURE_SPOTS_OLUN:
             active.append("olun")
+        if FEATURE_SPOTS_EDANIA:
+            active.append("edania")
 
         if len(active) == 1 and session.mode == "create":
             session.spot_key = active[0]
@@ -3221,9 +3349,26 @@ class GruppensucheTest(commands.Cog):
     async def _get_search(self, message_id: int) -> Optional[dict]:
         guild = self.bot.get_guild(GUILD_ID)
         if guild is None:
+            self._log_warning(
+                "STORAGE",
+                "guild not available while reading search",
+                message_id=message_id,
+                guild_id=GUILD_ID,
+            )
             return None
+
         searches = await self.config.guild(guild).searches()
-        return (searches or {}).get(str(message_id))
+        data = (searches or {}).get(str(message_id))
+
+        if data is None:
+            self._log_warning(
+                "STORAGE",
+                "search entry missing",
+                message_id=message_id,
+                guild_id=guild.id,
+            )
+
+        return data
 
     async def _set_search(self, message_id: int, data: dict):
         guild = self.bot.get_guild(GUILD_ID)
@@ -3675,6 +3820,8 @@ class GruppensucheTest(commands.Cog):
                     emoji = GYFIN_EMOJI
                 elif spot == "olun":
                     emoji = OLUN_EMOJI
+                elif spot == "edania":
+                    emoji = EDANIA_EMOJI
                 else:
                     emoji = CHEER_EMOJI
                 title = f"{emoji} Gruppensuche – {_spot_name(spot)}"
@@ -3871,10 +4018,16 @@ class GruppensucheTest(commands.Cog):
     async def _refresh_public_post(self, *, guild: discord.Guild, channel: discord.abc.Messageable, message_id: int) -> None:
         """Baut Embed + View neu und editiert den Public-Post."""
         mid = int(message_id)
-        data = await self.config.custom("POST", str(mid)).all()
+        data = await self._get_search(mid)
+        if data is None:
+            return
 
         embed = await self._build_public_embed(guild, data)
-        view = PublicPostView(self, mid)
+        view = ClosedPostView(self, mid) if bool(
+            data.get("is_closed", False)) else PublicPostView(self, mid)
+
+        if isinstance(view, PublicPostView):
+            await self._apply_dynamic_button_labels(view, data)
 
         msg_obj = await channel.fetch_message(mid)
         await msg_obj.edit(embed=embed, view=view)
@@ -3883,13 +4036,18 @@ class GruppensucheTest(commands.Cog):
         mid = int(message_id)
 
         async with self._lock_for(mid):
-            data = await self.config.custom("POST", str(mid)).all()
+            data = await self._get_search(mid)
+            if data is None:
+                return
+
             if bool(data.get("is_closed", False)):
                 return
 
-            await self.config.custom("POST", str(mid)).is_closed.set(True)
+            data["is_closed"] = True
+            data["updated_at"] = int(_now_local().timestamp())
+            await self._set_search(mid, data)
 
-            # Post direkt refreshen (zeigt "Geschlossen" + Buttons je nach View-Logik)
+            # Post direkt refreshen (zeigt "Geschlossen" + passende View)
             try:
                 await self._refresh_public_post(guild=guild, channel=channel, message_id=mid)
             except Exception:
@@ -3989,6 +4147,12 @@ class GruppensucheTest(commands.Cog):
                 return
             if session.spot_key == "gyfin" and not FEATURE_SPOTS_GYFIN:
                 await self._ephemeral_notice(interaction, "Gyfin ist aktuell deaktiviert.")
+                return
+            if session.spot_key == "olun" and not FEATURE_SPOTS_OLUN:
+                await self._ephemeral_notice(interaction, "Olun ist aktuell deaktiviert.")
+                return
+            if session.spot_key == "edania" and not FEATURE_SPOTS_EDANIA:
+                await self._ephemeral_notice(interaction, "Edania ist aktuell deaktiviert.")
                 return
 
         if cat == "altar" and not FEATURE_ALTAR:
@@ -4101,16 +4265,69 @@ class GruppensucheTest(commands.Cog):
         allowed = discord.AllowedMentions(
             roles=True, users=False, everyone=False)
 
-        msg = await channel.send(content=content, embed=embed, allowed_mentions=allowed)
-        data["message_id"] = msg.id
+        msg: Optional[discord.Message] = None
 
-        view = PublicPostView(self, msg.id)
-        await self._apply_dynamic_button_labels(view, data)   # ✅ HIER
-        await msg.edit(view=view)
-        self.bot.add_view(view)
+        try:
+            # 1) Discord-Post senden
+            msg = await channel.send(
+                content=content,
+                embed=embed,
+                allowed_mentions=allowed,
+            )
+            data["message_id"] = msg.id
+            self._log_info(
+                "CREATE",
+                "message created",
+                message_id=msg.id,
+                guild_id=guild.id,
+                channel_id=channel.id,
+                owner_id=owner_id,
+                category=session.category,
+            )
 
-        async with self.config.guild(guild).searches() as searches:
-            searches[str(msg.id)] = data
+            # 2) View vorbereiten und am Post setzen
+            view = PublicPostView(self, msg.id)
+            await self._apply_dynamic_button_labels(view, data)
+            await msg.edit(view=view)
+
+            # 3) Erst jetzt persistent speichern
+            async with self.config.guild(guild).searches() as searches:
+                searches[str(msg.id)] = data
+            self._log_info(
+                "CREATE",
+                "search entry saved",
+                message_id=msg.id,
+                guild_id=guild.id,
+                channel_id=channel.id,
+            )
+            # 4) View erst nach erfolgreichem Save registrieren
+            self.bot.add_view(view)
+
+        except Exception:
+            self._log_error(
+                "CREATE",
+                "create flow failed",
+                message_id=(msg.id if msg is not None else 0),
+                guild_id=guild.id,
+                channel_id=channel.id,
+                owner_id=owner_id,
+                category=session.category,
+            )
+            # Rollback:
+            # Wenn der Discord-Post schon existiert, aber Save/Edit scheitert,
+            # versuchen wir die Nachricht wieder zu entfernen, damit kein "toter" Post stehen bleibt.
+            if msg is not None:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+
+            await self._ephemeral_notice(
+                interaction,
+                "❌ Die Gruppensuche konnte nicht vollständig erstellt werden. Bitte versuche es erneut.",
+                ephemeral=True,
+            )
+            return
 
         self._dispatch_dashboard_update(guild.id)
 
@@ -4361,6 +4578,13 @@ class GruppensucheTest(commands.Cog):
                         data["easter_egg_texts"] = egg_map
 
                 await self._save_refresh_dispatch(data)
+                self._log_info(
+                    "JOIN",
+                    "participant ap updated",
+                    message_id=message_id,
+                    user_id=uid,
+                    ap=ap_val,
+                )
                 await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Teilnehmer).")
                 return
 
@@ -4379,6 +4603,13 @@ class GruppensucheTest(commands.Cog):
                         data["easter_egg_texts"] = egg_map
 
                 await self._save_refresh_dispatch(data)
+                self._log_info(
+                    "JOIN",
+                    "waitlist ap updated",
+                    message_id=message_id,
+                    user_id=uid,
+                    ap=ap_val,
+                )
                 await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Warteschlange).")
                 return
 
@@ -4393,6 +4624,15 @@ class GruppensucheTest(commands.Cog):
                 _ensure_easter_egg_text(data, uid, ap_val)
 
                 await self._save_refresh_dispatch(data)
+                self._log_info(
+                    "JOIN",
+                    "user joined as participant",
+                    message_id=message_id,
+                    user_id=uid,
+                    ap=ap_val,
+                    participants=len(participants),
+                    max_players=max_players,
+                )
                 await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
                 return
 
@@ -4407,6 +4647,15 @@ class GruppensucheTest(commands.Cog):
             _ensure_easter_egg_text(data, uid, ap_val)
 
             await self._save_refresh_dispatch(data)
+            self._log_info(
+                "JOIN",
+                "user added to waitlist",
+                message_id=message_id,
+                user_id=uid,
+                ap=ap_val,
+                waitlist=len(waitlist),
+                max_players=max_players,
+            )
             await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
 
     async def _leave(self, interaction: discord.Interaction, message_id: int):
@@ -4479,6 +4728,14 @@ class GruppensucheTest(commands.Cog):
 
             await self._save_refresh_dispatch(data)
 
+        self._log_info(
+            "LEAVE",
+            "user removed from search",
+            message_id=message_id,
+            user_id=uid,
+            promoted_id=(promoted_id or 0),
+        )
+
         await self._ephemeral_notice(interaction, "✅ Du wurdest abgemeldet.", ephemeral=True)
 
         # ✅ Promotion-Notify NACH Lock (verhindert Lock-Blocking bei DMs)
@@ -4530,6 +4787,15 @@ class GruppensucheTest(commands.Cog):
 
             # ✅ speichern + public post aktualisieren + dashboard refresh
             await self._save_refresh_dispatch(data)
+
+        self._log_info(
+            "AP_EDIT",
+            "user ap adjusted",
+            message_id=message_id,
+            user_id=uid,
+            ap=ap_clean,
+            target=("participants" if is_participant else "waitlist"),
+        )
 
         await self._ephemeral_notice(interaction, "✅ AP wurde aktualisiert.", ephemeral=True)
 
@@ -4769,18 +5035,64 @@ class GruppensucheTest(commands.Cog):
 
         guild = interaction.guild
         if guild is None:
-            await self._del_search(message_id)
+            # Ohne Guild-Kontext nichts löschen:
+            # sonst riskieren wir wieder "sichtbarer Post, aber Storage weg".
+            self._log_warning(
+                "DELETE",
+                "delete aborted because guild is unavailable",
+                message_id=message_id,
+            )
+            await self._ephemeral_notice(
+                interaction,
+                "❌ Die Suche konnte nicht sicher gelöscht werden (Guild nicht verfügbar).",
+                ephemeral=True,
+            )
             return
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
-        if isinstance(channel, discord.TextChannel):
-            try:
-                msg = await channel.fetch_message(int(data.get("message_id", 0)))
-                await msg.delete()
-            except Exception:
-                pass
+        if not isinstance(channel, discord.TextChannel):
+            self._log_warning(
+                "DELETE",
+                "delete aborted because channel is unavailable",
+                message_id=message_id,
+                guild_id=guild.id,
+                channel_id=int(data.get("channel_id", 0)),
+            )
+            await self._ephemeral_notice(
+                interaction,
+                "❌ Die Suche konnte nicht sicher gelöscht werden (Channel nicht gefunden).",
+                ephemeral=True,
+            )
+            return
+
+        # Nachricht MUSS erfolgreich gelöscht werden,
+        # bevor der Storage-Eintrag entfernt wird.
+        try:
+            msg = await channel.fetch_message(int(data.get("message_id", 0)))
+            await msg.delete()
+        except Exception:
+            self._log_warning(
+                "DELETE",
+                "message delete failed, storage preserved",
+                message_id=message_id,
+                guild_id=guild.id,
+                channel_id=channel.id,
+            )
+            await self._ephemeral_notice(
+                interaction,
+                "❌ Die Suche konnte nicht vollständig gelöscht werden. Der Post wurde nicht entfernt.",
+                ephemeral=True,
+            )
+            return
 
         await self._del_search(message_id)
+        self._log_info(
+            "DELETE",
+            "search deleted successfully",
+            message_id=message_id,
+            guild_id=guild.id,
+            channel_id=channel.id,
+        )
         self._dispatch_dashboard_update(int(data.get("guild_id", 0)))
 
     # =========================
@@ -4833,7 +5145,12 @@ class GruppensucheTest(commands.Cog):
         if data is None:
             await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
             return
-
+        self._log_info(
+            "EDIT",
+            "edit flow started",
+            message_id=message_id,
+            user_id=int(interaction.user.id),
+        )
         # Owner/Admin/Offizier -> Owner Menü
         if await self._is_owner_or_mod(interaction, int(message_id)):
             await self._open_owner_edit_menu(interaction, int(message_id), data)
@@ -4844,41 +5161,6 @@ class GruppensucheTest(commands.Cog):
             await interaction.response.send_modal(APAdjustModal(self, int(message_id)))
         except discord.InteractionResponded:
             await interaction.followup.send_modal(APAdjustModal(self, int(message_id)))
-        session = WizardSession(
-            user_id=interaction.user.id,
-            guild_id=interaction.guild_id or 0,
-            mode="edit",
-            edit_message_id=message_id,
-            category=str(data.get("category")),
-            day_date_iso=str(data.get("day_date_iso")),
-            difficulty=str(data.get("difficulty")) if data.get(
-                "category") == "muhhelfer" else None,
-            boss_runs=dict(data.get("boss_runs") or {}),
-            spot_key=str(data.get("spot_key")) if data.get(
-                "category") == "spots" else None,
-            max_players=int(data.get("max_players", 2)),
-            scroll_amount=str(data.get("scroll_amount")) if data.get(
-                "category") == "pilafe" else None,
-            duration_text=data.get("duration_text"),
-            start_text=data.get("start_text"),
-            req_text=data.get("req_text"),
-            notes=data.get("notes"),
-            olun_tier=str(data.get("olun_tier")) if str(
-                data.get("spot_key")) == "olun" else None,
-            atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
-        )
-
-        session.wizard_interaction = interaction
-        self._sessions[interaction.user.id] = session
-
-        view = EditMenuView(self, session, data)
-
-        # WICHTIG: NIE edit_message hier!
-        await interaction.response.send_message(
-            embed=view.embed(),
-            view=view,
-            ephemeral=True
-        )
 
     async def _send_edit_menu(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
@@ -4938,6 +5220,15 @@ class GruppensucheTest(commands.Cog):
         )
 
         await self._save_refresh_dispatch(data)
+
+        self._log_info(
+            "EDIT",
+            "day updated",
+            message_id=int(session.edit_message_id),
+            user_id=int(interaction.user.id),
+            old=old_fmt,
+            new=new_fmt,
+        )
 
         await self._send_edit_menu(interaction, session)
 
@@ -5040,7 +5331,13 @@ class GruppensucheTest(commands.Cog):
                 })
 
             self._schedule_edit_notify(message_id, data, changes=changes)
-
+        self._log_info(
+            "EDIT",
+            "max players updated",
+            message_id=message_id,
+            user_id=int(interaction.user.id),
+            new_max=desired_max,
+        )
         await self._send_edit_menu(interaction, session)
 
     async def _apply_edit_details(self, interaction: discord.Interaction, session: WizardSession):
@@ -5167,6 +5464,14 @@ class GruppensucheTest(commands.Cog):
                 data,
                 changes=changes
             )
+
+        self._log_info(
+            "EDIT",
+            "details updated",
+            message_id=int(session.edit_message_id),
+            user_id=int(interaction.user.id),
+            category=cat,
+        )
 
         # Zurück ins Edit-Menü (ohne neues Ephemeral)
         await self._send_edit_menu(interaction, session)
