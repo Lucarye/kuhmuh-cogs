@@ -297,12 +297,18 @@ class Gruppenübersicht(commands.Cog):
         log.warning(f"[Kuhmuh-Dashboard][{category}] {message}{suffix}")
 
     def _log_console(self, level: str, module: str, event: str, **kwargs):
+        level_name = str(level or "info").lower()
+        if level_name == "warn":
+            level_name = "warning"
+
         base = f"[KUHMUH][{module.upper()}][{event.upper()}][{level.upper()}]"
+        logger_fn = getattr(log, level_name, log.info)
+
         if kwargs:
             details = " ".join(f"{k}={v}" for k, v in kwargs.items())
-            getattr(log, level.lower(), log.info)(f"{base} {details}")
+            logger_fn(f"{base} {details}")
         else:
-            getattr(log, level.lower(), log.info)(base)
+            logger_fn(base)
 
     async def _log_event(
         self,
