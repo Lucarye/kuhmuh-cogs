@@ -615,8 +615,7 @@ class Gruppenübersicht(commands.Cog):
                     (
                         f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
                         "Der gespeicherte Dashboard-Channel ist nicht mehr verfügbar.\n"
-                        "Das Dashboard konnte nicht automatisch repariert werden.\n\n"
-                        "Bitte `/dashboard` neu ausführen."
+                        "Das Dashboard konnte nicht automatisch repariert werden."
                     ),
                 )
             except Exception:
