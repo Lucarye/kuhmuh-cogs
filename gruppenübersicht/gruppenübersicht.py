@@ -26,6 +26,7 @@ DASHBOARD_CONFIG_IDENTIFIER = 935771234124
 
 # Update-Intervall
 DASHBOARD_REFRESH_MINUTES = 1
+MISSING_POST_CLEANUP_MINUTES = 15
 
 # Emojis
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
@@ -697,7 +698,8 @@ class Gruppenübersicht(commands.Cog):
         today = _now_local().date()
 
         items: List[dict] = []
-        skipped_message_ids: List[int] = []
+        searches_changed = False
+        now_ts = int(dt.datetime.now(dt.timezone.utc).timestamp())
 
         for mid_str, data in (searches or {}).items():
             try:
@@ -715,33 +717,85 @@ class Gruppenübersicht(commands.Cog):
                 channel_id = int(data.get("channel_id") or 0)
                 message_id = int(data.get("message_id") or 0) or int(mid_str)
 
+                missing_since = int(data.get("missing_since") or 0)
+                missing_logged = bool(data.get("missing_logged") or False)
+
                 ch = guild.get_channel(channel_id)
                 if not isinstance(ch, discord.TextChannel):
-                    skipped_message_ids.append(int(message_id))
-                    self._log_warning(
-                        "FETCH",
-                        "dashboard skipped post because channel is unavailable",
-                        message_id=message_id,
-                        channel_id=channel_id,
-                    )
+                    if not missing_since:
+                        data["missing_since"] = now_ts
+                        data["missing_logged"] = True
+                        searches[mid_str] = data
+                        searches_changed = True
+
+                        self._log_warning(
+                            "FETCH",
+                            "dashboard skipped post because channel is unavailable",
+                            message_id=message_id,
+                            channel_id=channel_id,
+                        )
+
+                    elif missing_since and (now_ts - missing_since) >= (MISSING_POST_CLEANUP_MINUTES * 60):
+                        searches.pop(mid_str, None)
+                        searches_changed = True
+
+                        self._log_info(
+                            "CLEANUP",
+                            "removed stale search entry because channel stayed unavailable",
+                            message_id=message_id,
+                            channel_id=channel_id,
+                        )
                     continue
 
                 try:
                     await ch.fetch_message(int(message_id))
                 except Exception:
-                    skipped_message_ids.append(int(message_id))
-                    self._log_warning(
-                        "FETCH",
-                        "dashboard skipped post because fetch_message failed",
-                        message_id=message_id,
-                        channel_id=channel_id,
-                    )
+                    if not missing_since:
+                        data["missing_since"] = now_ts
+                        data["missing_logged"] = True
+                        searches[mid_str] = data
+                        searches_changed = True
+
+                        self._log_warning(
+                            "FETCH",
+                            "dashboard skipped post because fetch_message failed",
+                            message_id=message_id,
+                            channel_id=channel_id,
+                        )
+
+                    elif missing_since and (now_ts - missing_since) >= (MISSING_POST_CLEANUP_MINUTES * 60):
+                        searches.pop(mid_str, None)
+                        searches_changed = True
+
+                        self._log_info(
+                            "CLEANUP",
+                            "removed stale search entry because message stayed unavailable",
+                            message_id=message_id,
+                            channel_id=channel_id,
+                        )
                     continue
+
+                # Post ist wieder erreichbar -> Missing-Marker entfernen
+                if missing_since or missing_logged:
+                    data.pop("missing_since", None)
+                    data.pop("missing_logged", None)
+                    searches[mid_str] = data
+                    searches_changed = True
 
                 items.append(d2)
 
             except Exception:
                 continue
+
+        if searches_changed:
+            try:
+                search_cog = self._get_gruppensuche_cog_live() if which == "live" else self._get_gruppensuche_cog_test()
+                if search_cog:
+                    async with search_cog.config.guild(guild).searches() as s:
+                        s.clear()
+                        s.update(searches)
+            except Exception:
+                pass
 
         SPOT_ORDER = ["mirumok", "gyfin", "olun", "edania"]
 
