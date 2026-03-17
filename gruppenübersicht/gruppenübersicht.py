@@ -266,16 +266,6 @@ class Gruppenübersicht(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    def _log_info(self, category: str, message: str, **fields):
-        parts = [f"{k}={v}" for k, v in fields.items()]
-        suffix = f" | {' '.join(parts)}" if parts else ""
-        log.info(f"[Kuhmuh-Dashboard][{category}] {message}{suffix}")
-
-    def _log_warning(self, category: str, message: str, **fields):
-        parts = [f"{k}={v}" for k, v in fields.items()]
-        suffix = f" | {' '.join(parts)}" if parts else ""
-        log.warning(f"[Kuhmuh-Dashboard][{category}] {message}{suffix}")
-
         # Eigene Config fuer Dashboard-Msg/Channel
         self.config = Config.get_conf(
             self, identifier=DASHBOARD_CONFIG_IDENTIFIER, force_registration=True)
@@ -285,6 +275,7 @@ class Gruppenübersicht(commands.Cog):
             dashboard_test_channel_id=None,
             dashboard_test_message_id=None,
         )
+
         # --- Anti-RateLimit Schutz ---
         self._dash_locks: Dict[str, asyncio.Lock] = {
             "live": asyncio.Lock(),
@@ -294,6 +285,16 @@ class Gruppenübersicht(commands.Cog):
             "live": None,
             "test": None,
         }
+
+    def _log_info(self, category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.info(f"[Kuhmuh-Dashboard][{category}] {message}{suffix}")
+
+    def _log_warning(self, category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.warning(f"[Kuhmuh-Dashboard][{category}] {message}{suffix}")
 
     async def force_refresh_all(self, guild_id: int):
         if int(guild_id) != GUILD_ID:
