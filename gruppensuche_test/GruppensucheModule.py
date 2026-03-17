@@ -2679,6 +2679,7 @@ class GruppensucheTest(commands.Cog):
         self._dashboard_refresh_tasks: Dict[int, asyncio.Task] = {}
         self._dashboard_refresh_pending: Dict[int, bool] = {}
         self._dashboard_refresh_delay = 2  # Sekunden
+        self._dashboard_refresh_retry_delay = 5  # Sekunden
         self._startup_task: Optional[asyncio.Task] = self.bot.loop.create_task(
             self._startup_register_views())
         self._reminder_task: Optional[asyncio.Task] = self.bot.loop.create_task(
@@ -3695,26 +3696,32 @@ class GruppensucheTest(commands.Cog):
 
                     await asyncio.sleep(self._dashboard_refresh_delay)
 
-                    log.info(f"[KUHMUH][DASHBOARD][DISPATCH][START] guild_id={guild_id}")
+                    try:
+                        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][START] guild_id={guild_id}")
 
-                    dash = self.bot.get_cog("Gruppenübersicht")
-                    if dash is None:
-                        log.warning(f"[KUHMUH][DASHBOARD][DISPATCH][NO COG] guild_id={guild_id}")
-                        return
+                        dash = self.bot.get_cog("Gruppenübersicht")
+                        if dash is None:
+                            log.warning(f"[KUHMUH][DASHBOARD][DISPATCH][NO COG] guild_id={guild_id}")
+                            self._dashboard_refresh_pending[guild_id] = True
+                            await asyncio.sleep(self._dashboard_refresh_retry_delay)
+                            continue
 
-                    log.info(f"[KUHMUH][DASHBOARD][DISPATCH][COG FOUND] guild_id={guild_id}")
+                        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][COG FOUND] guild_id={guild_id}")
 
-                    await dash.force_refresh_all(guild_id)
+                        await dash.force_refresh_all(guild_id)
 
-                    log.info(f"[KUHMUH][DASHBOARD][DISPATCH][DONE] guild_id={guild_id}")
+                        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][DONE] guild_id={guild_id}")
+
+                    except Exception as e:
+                        log.exception(
+                            f"[KUHMUH][DASHBOARD][DISPATCH][ERROR] guild_id={guild_id} error={e}"
+                        )
+                        self._dashboard_refresh_pending[guild_id] = True
+                        await asyncio.sleep(self._dashboard_refresh_retry_delay)
 
             except asyncio.CancelledError:
                 log.info(f"[KUHMUH][DASHBOARD][DISPATCH][CANCELLED] guild_id={guild_id}")
                 return
-            except Exception as e:
-                log.exception(
-                    f"[KUHMUH][DASHBOARD][DISPATCH][ERROR] guild_id={guild_id} error={e}"
-                )
             finally:
                 self._dashboard_refresh_tasks.pop(guild_id, None)
                 self._dashboard_refresh_pending.pop(guild_id, None)
