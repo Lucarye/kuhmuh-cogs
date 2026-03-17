@@ -2688,6 +2688,10 @@ class GruppensucheTest(commands.Cog):
         self._edit_notify_tasks: Dict[int, asyncio.Task] = {}
         self._edit_notify_delay = 45  # Sekunden
 
+        # --- Kurzer Interaction-Guard gegen Doppelklicks / Duplicate Interactions ---
+        self._interaction_guard: Dict[str, float] = {}
+        self._interaction_guard_window = 2.5
+
     def cog_unload(self):
         if getattr(self, "_locks_gc_task", None):
             self._locks_gc_task.cancel()
@@ -2808,6 +2812,43 @@ class GruppensucheTest(commands.Cog):
     def _expire_session(self, user_id: int):
         if user_id in self._sessions:
             del self._sessions[user_id]
+
+    def _interaction_guard_key(
+        self,
+        *,
+        action: str,
+        user_id: int,
+        message_id: int = 0,
+    ) -> str:
+        return f"{action}:{int(user_id)}:{int(message_id)}"
+
+    def _interaction_guard_hit(
+        self,
+        *,
+        action: str,
+        user_id: int,
+        message_id: int = 0,
+    ) -> bool:
+        now_ts = _now_local().timestamp()
+        key = self._interaction_guard_key(
+            action=action,
+            user_id=user_id,
+            message_id=message_id,
+        )
+
+        last_ts = float(self._interaction_guard.get(key, 0.0))
+        if (now_ts - last_ts) < float(self._interaction_guard_window):
+            return True
+
+        self._interaction_guard[key] = now_ts
+
+        # kleine opportunistische Bereinigung
+        cutoff = now_ts - max(30.0, float(self._interaction_guard_window) * 4.0)
+        stale_keys = [k for k, ts in self._interaction_guard.items() if float(ts) < cutoff]
+        for stale in stale_keys:
+            self._interaction_guard.pop(stale, None)
+
+        return False
 
     def _lock_for(self, message_id: int) -> asyncio.Lock:
         mid = int(message_id)
@@ -4689,6 +4730,18 @@ class GruppensucheTest(commands.Cog):
                 pass
 
     async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
+        if self._interaction_guard_hit(
+            action="join",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Deine letzte Anmeldung wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         data: Optional[dict] = None
 
         lock = self._lock_for(message_id)
@@ -4818,6 +4871,18 @@ class GruppensucheTest(commands.Cog):
         await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
 
     async def _leave(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="leave",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Deine letzte Abmeldung wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
@@ -4902,6 +4967,18 @@ class GruppensucheTest(commands.Cog):
             await self._notify_promotion(data, promoted_id)
 
     async def _apply_ap_adjust(self, interaction: discord.Interaction, message_id: int, ap_val: int):
+        if self._interaction_guard_hit(
+            action="ap_adjust",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Deine letzte AP-Änderung wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         # ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
@@ -5150,6 +5227,18 @@ class GruppensucheTest(commands.Cog):
         await channel.send(txt, allowed_mentions=discord.AllowedMentions.none())
 
     async def _close_search(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="close",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Die letzte Aktion zum Schließen wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
@@ -5170,6 +5259,18 @@ class GruppensucheTest(commands.Cog):
         await self._post_save_refresh_dispatch(data)
 
     async def _open_search(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="open",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Die letzte Aktion zum Öffnen wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
@@ -5192,6 +5293,18 @@ class GruppensucheTest(commands.Cog):
         await self._ephemeral_notice(interaction, "✅ Suche wieder geöffnet.")
 
     async def _delete_search(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="delete",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Die letzte Löschaktion wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         data = await self._get_search(message_id)
         if data is None:
             return
