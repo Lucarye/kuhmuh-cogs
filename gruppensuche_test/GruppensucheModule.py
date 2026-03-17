@@ -419,71 +419,6 @@ def _party_size_help_text(min_n: int, max_n: int) -> str:
         f"Beispiel: **{max_n}** = du + **{max_n - 1}** weitere."
     )
 
-def _log_console(self, level: str, module: str, event: str, **kwargs):
-    base = f"[KUHMUH][{module.upper()}][{event.upper()}][{level.upper()}]"
-
-    if kwargs:
-        details = " ".join(f"{k}={v}" for k, v in kwargs.items())
-        log.warning(f"{base} {details}")
-    else:
-        log.warning(base)
-
-
-async def _log_event(
-    self,
-    guild: discord.Guild,
-    level: str,
-    module: str,
-    event: str,
-    description: str,
-    *,
-    channel: Optional[discord.TextChannel] = None,
-):
-    # --- Console Log ---
-    self._log_console(level, module, event, guild_id=guild.id)
-
-    # --- Discord Channel holen ---
-    ch = guild.get_channel(LOG_CHANNEL_ID)
-    if not isinstance(ch, discord.TextChannel):
-        return
-
-    # --- Emoji je nach Level ---
-    emoji_map = {
-        "info": "ℹ️",
-        "warn": "⚠️",
-        "error": "❌",
-    }
-    emoji = emoji_map.get(level.lower(), "ℹ️")
-
-    # --- Embed bauen ---
-    embed = discord.Embed(
-        title=f"{emoji} Kuhmuh System Log",
-        description=description + "\n\nTechnische Details siehe Serverkonsole.",
-        color=discord.Color.orange() if level != "error" else discord.Color.red(),
-    )
-
-    embed.add_field(name="Modul", value=module, inline=True)
-    embed.add_field(name="Event", value=event, inline=True)
-    embed.add_field(name="Server", value=guild.name, inline=True)
-
-    if channel:
-        embed.add_field(name="Channel", value=channel.mention, inline=True)
-
-    embed.set_footer(text="Kuhmuh Bot • Systemmeldung")
-
-    # --- Ping bei ERROR ---
-    content = None
-    if level.lower() == "error" and DEV_ALERT_ROLE_ID:
-        content = f"<@&{DEV_ALERT_ROLE_ID}>"
-
-    try:
-        await ch.send(
-            content=content,
-            embed=embed,
-            allowed_mentions=discord.AllowedMentions(roles=True),
-        )
-    except Exception:
-        pass
 
 class BackTarget:
     START = "start"          # Kategorieauswahl
@@ -2763,20 +2698,79 @@ class GruppensucheTest(commands.Cog):
                 t.cancel()
         self._edit_notify_tasks.clear()
 
-    def _log_info(self, category: str, message: str, **fields):
-        parts = [f"{k}={v}" for k, v in fields.items()]
-        suffix = f" | {' '.join(parts)}" if parts else ""
-        log.info(f"[Kuhmuh-Gruppensuche][{category}] {message}{suffix}")
+    def _log_console(self, level: str, module: str, event: str, **kwargs):
+        base = f"[KUHMUH][{module.upper()}][{event.upper()}][{level.upper()}]"
+        if kwargs:
+            details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+            getattr(log, level.lower(), log.info)(f"{base} {details}")
+        else:
+            getattr(log, level.lower(), log.info)(base)
 
-    def _log_warning(self, category: str, message: str, **fields):
-        parts = [f"{k}={v}" for k, v in fields.items()]
-        suffix = f" | {' '.join(parts)}" if parts else ""
-        log.warning(f"[Kuhmuh-Gruppensuche][{category}] {message}{suffix}")
+    async def _log_event(
+        self,
+        guild: discord.Guild,
+        level: str,
+        module: str,
+        event: str,
+        description: str,
+        *,
+        channel: Optional[discord.TextChannel] = None,
+    ):
+        self._log_console(level, module, event, guild_id=guild.id)
 
-    def _log_error(self, category: str, message: str, **fields):
+        ch = guild.get_channel(LOG_CHANNEL_ID)
+        if not isinstance(ch, discord.TextChannel):
+            return
+
+        emoji_map = {
+            "info": "ℹ️",
+            "warn": "⚠️",
+            "error": "❌",
+        }
+        emoji = emoji_map.get(level.lower(), "ℹ️")
+
+        embed = discord.Embed(
+            title=f"{emoji} Kuhmuh System Log",
+            description=description + "\n\nTechnische Details siehe Serverkonsole.",
+            color=discord.Color.orange() if level.lower() != "error" else discord.Color.red(),
+        )
+
+        embed.add_field(name="Modul", value=module, inline=True)
+        embed.add_field(name="Event", value=event, inline=True)
+        embed.add_field(name="Server", value=guild.name, inline=True)
+
+        if channel:
+            embed.add_field(name="Channel", value=channel.mention, inline=True)
+
+        embed.set_footer(text="Kuhmuh Bot • Systemmeldung")
+
+        content = None
+        if level.lower() == "error" and DEV_ALERT_ROLE_ID:
+            content = f"<@&{DEV_ALERT_ROLE_ID}>"
+
+        try:
+            await ch.send(
+                content=content,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
+        except Exception:
+            pass
+
+    def _log_info(self, log_category: str, message: str, **fields):
         parts = [f"{k}={v}" for k, v in fields.items()]
         suffix = f" | {' '.join(parts)}" if parts else ""
-        log.error(f"[Kuhmuh-Gruppensuche][{category}] {message}{suffix}")
+        log.info(f"[Kuhmuh-Gruppensuche][{log_category}] {message}{suffix}")
+
+    def _log_warning(self, log_category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.warning(f"[Kuhmuh-Gruppensuche][{log_category}] {message}{suffix}")
+
+    def _log_error(self, log_category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.error(f"[Kuhmuh-Gruppensuche][{log_category}] {message}{suffix}")
 
     async def _startup_register_views(self):
         await self.bot.wait_until_red_ready()
