@@ -3698,13 +3698,7 @@ class GruppensucheTest(commands.Cog):
         task = self.bot.loop.create_task(_debounced())
         self._dashboard_refresh_tasks[guild_id] = task
 
-    async def _save_refresh_dispatch(
-        self,
-        data: dict,
-        *,
-        refresh_public: bool = True,
-        refresh_dashboard: bool = True,
-    ):
+    async def _save_refresh_dispatch(self, data: dict):
         try:
             now_ts = int(_now_local().timestamp())
             data["updated_at"] = now_ts
@@ -3713,13 +3707,18 @@ class GruppensucheTest(commands.Cog):
             if mid:
                 await self._set_search(mid, data)
 
-            if refresh_public and mid:
+        except Exception:
+            pass
+
+    async def _post_save_refresh_dispatch(self, data: dict):
+        try:
+            mid = int(data.get("message_id", 0))
+            if mid:
                 await self._refresh_public_message(data)
 
-            if refresh_dashboard:
-                gid = int(data.get("guild_id", 0))
-                if gid:
-                    self._dispatch_dashboard_update(gid)
+            gid = int(data.get("guild_id", 0))
+            if gid:
+                self._dispatch_dashboard_update(gid)
 
         except Exception:
             pass
@@ -4545,6 +4544,7 @@ class GruppensucheTest(commands.Cog):
         for mid_str, data in (searches or {}).items():
             try:
                 mid = int(mid_str)
+                fresh: Optional[dict] = None
 
                 # schon geschlossen? -> nix tun
                 if bool(data.get("is_closed", False)):
@@ -4577,6 +4577,8 @@ class GruppensucheTest(commands.Cog):
                     fresh["auto_closed_at"] = int(_now_local().timestamp())
 
                     await self._save_refresh_dispatch(fresh)
+
+                await self._post_save_refresh_dispatch(fresh)
 
             except Exception:
                 continue
@@ -4656,6 +4658,8 @@ class GruppensucheTest(commands.Cog):
                 pass
 
     async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
+        data: Optional[dict] = None
+
         lock = self._lock_for(message_id)
         async with lock:
             data = await self._get_search(message_id)
@@ -4671,6 +4675,7 @@ class GruppensucheTest(commands.Cog):
             if not ap_val or not ap_val.isdigit():
                 await self._ephemeral_notice(interaction, "Bitte nur Zahlen bei AP eintragen (z.B. 301).")
                 return
+
             uid = interaction.user.id
             participants: List[int] = list(data.get("participants") or [])
             waitlist: List[int] = list(data.get("waitlist") or [])
@@ -4683,7 +4688,6 @@ class GruppensucheTest(commands.Cog):
                 data["participant_ap"] = ap_map
                 _sync_easter_egg_text(data, uid, ap_val)
 
-                # Easteregg: add/remove je nach Threshold
                 if _ap_triggers_easter_egg(ap_val):
                     _ensure_easter_egg_text(data, uid, ap_val)
                 else:
@@ -4693,22 +4697,12 @@ class GruppensucheTest(commands.Cog):
                         data["easter_egg_texts"] = egg_map
 
                 await self._save_refresh_dispatch(data)
-                self._log_info(
-                    "JOIN",
-                    "participant ap updated",
-                    message_id=message_id,
-                    user_id=uid,
-                    ap=ap_val,
-                )
-                await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Teilnehmer).")
-                return
 
-            if uid in waitlist:
+            elif uid in waitlist:
                 wl_map = data.get("waitlist_ap") or {}
                 wl_map[str(uid)] = ap_val
                 data["waitlist_ap"] = wl_map
 
-                # Easteregg: add/remove je nach Threshold
                 if _ap_triggers_easter_egg(ap_val):
                     _ensure_easter_egg_text(data, uid, ap_val)
                 else:
@@ -4718,17 +4712,8 @@ class GruppensucheTest(commands.Cog):
                         data["easter_egg_texts"] = egg_map
 
                 await self._save_refresh_dispatch(data)
-                self._log_info(
-                    "JOIN",
-                    "waitlist ap updated",
-                    message_id=message_id,
-                    user_id=uid,
-                    ap=ap_val,
-                )
-                await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Warteschlange).")
-                return
 
-            if len(participants) < max_players:
+            elif len(participants) < max_players:
                 participants.append(uid)
                 data["participants"] = participants
 
@@ -4739,39 +4724,67 @@ class GruppensucheTest(commands.Cog):
                 _ensure_easter_egg_text(data, uid, ap_val)
 
                 await self._save_refresh_dispatch(data)
-                self._log_info(
-                    "JOIN",
-                    "user joined as participant",
-                    message_id=message_id,
-                    user_id=uid,
-                    ap=ap_val,
-                    participants=len(participants),
-                    max_players=max_players,
-                )
-                await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
-                return
 
-            waitlist.append(uid)
-            data["waitlist"] = waitlist
-            data["updated_at"] = int(_now_local().timestamp())
+            else:
+                waitlist.append(uid)
+                data["waitlist"] = waitlist
+                data["updated_at"] = int(_now_local().timestamp())
 
-            wl_map = data.get("waitlist_ap") or {}
-            wl_map[str(uid)] = ap_val
-            data["waitlist_ap"] = wl_map
+                wl_map = data.get("waitlist_ap") or {}
+                wl_map[str(uid)] = ap_val
+                data["waitlist_ap"] = wl_map
 
-            _ensure_easter_egg_text(data, uid, ap_val)
+                _ensure_easter_egg_text(data, uid, ap_val)
 
-            await self._save_refresh_dispatch(data)
+                await self._save_refresh_dispatch(data)
+
+        await self._post_save_refresh_dispatch(data)
+
+        if uid in participants:
             self._log_info(
                 "JOIN",
-                "user added to waitlist",
+                "participant ap updated",
                 message_id=message_id,
                 user_id=uid,
                 ap=ap_val,
-                waitlist=len(waitlist),
+            )
+            await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Teilnehmer).")
+            return
+
+        if uid in waitlist:
+            self._log_info(
+                "JOIN",
+                "waitlist ap updated",
+                message_id=message_id,
+                user_id=uid,
+                ap=ap_val,
+            )
+            await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Warteschlange).")
+            return
+
+        if len(data.get("participants") or []) <= max_players and uid in list(data.get("participants") or []):
+            self._log_info(
+                "JOIN",
+                "user joined as participant",
+                message_id=message_id,
+                user_id=uid,
+                ap=ap_val,
+                participants=len(data.get("participants") or []),
                 max_players=max_players,
             )
-            await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
+            await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
+            return
+
+        self._log_info(
+            "JOIN",
+            "user added to waitlist",
+            message_id=message_id,
+            user_id=uid,
+            ap=ap_val,
+            waitlist=len(data.get("waitlist") or []),
+            max_players=max_players,
+        )
+        await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
 
     async def _leave(self, interaction: discord.Interaction, message_id: int):
         # ✅ ACK-safe
@@ -4780,9 +4793,10 @@ class GruppensucheTest(commands.Cog):
         except discord.InteractionResponded:
             pass
 
-        lock = self._lock_for(message_id)
+        data: Optional[dict] = None
         promoted_id: Optional[int] = None
 
+        lock = self._lock_for(message_id)
         async with lock:
             data = await self._get_search(message_id)
             if data is None:
@@ -4817,13 +4831,11 @@ class GruppensucheTest(commands.Cog):
             data["participant_ap"] = ap_map
             data["waitlist_ap"] = wl_map
 
-            # Easter-Egg entfernen -> neu würfeln bei neuer Anmeldung
             egg_map = data.get("easter_egg_texts")
             if isinstance(egg_map, dict):
                 egg_map.pop(str(uid), None)
                 data["easter_egg_texts"] = egg_map
 
-            # Promote aus Warteschlange
             if was_participant and len(participants) < max_players and waitlist:
                 promoted_id = int(waitlist.pop(0))
                 participants.append(promoted_id)
@@ -4843,6 +4855,8 @@ class GruppensucheTest(commands.Cog):
 
             await self._save_refresh_dispatch(data)
 
+        await self._post_save_refresh_dispatch(data)
+
         self._log_info(
             "LEAVE",
             "user removed from search",
@@ -4853,7 +4867,6 @@ class GruppensucheTest(commands.Cog):
 
         await self._ephemeral_notice(interaction, "✅ Du wurdest abgemeldet.", ephemeral=True)
 
-        # ✅ Promotion-Notify NACH Lock (verhindert Lock-Blocking bei DMs)
         if promoted_id:
             await self._notify_promotion(data, promoted_id)
 
@@ -4863,6 +4876,8 @@ class GruppensucheTest(commands.Cog):
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
+
+        data: Optional[dict] = None
 
         lock = self._lock_for(int(message_id))
         uid = int(interaction.user.id)
@@ -4886,7 +4901,6 @@ class GruppensucheTest(commands.Cog):
             ap_map = data.get("participant_ap") or {}
             wl_map = data.get("waitlist_ap") or {}
 
-            # wir speichern AP konsistent als digits-only string
             ap_clean = str(int(ap_val))
 
             if is_participant:
@@ -4897,11 +4911,11 @@ class GruppensucheTest(commands.Cog):
             data["participant_ap"] = ap_map
             data["waitlist_ap"] = wl_map
 
-            # ✅ Easteregg add/remove passend zur neuen AP
             _sync_easter_egg_text(data, uid, ap_clean)
 
-            # ✅ speichern + public post aktualisieren + dashboard refresh
             await self._save_refresh_dispatch(data)
+
+        await self._post_save_refresh_dispatch(data)
 
         self._log_info(
             "AP_EDIT",
@@ -5013,11 +5027,7 @@ class GruppensucheTest(commands.Cog):
         cd["type"] = now_ts
         data["ping_cd"] = cd
 
-        await self._save_refresh_dispatch(
-            data,
-            refresh_public=False,
-            refresh_dashboard=False,
-        )
+        await self._save_refresh_dispatch(data)
 
         guild = interaction.guild
         if guild is None:
@@ -5083,11 +5093,7 @@ class GruppensucheTest(commands.Cog):
         cd["wait"] = now_ts
         data["ping_cd"] = cd
 
-        await self._save_refresh_dispatch(
-            data,
-            refresh_public=False,
-            refresh_dashboard=False,
-        )
+        await self._save_refresh_dispatch(data)
 
         guild = interaction.guild
         if guild is None:
@@ -5119,6 +5125,8 @@ class GruppensucheTest(commands.Cog):
         except discord.InteractionResponded:
             pass
 
+        data: Optional[dict] = None
+
         lock = self._lock_for(int(message_id))
         async with lock:
             data = await self._get_search(int(message_id))
@@ -5128,12 +5136,16 @@ class GruppensucheTest(commands.Cog):
             data["is_closed"] = True
             await self._save_refresh_dispatch(data)
 
+        await self._post_save_refresh_dispatch(data)
+
     async def _open_search(self, interaction: discord.Interaction, message_id: int):
         # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
+
+        data: Optional[dict] = None
 
         lock = self._lock_for(int(message_id))
         async with lock:
@@ -5145,6 +5157,7 @@ class GruppensucheTest(commands.Cog):
             data["is_closed"] = False
             await self._save_refresh_dispatch(data)
 
+        await self._post_save_refresh_dispatch(data)
         await self._ephemeral_notice(interaction, "✅ Suche wieder geöffnet.")
 
     async def _delete_search(self, interaction: discord.Interaction, message_id: int):
@@ -5350,6 +5363,8 @@ class GruppensucheTest(commands.Cog):
         if not session.edit_message_id:
             return
 
+        data: Optional[dict] = None
+
         lock = self._lock_for(int(session.edit_message_id))
         async with lock:
             data = await self._get_search(int(session.edit_message_id))
@@ -5392,6 +5407,8 @@ class GruppensucheTest(commands.Cog):
 
             await self._save_refresh_dispatch(data)
 
+        await self._post_save_refresh_dispatch(data)
+
         self._log_info(
             "EDIT",
             "day updated",
@@ -5415,18 +5432,11 @@ class GruppensucheTest(commands.Cog):
 
         message_id = int(session.edit_message_id)
         desired_max = int(session.max_players or 0)
+        data: Optional[dict] = None
 
         # ✅ Admin-only: 1 Teilnehmer nur für Admin-Testzwecke
         member = _member_from_interaction(interaction)
         allow_one = bool(member and _is_admin_only(member))
-
-        if desired_max == 1 and not allow_one:
-            await self._ephemeral_notice(
-                interaction,
-                "1 Teilnehmer ist nur für Admin-Testzwecke erlaubt.",
-                ephemeral=True,
-            )
-            return
 
         # ✅ Range korrekt bestimmen (und Admin-Override sauber berücksichtigen)
         mn, mx = _allowed_party_range(session.category or "", session.spot_key)
@@ -5434,7 +5444,11 @@ class GruppensucheTest(commands.Cog):
             mn = 1
 
         if desired_max < mn or desired_max > mx:
-            await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.", ephemeral=True)
+            await self._ephemeral_notice(
+                interaction,
+                "Ungültige Teilnehmerzahl.",
+                ephemeral=True,
+            )
             return
 
         lock = self._lock_for(message_id)
@@ -5502,6 +5516,9 @@ class GruppensucheTest(commands.Cog):
                 })
 
             self._schedule_edit_notify(message_id, data, changes=changes)
+
+        await self._post_save_refresh_dispatch(data)
+
         self._log_info(
             "EDIT",
             "max players updated",
@@ -5514,6 +5531,8 @@ class GruppensucheTest(commands.Cog):
     async def _apply_edit_details(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
+
+        data: Optional[dict] = None
 
         lock = self._lock_for(int(session.edit_message_id))
         async with lock:
@@ -5638,6 +5657,8 @@ class GruppensucheTest(commands.Cog):
                     changes=changes
                 )
 
+        await self._post_save_refresh_dispatch(data)
+
         self._log_info(
             "EDIT",
             "details updated",
@@ -5652,6 +5673,8 @@ class GruppensucheTest(commands.Cog):
     async def _apply_edit_bosses(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
+
+        data: Optional[dict] = None
 
         lock = self._lock_for(int(session.edit_message_id))
         async with lock:
@@ -5690,6 +5713,7 @@ class GruppensucheTest(commands.Cog):
                           "old": old_bosses, "new": new_bosses}],
             )
 
+        await self._post_save_refresh_dispatch(data)
         await self._send_edit_menu(interaction, session)
 
     async def _apply_edit_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession):
@@ -5701,6 +5725,8 @@ class GruppensucheTest(commands.Cog):
 
         if not session.edit_message_id:
             return
+
+        data: Optional[dict] = None
 
         lock = self._lock_for(int(session.edit_message_id))
         async with lock:
@@ -5754,4 +5780,5 @@ class GruppensucheTest(commands.Cog):
                 }],
             )
 
+        await self._post_save_refresh_dispatch(data)
         await self._send_edit_menu(interaction, session)
