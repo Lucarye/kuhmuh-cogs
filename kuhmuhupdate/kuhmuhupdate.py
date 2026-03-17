@@ -114,7 +114,7 @@ class KuhmuhUpdate(commands.Cog):
 
     # /update
     update_group = app_commands.Group(
-        name="update",
+        name="kuhmuhupdate",
         description="Admin: Cogs updaten & verwalten.",
         guild_ids=[GUILD_ID],
     )
@@ -144,26 +144,26 @@ class KuhmuhUpdate(commands.Cog):
     async def cog_load(self) -> None:
         guild_obj = discord.Object(id=GUILD_ID)
 
-        # Wichtig: alte Registrierungen raus (guild + global), sonst CommandAlreadyRegistered
+        # alte Commands entfernen (update + kuhmuhupdate, global + guild)
         with contextlib.suppress(Exception):
             self.bot.tree.remove_command("update", guild=guild_obj)
         with contextlib.suppress(Exception):
             self.bot.tree.remove_command("update", guild=None)
+        with contextlib.suppress(Exception):
+            self.bot.tree.remove_command("kuhmuhupdate", guild=guild_obj)
+        with contextlib.suppress(Exception):
+            self.bot.tree.remove_command("kuhmuhupdate", guild=None)
 
         # Neu hinzufügen (guild-scoped)
         with contextlib.suppress(Exception):
             self.bot.tree.add_command(self.update_group, guild=guild_obj)
-
-        # Direkt syncen, damit der Command sofort wieder da ist
-        with contextlib.suppress(Exception):
-            await self.bot.tree.sync(guild=guild_obj)
 
 
     async def cog_unload(self) -> None:
         guild_obj = discord.Object(id=GUILD_ID)
 
         with contextlib.suppress(Exception):
-            self.bot.tree.remove_command("update", guild=guild_obj)
+            self.bot.tree.remove_command("kuhmuhupdate", guild=guild_obj)
 
         with contextlib.suppress(Exception):
             await self.bot.tree.sync(guild=guild_obj)
