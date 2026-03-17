@@ -296,6 +296,65 @@ class Gruppenübersicht(commands.Cog):
         suffix = f" | {' '.join(parts)}" if parts else ""
         log.warning(f"[Kuhmuh-Dashboard][{category}] {message}{suffix}")
 
+    def _log_console(self, level: str, module: str, event: str, **kwargs):
+        base = f"[KUHMUH][{module.upper()}][{event.upper()}][{level.upper()}]"
+        if kwargs:
+            details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+            getattr(log, level.lower(), log.info)(f"{base} {details}")
+        else:
+            getattr(log, level.lower(), log.info)(base)
+
+    async def _log_event(
+        self,
+        guild: discord.Guild,
+        level: str,
+        module: str,
+        event: str,
+        description: str,
+        *,
+        channel: Optional[discord.TextChannel] = None,
+    ):
+        self._log_console(level, module, event, guild_id=guild.id)
+
+        ch = guild.get_channel(LOG_CHANNEL_ID)
+        if not isinstance(ch, discord.TextChannel):
+            return
+
+        emoji_map = {
+            "info": "ℹ️",
+            "warn": "⚠️",
+            "error": "❌",
+        }
+        emoji = emoji_map.get(level.lower(), "ℹ️")
+
+        embed = discord.Embed(
+            title=f"{emoji} Kuhmuh System Log",
+            description=description + "\n\nTechnische Details siehe Serverkonsole.",
+            color=discord.Color.orange() if level.lower() != "error" else discord.Color.red(),
+        )
+
+        embed.add_field(name="Modul", value=module, inline=True)
+        embed.add_field(name="Event", value=event, inline=True)
+        embed.add_field(name="Server", value=guild.name, inline=True)
+
+        if channel:
+            embed.add_field(name="Channel", value=channel.mention, inline=True)
+
+        embed.set_footer(text="Kuhmuh Bot • Systemmeldung")
+
+        content = None
+        if level.lower() == "error" and DEV_ROLE_ID:
+            content = f"<@&{DEV_ROLE_ID}>"
+
+        try:
+            await ch.send(
+                content=content,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
+        except Exception:
+            pass
+
     async def force_refresh_all(self, guild_id: int):
         if int(guild_id) != GUILD_ID:
             return
