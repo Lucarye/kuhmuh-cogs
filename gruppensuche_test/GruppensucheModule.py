@@ -5119,12 +5119,14 @@ class GruppensucheTest(commands.Cog):
         except discord.InteractionResponded:
             pass
 
-        data = await self._get_search(message_id)
-        if data is None:
-            return
+        lock = self._lock_for(int(message_id))
+        async with lock:
+            data = await self._get_search(int(message_id))
+            if data is None:
+                return
 
-        data["is_closed"] = True
-        await self._save_refresh_dispatch(data)
+            data["is_closed"] = True
+            await self._save_refresh_dispatch(data)
 
     async def _open_search(self, interaction: discord.Interaction, message_id: int):
         # ✅ ACK-safe
@@ -5133,13 +5135,15 @@ class GruppensucheTest(commands.Cog):
         except discord.InteractionResponded:
             pass
 
-        data = await self._get_search(message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
-            return
+        lock = self._lock_for(int(message_id))
+        async with lock:
+            data = await self._get_search(int(message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+                return
 
-        data["is_closed"] = False
-        await self._save_refresh_dispatch(data)
+            data["is_closed"] = False
+            await self._save_refresh_dispatch(data)
 
         await self._ephemeral_notice(interaction, "✅ Suche wieder geöffnet.")
 
@@ -5345,44 +5349,48 @@ class GruppensucheTest(commands.Cog):
     async def _apply_edit_day(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
-        data = await self._get_search(session.edit_message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
-        # --- alten Wert sichern (WICHTIG für "old -> new") ---
-        old_day_iso = str(data.get("day_date_iso") or "")
 
-        # --- neuen Wert setzen ---
-        data["day_date_iso"] = session.day_date_iso
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(int(session.edit_message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        # ✅ Reminder reset, weil Tag geändert wurde
-        rem = data.get("reminders")
-        if not isinstance(rem, dict):
-            rem = {}
-        rem.pop("start_30m", None)
-        data["reminders"] = rem
+            # --- alten Wert sichern (WICHTIG für "old -> new") ---
+            old_day_iso = str(data.get("day_date_iso") or "")
 
-        # --- Edit Notify (debounced) ---
-        try:
-            old_fmt = _format_day(dt.date.fromisoformat(
-                old_day_iso)) if old_day_iso else "—"
-        except Exception:
-            old_fmt = old_day_iso or "—"
+            # --- neuen Wert setzen ---
+            data["day_date_iso"] = session.day_date_iso
 
-        try:
-            new_fmt = _format_day(dt.date.fromisoformat(
-                str(session.day_date_iso or ""))) if session.day_date_iso else "—"
-        except Exception:
-            new_fmt = str(session.day_date_iso or "—")
+            # ✅ Reminder reset, weil Tag geändert wurde
+            rem = data.get("reminders")
+            if not isinstance(rem, dict):
+                rem = {}
+            rem.pop("start_30m", None)
+            data["reminders"] = rem
 
-        self._schedule_edit_notify(
-            int(session.edit_message_id),
-            data,
-            changes=[{"key": "day", "label": "Tag",
-                      "old": old_fmt, "new": new_fmt}],
-        )
+            # --- Edit Notify (debounced) ---
+            try:
+                old_fmt = _format_day(dt.date.fromisoformat(
+                    old_day_iso)) if old_day_iso else "—"
+            except Exception:
+                old_fmt = old_day_iso or "—"
 
-        await self._save_refresh_dispatch(data)
+            try:
+                new_fmt = _format_day(dt.date.fromisoformat(
+                    str(session.day_date_iso or ""))) if session.day_date_iso else "—"
+            except Exception:
+                new_fmt = str(session.day_date_iso or "—")
+
+            self._schedule_edit_notify(
+                int(session.edit_message_id),
+                data,
+                changes=[{"key": "day", "label": "Tag",
+                          "old": old_fmt, "new": new_fmt}],
+            )
+
+            await self._save_refresh_dispatch(data)
 
         self._log_info(
             "EDIT",
@@ -5507,126 +5515,128 @@ class GruppensucheTest(commands.Cog):
         if not session.edit_message_id:
             return
 
-        data = await self._get_search(session.edit_message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(int(session.edit_message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        cat = str(data.get("category", "")).lower()
+            cat = str(data.get("category", "")).lower()
 
-        # --- alte Werte sichern ---
-        old_duration = data.get("duration_text")
-        old_start = data.get("start_text")
-        old_req = data.get("req_text")
-        old_notes = data.get("notes")
-        old_day_iso = data.get("day_date_iso")
-        old_amount = data.get("scroll_amount") if cat == "pilafe" else None
-        old_owner_ap = data.get("owner_ap")
+            # --- alte Werte sichern ---
+            old_duration = data.get("duration_text")
+            old_start = data.get("start_text")
+            old_req = data.get("req_text")
+            old_notes = data.get("notes")
+            old_day_iso = data.get("day_date_iso")
+            old_amount = data.get("scroll_amount") if cat == "pilafe" else None
+            old_owner_ap = data.get("owner_ap")
 
-        # --- Änderungen anwenden ---
-        if cat == "pilafe" and session.scroll_amount is not None:
-            data["scroll_amount"] = session.scroll_amount
+            # --- Änderungen anwenden ---
+            if cat == "pilafe" and session.scroll_amount is not None:
+                data["scroll_amount"] = session.scroll_amount
 
-        if session.duration_text is not None:
-            data["duration_text"] = session.duration_text
+            if session.duration_text is not None:
+                data["duration_text"] = session.duration_text
 
-        if session.start_text is not None:
-            data["start_text"] = session.start_text
+            if session.start_text is not None:
+                data["start_text"] = session.start_text
 
-        if session.req_text is not None:
-            data["req_text"] = session.req_text
+            if session.req_text is not None:
+                data["req_text"] = session.req_text
 
-        if session.notes is not None:
-            data["notes"] = session.notes
+            if session.notes is not None:
+                data["notes"] = session.notes
 
-        # ✅ Host-AP korrekt übernehmen
-        if session.own_ap is not None:
-            owner_id = int(data.get("owner_id", 0))
-            data["owner_ap"] = session.own_ap
+            # ✅ Host-AP korrekt übernehmen
+            if session.own_ap is not None:
+                owner_id = int(data.get("owner_id", 0))
+                data["owner_ap"] = session.own_ap
 
-            ap_map = data.get("participant_ap")
-            if not isinstance(ap_map, dict):
-                ap_map = {}
+                ap_map = data.get("participant_ap")
+                if not isinstance(ap_map, dict):
+                    ap_map = {}
 
-            ap_map[str(owner_id)] = session.own_ap
-            data["participant_ap"] = ap_map
+                ap_map[str(owner_id)] = session.own_ap
+                data["participant_ap"] = ap_map
 
-            # ✅ Easter-Egg Host: setzen ODER entfernen (bei AP-Korrektur)
-            _sync_easter_egg_text(data, owner_id, session.own_ap)
+                # ✅ Easter-Egg Host: setzen ODER entfernen (bei AP-Korrektur)
+                _sync_easter_egg_text(data, owner_id, session.own_ap)
 
-        # ✅ Reminder reset bei Start/Tag-Änderung
-        if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day_iso):
-            rem = data.get("reminders")
-            if not isinstance(rem, dict):
-                rem = {}
-            rem.pop("start_30m", None)
-            data["reminders"] = rem
+            # ✅ Reminder reset bei Start/Tag-Änderung
+            if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day_iso):
+                rem = data.get("reminders")
+                if not isinstance(rem, dict):
+                    rem = {}
+                rem.pop("start_30m", None)
+                data["reminders"] = rem
 
-        # --- Speichern ---
-        await self._save_refresh_dispatch(data)
+            # --- Speichern ---
+            await self._save_refresh_dispatch(data)
 
-        # --- Change-Liste bauen ---
-        changes: list[dict] = []
+            # --- Change-Liste bauen ---
+            changes: list[dict] = []
 
-        if cat == "pilafe":
-            if old_amount != data.get("scroll_amount"):
+            if cat == "pilafe":
+                if old_amount != data.get("scroll_amount"):
+                    changes.append({
+                        "key": "scroll_amount",
+                        "label": "Menge",
+                        "old": old_amount,
+                        "new": data.get("scroll_amount")
+                    })
+
+            if old_duration != data.get("duration_text"):
                 changes.append({
-                    "key": "scroll_amount",
-                    "label": "Menge",
-                    "old": old_amount,
-                    "new": data.get("scroll_amount")
+                    "key": "duration",
+                    "label": "Geplante Dauer",
+                    "old": old_duration,
+                    "new": data.get("duration_text")
                 })
 
-        if old_duration != data.get("duration_text"):
-            changes.append({
-                "key": "duration",
-                "label": "Geplante Dauer",
-                "old": old_duration,
-                "new": data.get("duration_text")
-            })
+            if old_start != data.get("start_text"):
+                changes.append({
+                    "key": "start",
+                    "label": "Startzeit",
+                    "old": old_start,
+                    "new": data.get("start_text")
+                })
 
-        if old_start != data.get("start_text"):
-            changes.append({
-                "key": "start",
-                "label": "Startzeit",
-                "old": old_start,
-                "new": data.get("start_text")
-            })
+            # ✅ Kategorieabhängiges Label für req
+            if old_req != data.get("req_text"):
+                req_label = "Gewünschte AP" if cat in (
+                    "atoraxxion", "altar") else "Anforderung AK/VK"
+                changes.append({
+                    "key": "req",
+                    "label": req_label,
+                    "old": old_req,
+                    "new": data.get("req_text")
+                })
 
-        # ✅ Kategorieabhängiges Label für req
-        if old_req != data.get("req_text"):
-            req_label = "Gewünschte AP" if cat in (
-                "atoraxxion", "altar") else "Anforderung AK/VK"
-            changes.append({
-                "key": "req",
-                "label": req_label,
-                "old": old_req,
-                "new": data.get("req_text")
-            })
+            if old_notes != data.get("notes"):
+                changes.append({
+                    "key": "notes",
+                    "label": "Notiz",
+                    "old": old_notes,
+                    "new": data.get("notes")
+                })
 
-        if old_notes != data.get("notes"):
-            changes.append({
-                "key": "notes",
-                "label": "Notiz",
-                "old": old_notes,
-                "new": data.get("notes")
-            })
+            # ✅ Host-AP Change-Notify
+            if old_owner_ap != data.get("owner_ap"):
+                changes.append({
+                    "key": "owner_ap",
+                    "label": "Host AP",
+                    "old": old_owner_ap,
+                    "new": data.get("owner_ap"),
+                })
 
-        # ✅ Host-AP Change-Notify
-        if old_owner_ap != data.get("owner_ap"):
-            changes.append({
-                "key": "owner_ap",
-                "label": "Host AP",
-                "old": old_owner_ap,
-                "new": data.get("owner_ap"),
-            })
-
-        if changes:
-            self._schedule_edit_notify(
-                int(session.edit_message_id),
-                data,
-                changes=changes
-            )
+            if changes:
+                self._schedule_edit_notify(
+                    int(session.edit_message_id),
+                    data,
+                    changes=changes
+                )
 
         self._log_info(
             "EDIT",
@@ -5642,40 +5652,43 @@ class GruppensucheTest(commands.Cog):
     async def _apply_edit_bosses(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
-        data = await self._get_search(session.edit_message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
 
-        if data.get("category") != "muhhelfer":
-            await self._ephemeral_notice(interaction, "Bossbearbeitung ist nur für Muhhelfer.", ephemeral=True)
-            return
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(int(session.edit_message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        if not session.boss_runs:
-            await self._ephemeral_notice(interaction, "Bitte mindestens 1 Boss auswählen.", ephemeral=True)
-            return
+            if data.get("category") != "muhhelfer":
+                await self._ephemeral_notice(interaction, "Bossbearbeitung ist nur für Muhhelfer.", ephemeral=True)
+                return
 
-        def _fmt_boss_runs(br: dict) -> str:
-            if not isinstance(br, dict) or not br:
-                return "—"
-            parts = []
-            for k, v in br.items():
-                name = _boss_name(str(k))
-                runs = int(v or 1)
-                parts.append(f"{name}{' (2x)' if runs >= 2 else ''}")
-            return ", ".join(parts)
+            if not session.boss_runs:
+                await self._ephemeral_notice(interaction, "Bitte mindestens 1 Boss auswählen.", ephemeral=True)
+                return
 
-        old_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
-        data["boss_runs"] = dict(session.boss_runs)
-        data["updated_at"] = int(_now_local().timestamp())
-        await self._save_refresh_dispatch(data)
-        new_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
-        self._schedule_edit_notify(
-            int(session.edit_message_id),
-            data,
-            changes=[{"key": "bosses", "label": "Bosse",
-                      "old": old_bosses, "new": new_bosses}],
-        )
+            def _fmt_boss_runs(br: dict) -> str:
+                if not isinstance(br, dict) or not br:
+                    return "—"
+                parts = []
+                for k, v in br.items():
+                    name = _boss_name(str(k))
+                    runs = int(v or 1)
+                    parts.append(f"{name}{' (2x)' if runs >= 2 else ''}")
+                return ", ".join(parts)
+
+            old_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
+            data["boss_runs"] = dict(session.boss_runs)
+            data["updated_at"] = int(_now_local().timestamp())
+            await self._save_refresh_dispatch(data)
+            new_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
+            self._schedule_edit_notify(
+                int(session.edit_message_id),
+                data,
+                changes=[{"key": "bosses", "label": "Bosse",
+                          "old": old_bosses, "new": new_bosses}],
+            )
 
         await self._send_edit_menu(interaction, session)
 
@@ -5689,54 +5702,56 @@ class GruppensucheTest(commands.Cog):
         if not session.edit_message_id:
             return
 
-        data = await self._get_search(session.edit_message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(int(session.edit_message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        if str(data.get("category", "")).lower() != "atoraxxion":
-            await self._ephemeral_notice(interaction, "Dungeon-Bearbeitung ist nur für Atoraxxion.", ephemeral=True)
-            return
+            if str(data.get("category", "")).lower() != "atoraxxion":
+                await self._ephemeral_notice(interaction, "Dungeon-Bearbeitung ist nur für Atoraxxion.", ephemeral=True)
+                return
 
-        # alte / neue Auswahl normalisieren
-        old_runs = _normalize_atoraxxion_runs(data)
-        new_runs = list(session.atoraxxion_runs or [])
+            # alte / neue Auswahl normalisieren
+            old_runs = _normalize_atoraxxion_runs(data)
+            new_runs = list(session.atoraxxion_runs or [])
 
-        # nur erlaubte Keys + stabile Reihenfolge
-        allowed_order = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
-        new_runs = [k for k in allowed_order if k in {
-            str(x).lower().strip() for x in new_runs}]
+            # nur erlaubte Keys + stabile Reihenfolge
+            allowed_order = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
+            new_runs = [k for k in allowed_order if k in {
+                str(x).lower().strip() for x in new_runs}]
 
-        # wenn nichts gewählt -> Fehlermeldung
-        if not new_runs:
-            await self._ephemeral_notice(interaction, "Bitte wähle mindestens einen Dungeon aus.", ephemeral=True)
-            return
+            # wenn nichts gewählt -> Fehlermeldung
+            if not new_runs:
+                await self._ephemeral_notice(interaction, "Bitte wähle mindestens einen Dungeon aus.", ephemeral=True)
+                return
 
-        data["atoraxxion_runs"] = new_runs
-        data["updated_at"] = int(_now_local().timestamp())
+            data["atoraxxion_runs"] = new_runs
+            data["updated_at"] = int(_now_local().timestamp())
 
-        await self._save_refresh_dispatch(data)
+            await self._save_refresh_dispatch(data)
 
-        def _fmt(keys: list[str]) -> str:
-            if set(keys) == set(allowed_order):
-                return "Kompletter Run"
-            m = {
-                "vahmalkea": "Vahmalkea",
-                "sycrakea": "Sycrakea",
-                "yolunakea": "Yolunakea",
-                "orzekea": "Orzekea",
-            }
-            return ", ".join(m.get(k, k) for k in keys) if keys else "—"
+            def _fmt(keys: list[str]) -> str:
+                if set(keys) == set(allowed_order):
+                    return "Kompletter Run"
+                m = {
+                    "vahmalkea": "Vahmalkea",
+                    "sycrakea": "Sycrakea",
+                    "yolunakea": "Yolunakea",
+                    "orzekea": "Orzekea",
+                }
+                return ", ".join(m.get(k, k) for k in keys) if keys else "—"
 
-        self._schedule_edit_notify(
-            int(session.edit_message_id),
-            data,
-            changes=[{
-                "key": "atoraxxion_runs",
-                "label": "Atoraxxion Auswahl",
-                "old": _fmt(old_runs),
-                "new": _fmt(new_runs),
-            }],
-        )
+            self._schedule_edit_notify(
+                int(session.edit_message_id),
+                data,
+                changes=[{
+                    "key": "atoraxxion_runs",
+                    "label": "Atoraxxion Auswahl",
+                    "old": _fmt(old_runs),
+                    "new": _fmt(new_runs),
+                }],
+            )
 
         await self._send_edit_menu(interaction, session)
