@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import asyncio
 import hashlib
 import json
+import logging
 
 
 import discord
@@ -13,6 +14,7 @@ from discord.ext import tasks
 from redbot.core import commands, Config
 from discord import app_commands
 
+log = logging.getLogger("red.kuhmuh.dashboard")
 
 # =========================
 # FIX: Nur fuer eure Guild
@@ -31,6 +33,7 @@ PILAFE_EMOJI = "<:pilafe:1450051653297504368>"
 MIRUMOK_EMOJI = "<:Mirumok:1461101498954940428>"
 GYFIN_EMOJI = "<:Gyfin:1461102103266066502>"
 OLUN_EMOJI = "<:olun:1471826612394655857>"
+EDANIA_EMOJI = "<:edania:1483216698625753088>"
 CHEER_EMOJI = "<:blackspiritcheer:1199730129476268183>"
 
 AKVK_NORMAL = "301/385"
@@ -81,6 +84,8 @@ def _default_req_for(data: dict) -> str:
             return "350/427"
         if spot == "gyfin":
             return "370/440"
+        if spot == "edania":
+            return "385/450"
         return ""
     return ""
 
@@ -182,8 +187,9 @@ def _spot_emoji(spot_key: str, *, olun_tier: str = "") -> str:
     if sk == "gyfin":
         return GYFIN_EMOJI
     if sk == "olun":
-        # Optional: Dehkia optisch gleich lassen oder später eigenes Emoji je Tier
         return OLUN_EMOJI
+    if sk == "edania":
+        return EDANIA_EMOJI
 
     return CHEER_EMOJI
 
@@ -259,6 +265,16 @@ class Gruppenübersicht(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    def _log_info(self, category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.info(f"[Kuhmuh-Dashboard][{category}] {message}{suffix}")
+
+    def _log_warning(self, category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.warning(f"[Kuhmuh-Dashboard][{category}] {message}{suffix}")
 
         # Eigene Config fuer Dashboard-Msg/Channel
         self.config = Config.get_conf(
@@ -488,13 +504,24 @@ class Gruppenübersicht(commands.Cog):
 
         ch = guild.get_channel(int(ch_id))
         if not isinstance(ch, discord.TextChannel):
-            return
-
-        try:
-            msg = await ch.fetch_message(int(msg_id))
-        except Exception:
             try:
                 await self._clear_dashboard_target(guild, which)
+            except Exception:
+                pass
+
+            try:
+                await self._log_event(
+                    guild,
+                    "warn",
+                    "Dashboard",
+                    "Target Channel Missing",
+                    (
+                        f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
+                        "Der gespeicherte Dashboard-Channel ist nicht mehr verfügbar.\n"
+                        "Das Dashboard konnte nicht automatisch repariert werden.\n\n"
+                        "Bitte `/dashboard` neu ausführen."
+                    ),
+                )
             except Exception:
                 pass
             return
@@ -505,6 +532,32 @@ class Gruppenübersicht(commands.Cog):
             self._dash_locks[which] = lock
 
         async with lock:
+            try:
+                msg = await ch.fetch_message(int(msg_id))
+            except Exception:
+                try:
+                    await self._clear_dashboard_target(guild, which)
+                except Exception:
+                    pass
+
+                try:
+                    await self._log_event(
+                        guild,
+                        "warn",
+                        "Dashboard",
+                        "Message Fetch Failed",
+                        (
+                            f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
+                            "Die gespeicherte Dashboard-Nachricht konnte nicht geladen werden.\n"
+                            "Das Dashboard konnte nicht automatisch repariert werden.\n\n"
+                            "Bitte `/dashboard` neu ausführen."
+                        ),
+                        channel=ch,
+                    )
+                except Exception:
+                    pass
+                return
+
             try:
                 embed = await self._build_dashboard_embed(guild, which=which)
                 view = DashboardDMView(which)
@@ -525,6 +578,27 @@ class Gruppenübersicht(commands.Cog):
                 self._last_sig[which] = sig
 
             except Exception:
+                try:
+                    await self._clear_dashboard_target(guild, which)
+                except Exception:
+                    pass
+
+                try:
+                    await self._log_event(
+                        guild,
+                        "error",
+                        "Dashboard",
+                        "Message Edit Failed",
+                        (
+                            f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
+                            "Die bestehende Dashboard-Nachricht konnte nicht bearbeitet werden.\n"
+                            "Das Dashboard konnte nicht automatisch repariert werden.\n\n"
+                            "Bitte `/dashboard` neu ausführen."
+                        ),
+                        channel=ch,
+                    )
+                except Exception:
+                    pass
                 return
 
     # =========================
@@ -557,50 +631,53 @@ class Gruppenübersicht(commands.Cog):
         today = _now_local().date()
 
         items: List[dict] = []
-        stale_message_ids: List[int] = []
+        skipped_message_ids: List[int] = []
 
         for mid_str, data in (searches or {}).items():
             try:
                 day_iso = data.get("day_date_iso")
                 if not day_iso:
                     continue
+
                 day_d = dt.date.fromisoformat(str(day_iso))
                 if day_d < today:
                     continue
 
                 d2 = dict(data)
                 d2["message_id"] = int(d2.get("message_id") or int(mid_str))
+
                 channel_id = int(data.get("channel_id") or 0)
                 message_id = int(data.get("message_id") or 0) or int(mid_str)
 
                 ch = guild.get_channel(channel_id)
                 if not isinstance(ch, discord.TextChannel):
-                    stale_message_ids.append(int(message_id))
+                    skipped_message_ids.append(int(message_id))
+                    self._log_warning(
+                        "FETCH",
+                        "dashboard skipped post because channel is unavailable",
+                        message_id=message_id,
+                        channel_id=channel_id,
+                    )
                     continue
 
                 try:
                     await ch.fetch_message(int(message_id))
                 except Exception:
-                    stale_message_ids.append(int(message_id))
+                    skipped_message_ids.append(int(message_id))
+                    self._log_warning(
+                        "FETCH",
+                        "dashboard skipped post because fetch_message failed",
+                        message_id=message_id,
+                        channel_id=channel_id,
+                    )
                     continue
 
                 items.append(d2)
+
             except Exception:
                 continue
 
-        # stale Einträge löschen (nur in der passenden Quelle!)
-        if stale_message_ids:
-            search_cog = self._get_gruppensuche_cog_live(
-            ) if which == "live" else self._get_gruppensuche_cog_test()
-            if search_cog:
-                try:
-                    async with search_cog.config.guild(guild).searches() as s:
-                        for mid in stale_message_ids:
-                            s.pop(str(mid), None)
-                except Exception:
-                    pass
-
-        SPOT_ORDER = ["mirumok", "gyfin", "olun", "newspot"]
+        SPOT_ORDER = ["mirumok", "gyfin", "olun", "edania"]
 
         def _spot_order_key(spot_key: str) -> int:
             try:
@@ -632,6 +709,7 @@ class Gruppenübersicht(commands.Cog):
         spots_olun_normal: List[dict] = []
         spots_olun_d1: List[dict] = []
         spots_olun_d2: List[dict] = []
+        spots_edania: List[dict] = []
 
         pilafe: List[dict] = []
         atoraxxion: List[dict] = []
@@ -668,6 +746,9 @@ class Gruppenübersicht(commands.Cog):
                     else:
                         spots_olun_normal.append(d)
 
+                elif sk == "edania":
+                    spots_edania.append(d)
+
                 else:
                     spots_miru.append(d)
 
@@ -702,7 +783,8 @@ class Gruppenübersicht(commands.Cog):
             is_full = len(participants) >= max_players
 
             status_icon = "🔴" if is_closed else ("🔴" if is_full else "🟢")
-            status_label = "Geschlossen" if is_closed else ("Voll" if is_full else "Offen")
+            status_label = "Geschlossen" if is_closed else (
+                "Voll" if is_full else "Offen")
 
             chan_name = d.get("channel_name") or "—"
             jump = _jump_link(d)
@@ -820,9 +902,13 @@ class Gruppenübersicht(commands.Cog):
 
         add_entries(f"{MIRUMOK_EMOJI} Gruppenspots – Mirumok", spots_miru)
         add_entries(f"{GYFIN_EMOJI} Gruppenspots – Gyfin", spots_gyfin)
-        add_entries(f"{OLUN_EMOJI} Gruppenspots – Olun Normal", spots_olun_normal)
-        add_entries(f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 1", spots_olun_d1)
-        add_entries(f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 2", spots_olun_d2)
+        add_entries(f"{OLUN_EMOJI} Gruppenspots – Olun Normal",
+                    spots_olun_normal)
+        add_entries(
+            f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 1", spots_olun_d1)
+        add_entries(
+            f"{OLUN_EMOJI} Gruppenspots – Olun Dehkia 2", spots_olun_d2)
+        add_entries(f"{EDANIA_EMOJI} Gruppenspots – Edania", spots_edania)
 
         add_entries(f"{PILAFE_EMOJI} Pila Fe", pilafe)
         add_entries("🏛️ Atoraxxion", atoraxxion)
@@ -874,8 +960,8 @@ class Gruppenübersicht(commands.Cog):
             for cat_title, item in day_items:
                 cat_map.setdefault(cat_title, []).append(item)
 
-
             # ---------- Status Sort Key (einmal definieren) ----------
+
             def _status_sort_key(x: dict) -> tuple:
                 max_players = int(x.get("max_players", 2) or 2)
                 participants = list(x.get("participants") or [])
@@ -899,7 +985,6 @@ class Gruppenübersicht(commands.Cog):
 
                 return (state, tkey[0], tkey[1])
 
-
             # ---------- Rendering ----------
             for cat_title, items_cat in cat_map.items():
 
@@ -916,7 +1001,8 @@ class Gruppenübersicht(commands.Cog):
                         break
                     chunks.append(ln)
 
-        e.description = info_prefix + "\n".join([c for c in chunks if c is not None])
+        e.description = info_prefix + \
+            "\n".join([c for c in chunks if c is not None])
 
         # Letztes echtes Update (datengetrieben) statt "immer jetzt"
         last_ts = 0
