@@ -226,7 +226,7 @@ FEATURE_SPOTS_EDANIA = True
 
 
 FEATURE_PILAFE = True
-FEATURE_ALTAR = FALSE              # <- vorbereitet, aber nicht im Menü
+FEATURE_ALTAR = False            # <- vorbereitet, aber nicht im Menü
 FEATURE_ATORAXXION = True         # <- vorbereitet, aber nicht im Menü
 
 FEATURE_POST_IN_CURRENT_CHANNEL = True  # statt TEST_CHANNEL_ID
