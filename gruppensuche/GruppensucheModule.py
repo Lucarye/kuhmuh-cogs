@@ -14,7 +14,10 @@ import discord  # pyright: ignore[reportMissingImports]
 # pyright: ignore[reportMissingImports]
 from redbot.core import commands, Config
 import random
+import logging
 
+
+log = logging.getLogger("red.kuhmuh.gruppensuche")
 
 # =========================
 # IDs / Konfiguration
@@ -22,6 +25,9 @@ import random
 
 TEST_CHANNEL_ID = 1199322485297000528
 TEST_ROLE_ID = 1445018518562017373
+
+LOG_CHANNEL_ID: int = 1460298038269575282
+DEV_ALERT_ROLE_ID: int = 1445018518562017373
 
 ROLE_NORMAL_ID = 1424768638157852682
 ROLE_SCHWER_ID = 1424769286790054050
@@ -32,6 +38,7 @@ ROLE_OLUN_DEHKIA2_ID = 1471825918480875626
 
 ROLE_MIRUMOK_ID = 1459832247405248707
 ROLE_GYFIN_ID = 1459832490603708590
+ROLE_EDANIA_ID = 1483214699754688562
 
 ROLE_PILAFE_ID = 1458832343149318269
 ROLE_ALTAR_ID = 1459833455369130140
@@ -56,6 +63,7 @@ MIRUMOK_EMOJI = "<:Mirumok:1461101498954940428>"
 GYFIN_EMOJI = "<:Gyfin:1461102103266066502>"
 CHEER_EMOJI = "<:blackspiritcheer:1199730129476268183>"
 OLUN_EMOJI = "<:olun:1471826612394655857>"
+EDANIA_EMOJI = "<:edania:1483216698625753088>"
 
 EASTER_EGG_AP = 396
 EASTER_EGG_MARK = " ✨"  # oder f" {MUHKUH_EMOJI}" wenn du es cow-themed willst
@@ -91,6 +99,7 @@ EASTER_EGG_TEXT_POOL = [
     "Cronsteine wurden geopfert",
     "über dem empfohlenen Patchlevel",
     "Sheet-AP ist nur ein Vorschlag",
+    "ist wohl die Katze über die Tastatur gelaufen..",
     "Legenden beginnen genau so."
 ]
 
@@ -114,6 +123,7 @@ SPOTS: List[Tuple[str, str]] = [
     ("mirumok", "Mirumok"),
     ("gyfin", "Gyfin"),
     ("olun", "Olun"),
+    ("edania", "Edania"),
 ]
 
 
@@ -121,6 +131,7 @@ SPOT_REQ: Dict[str, str] = {
     "mirumok": "350 / 427",
     "gyfin": "370 / 440",
     "olun": "",  # bleibt leer, weil tier-basiert (siehe OLUN_REQ)
+    "edania": "385 / 450",
 }
 
 OLUN_REQ: Dict[str, str] = {
@@ -133,6 +144,7 @@ SPOT_TOTAL_AP: Dict[str, str] = {
     "mirumok": "Total AP 1565 - 1595",
     "gyfin": "Total AP 1650 - 1680",
     "olun": "",  # bleibt leer, weil tier-basiert (siehe OLUN_TOTAL_AP)
+    "edania": "Total AP 1850 - 1880",
 }
 
 OLUN_TOTAL_AP: Dict[str, str] = {
@@ -140,6 +152,7 @@ OLUN_TOTAL_AP: Dict[str, str] = {
     "dehkia1": "Total AP 1320 - 1350",
     "dehkia2": "Total AP 1460 - 1490",
 }
+
 
 ATORAXXION_DUNGEONS: List[Tuple[str, str]] = [
     ("vahmalkea", "Vahmalkea"),
@@ -196,6 +209,7 @@ def _olun_tier_label(tier: str) -> str:
 SPOT_PING_ROLE: Dict[str, int] = {
     "mirumok": ROLE_MIRUMOK_ID,
     "gyfin": ROLE_GYFIN_ID,
+    "edania": ROLE_EDANIA_ID,
 }
 
 # =========================
@@ -208,10 +222,12 @@ FEATURE_SPOTS = True
 FEATURE_SPOTS_GYFIN = True
 FEATURE_SPOTS_MIRUMOK = True
 FEATURE_SPOTS_OLUN = True
+FEATURE_SPOTS_EDANIA = True
+
 
 FEATURE_PILAFE = True
-FEATURE_ALTAR = False
-FEATURE_ATORAXXION = True
+FEATURE_ALTAR = True              # <- vorbereitet, aber nicht im Menü
+FEATURE_ATORAXXION = True         # <- vorbereitet, aber nicht im Menü
 
 FEATURE_POST_IN_CURRENT_CHANNEL = True  # statt TEST_CHANNEL_ID
 FEATURE_DM_REMINDERS = True
@@ -238,6 +254,8 @@ def _spots_title(session: "WizardSession") -> str:
         emoji = GYFIN_EMOJI
     elif spot == "olun":
         emoji = OLUN_EMOJI
+    elif spot == "edania":
+        emoji = EDANIA_EMOJI
     else:
         emoji = CHEER_EMOJI
 
@@ -286,12 +304,85 @@ def _ui_for(category: str) -> dict:
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
+def _parse_int_strict(val: object) -> Optional[int]:
+    """
+    Erlaubt nur Ziffern + gängige Trenner (., , und Leerzeichen).
+    - "3245" -> 3245
+    - "3.245" / "3,245" / "3 245" -> 3245
+    Alles andere (Buchstaben etc.) -> None
+    """
+    s = str(val or "").strip()
+    if not s:
+        return None
+
+    allowed = set("0123456789., ")
+    if any(ch not in allowed for ch in s):
+        return None
+
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        return None
+
+    try:
+        return int(digits)
+    except Exception:
+        return None
+
+
+def _member_from_interaction(interaction: discord.Interaction) -> Optional[discord.Member]:
+    if isinstance(interaction.user, discord.Member):
+        return interaction.user
+    if interaction.guild:
+        return interaction.guild.get_member(int(interaction.user.id))
+    return None
+
+
+def _category_emoji(data: dict) -> str:
+    cat = str(data.get("category") or "").lower()
+    spot = str(data.get("spot_key") or "").lower()
+
+    if cat == "muhhelfer":
+        return MUHKUH_EMOJI
+
+    if cat == "pilafe":
+        return PILAFE_EMOJI
+
+    if cat == "atoraxxion":
+        return "🏛️"
+
+    if cat == "altar":
+        return "🩸"
+
+    if cat == "spots":
+        if spot == "mirumok":
+            return MIRUMOK_EMOJI
+        if spot == "gyfin":
+            return GYFIN_EMOJI
+        if spot == "olun":
+            return OLUN_EMOJI
+        if spot == "edania":
+            return EDANIA_EMOJI
+
+    return MUHKUH_EMOJI
+
+
 def _get_post_lock(self, message_id: int) -> asyncio.Lock:
     lock = self._post_locks.get(message_id)
     if lock is None:
         lock = asyncio.Lock()
         self._post_locks[message_id] = lock
     return lock
+
+
+def _fmt_number(val: Optional[int | str]) -> str:
+    if val is None:
+        return "—"
+
+    try:
+        n = int(val)
+        return f"{n:,}".replace(",", ".")
+    except (ValueError, TypeError):
+        return str(val)
 
 
 def _format_remaining(seconds: int) -> str:
@@ -499,15 +590,10 @@ _AP_NUM_RE = re.compile(r"(\d+)")
 
 def _ap_triggers_easter_egg(ap_val: Optional[str]) -> bool:
     """Trigger: AP > 396 (weil 396 max ist)."""
-    if not ap_val:
+    n = _parse_int_strict(ap_val)
+    if n is None:
         return False
-    m = _AP_NUM_RE.search(str(ap_val))
-    if not m:
-        return False
-    try:
-        return int(m.group(1)) > EASTER_EGG_AP
-    except Exception:
-        return False
+    return n > EASTER_EGG_AP
 
 
 def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> Optional[str]:
@@ -531,6 +617,35 @@ def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> 
     egg_map[key] = txt
     data["easter_egg_texts"] = egg_map
     return txt
+
+
+def _sync_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> Optional[str]:
+    """
+    Stellt sicher:
+    - AP triggert -> Text existiert (einmalig würfeln)
+    - AP triggert NICHT -> Text wird entfernt (falls vorhanden)
+    """
+    egg_map = data.get("easter_egg_texts")
+    if not isinstance(egg_map, dict):
+        egg_map = {}
+
+    key = str(int(user_id))
+
+    if _ap_triggers_easter_egg(ap_val):
+        # existiert schon? dann behalten, sonst würfeln
+        if key in egg_map and str(egg_map.get(key) or "").strip():
+            return str(egg_map[key])
+        txt = random.choice(
+            EASTER_EGG_TEXT_POOL) if EASTER_EGG_TEXT_POOL else "✨"
+        egg_map[key] = txt
+        data["easter_egg_texts"] = egg_map
+        return txt
+
+    # triggert nicht -> entfernen
+    if key in egg_map:
+        egg_map.pop(key, None)
+        data["easter_egg_texts"] = egg_map
+    return None
 
 
 def _fmt_player_with_ap_and_egg(mention: str, ap_val: Optional[str], egg_text: Optional[str]) -> str:
@@ -864,14 +979,17 @@ class DetailsModal(discord.ui.Modal):
         self.session = session
         self.defaults = defaults or {}
         current_own_ap = self.defaults.get("own_ap") or ""
-        self.own_ap = discord.ui.TextInput(
-            label="Deine AP (Pflicht)",
-            placeholder="z.B. 305",
-            required=True if session.mode == "create" else False,
-            max_length=10,
-            default=str(current_own_ap) if current_own_ap else None,
-        )
-        self.add_item(self.own_ap)
+        # ✅ AP nur im Create-Wizard anzeigen (Edit bekommt AP separat als Button)
+        if session.mode == "create":
+            self.own_ap = discord.ui.TextInput(
+                label="Deine AP",
+                placeholder="z.B. 301",
+                required=True,
+                default=str(session.own_ap or ""),
+                max_length=10,
+            )
+        if hasattr(self, "own_ap"):
+            self.add_item(self.own_ap)
 
         is_pilafe = session.category == "pilafe"
 
@@ -921,7 +1039,7 @@ class DetailsModal(discord.ui.Modal):
         if cat in ("atoraxxion", "altar"):
             req_label = "Gewünschte AP (optional)"
             # current_req kommt ggf. aus defaults/req_default (bei atto oft leer) – das ist ok
-            req_placeholder = "z.B. 300+ (oder 305+)" if not current_req else f"Empfohlen: {current_req}"
+            req_placeholder = "z.B. 300+ (oder 301+)" if not current_req else f"Empfohlen: {current_req}"
 
         self.req_text = discord.ui.TextInput(
             label=req_label,
@@ -953,34 +1071,54 @@ class DetailsModal(discord.ui.Modal):
             self.add_item(self.notes)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Modal immer zuerst sauber beantworten -> Modal schließt zuverlässig
+        # ✅ NICHT sofort defer() – erst validieren!
+
+        def _invalid_number(msg: str):
+            return interaction.response.send_message(
+                msg,
+                ephemeral=True,
+                view=_ReopenModalView(lambda: type(self)(
+                    self.cog, self.session, defaults=self.defaults)),
+            )
+
+        # ---------- AP ----------
+        own_ap_val = str(self.own_ap.value).strip(
+        ) if hasattr(self, "own_ap") else ""
+
+        # Create: Pflicht
+        if self.session.mode == "create" and not own_ap_val:
+            await _invalid_number("❌ **AP ist Pflicht.** Bitte nur Zahlen eintragen (z.B. `301`).")
+            return
+
+        # Wenn gesetzt: Zahlenformat prüfen
+        if own_ap_val:
+            ap_int = _parse_int_strict(own_ap_val)
+            if ap_int is None:
+                await _invalid_number("❌ **AP ungültig.** Beispiele: `300`, `396`, `250`, ...")
+                return
+            # ✅ Speichern wie bisher als digits-only string (kompatibel zu deinem Restcode)
+            self.session.own_ap = str(ap_int)
+
+        # ---------- PilaFe Menge ----------
+        if self.session.category == "pilafe":
+            raw = str(self.scroll_amount.value).strip()
+
+            if self.session.mode == "create" and not raw:
+                await _invalid_number("❌ **Bei Pila Fe ist die Menge Pflicht.**")
+                return
+
+            if raw:
+                amt = _parse_int_strict(raw)
+                if amt is None:
+                    await _invalid_number("❌ **Menge ungültig.** Erlaubt: `10`, `1.000`, `1 000`, `1,000`.")
+                    return
+                self.session.scroll_amount = str(amt)
+
+        # ✅ ab hier "acknowledge" (Modal schließt zuverlässig)
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
-
-        own_ap_val = str(self.own_ap.value).strip(
-        ) if hasattr(self, "own_ap") else ""
-        if self.session.mode == "create":
-            if not own_ap_val:
-                await self.cog._ephemeral_notice(interaction, "AP ist Pflicht.", ephemeral=True)
-                return
-            self.session.own_ap = own_ap_val
-        else:
-            # im Edit-Mode optional übernehmen, wenn gesetzt
-            if own_ap_val:
-                self.session.own_ap = own_ap_val
-
-        # Session-Felder setzen
-        if self.session.category == "pilafe" and self.session.mode == "create":
-            if not str(self.scroll_amount.value).strip():
-                await self.cog._ephemeral_notice(interaction, "Bei Pila Fe ist die Menge Pflicht.", ephemeral=True)
-                return
-            self.session.scroll_amount = str(self.scroll_amount.value).strip()
-        elif self.session.category == "pilafe":
-            val = str(self.scroll_amount.value).strip()
-            self.session.scroll_amount = val if val else (
-                self.defaults.get("scroll_amount") or None)
 
         duration_val = str(self.duration_text.value).strip()
         start_val = str(self.start_text.value).strip()
@@ -993,7 +1131,7 @@ class DetailsModal(discord.ui.Modal):
             self.session.req_text = req_val or None
             self.session.notes = notes_val or None
         else:
-            # Edit: Nur überschreiben, wenn User etwas eingibt
+            # Edit: nur überschreiben, wenn User etwas eingibt
             if duration_val != "":
                 self.session.duration_text = duration_val
             if start_val != "":
@@ -1014,6 +1152,113 @@ class DetailsModal(discord.ui.Modal):
         await self.cog._apply_edit_details(base_interaction, self.session)
 
 
+class _ReopenModalView(discord.ui.View):
+    def __init__(self, modal_factory, *, timeout: int = 60):
+        super().__init__(timeout=timeout)
+        self._modal_factory = modal_factory
+
+    @discord.ui.button(label="Eingabe korrigieren", style=discord.ButtonStyle.primary, emoji="✏️")
+    async def reopen(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.send_modal(self._modal_factory())
+        except discord.InteractionResponded:
+            await interaction.followup.send_modal(self._modal_factory())
+
+
+class EditDetailsModal(discord.ui.Modal):
+    def __init__(self, cog: "Gruppensuche", session: WizardSession):
+        super().__init__(title="Details zur Gruppensuche")
+        self.cog = cog
+        self.session = session
+
+        # ⚠️ KEIN own_ap hier!
+
+        self.duration = discord.ui.TextInput(
+            label="Geplante Dauer",
+            placeholder="z.B. 30min, 90min, 2h",
+            required=False,
+            max_length=50,
+            default=str(session.duration_text or ""),
+        )
+        self.start = discord.ui.TextInput(
+            label="Startzeit",
+            placeholder="z.B. jetzt, 20Uhr, später",
+            required=False,
+            max_length=60,
+            default=str(session.start_text or ""),
+        )
+        self.desired_ap = discord.ui.TextInput(
+            label="Gewünschte AP (optional)",
+            placeholder="z.B. 300+ (oder 301+)",
+            required=False,
+            max_length=32,
+            default=str(session.req_text or ""),
+        )
+        self.note = discord.ui.TextInput(
+            label="Optionale Notizen",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=800,
+            default=str(session.notes or ""),
+        )
+
+        self.add_item(self.duration)
+        self.add_item(self.start)
+        self.add_item(self.desired_ap)
+        self.add_item(self.note)
+
+        # PilaFe: Scroll-Menge (editierbar) -> nur wenn Kategorie pilafe
+        if (session.category or "").lower() == "pilafe":
+            self.scroll_amount = discord.ui.TextInput(
+                label="Menge an Schriftrollen",
+                placeholder="z.B. 1000",
+                required=True,
+                max_length=16,
+                default=str(session.scroll_amount or ""),
+            )
+            self.add_item(self.scroll_amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # numeric check: scroll_amount (falls vorhanden)
+        if hasattr(self, "scroll_amount"):
+            amt = _parse_int_strict(getattr(self, "scroll_amount").value)
+            if amt is None:
+                await interaction.response.send_modal(EditDetailsModal(self.cog, self.session))
+                return
+            self.session.scroll_amount = int(amt)
+
+        self.session.duration_text = str(self.duration.value or "").strip()
+        self.session.start_text = str(self.start.value or "").strip()
+        self.session.req_text = str(self.desired_ap.value or "").strip()
+        self.session.notes = str(self.note.value or "").strip()
+
+        await self.cog._apply_edit_details(interaction, self.session)
+
+
+class APAdjustModal(discord.ui.Modal):
+    def __init__(self, cog: "Gruppensuche", message_id: int):
+        super().__init__(title="AP anpassen")
+        self.cog = cog
+        self.message_id = int(message_id)
+
+        self.ap_value = discord.ui.TextInput(
+            label="Deine AP (nur Zahlen)",
+            placeholder="z.B. 301",
+            required=True,
+            max_length=16,
+        )
+        self.add_item(self.ap_value)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ap_val = _parse_int_strict(self.ap_value.value)
+        if ap_val is None:
+            # Modal direkt erneut öffnen (so “fühlt” es sich wie ein Feld-Fehler an)
+            await interaction.response.send_modal(APAdjustModal(self.cog, self.message_id))
+            return
+
+        await self.cog._apply_ap_adjust(interaction, self.message_id, ap_val)
+
+
 class JoinApModal(discord.ui.Modal):
     def __init__(self, cog, on_done):
         super().__init__(title="AP bei Anmeldung")
@@ -1022,26 +1267,25 @@ class JoinApModal(discord.ui.Modal):
 
         self.ap = discord.ui.TextInput(
             label="Deine AP (Pflicht)",
-            placeholder="z.B. 305",
+            placeholder="z.B. 301",
             required=True,
-            max_length=10,
+            max_length=16,
         )
         self.add_item(self.ap)
 
     async def on_submit(self, interaction: discord.Interaction):
-        val = str(self.ap.value).strip()
-
-        # ✅ immer sofort acknowledgen (Modal zuverlässig schließen)
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except discord.InteractionResponded:
-            pass
-
-        if not val:
-            await self.cog._ephemeral_notice(interaction, "AP ist Pflicht.", ephemeral=True)
+        raw = str(self.ap.value).strip()
+        ap_int = _parse_int_strict(raw)
+        if ap_int is None:
+            await interaction.response.send_message(
+                "❌ **AP ungültig.** Erlaubt: `3245`, `3.245`, `3 245`, `3,245`.",
+                ephemeral=True,
+                view=_ReopenModalView(
+                    lambda: JoinApModal(self.cog, self.on_done)),
+            )
             return
 
-        await self.on_done(interaction, val)
+        await self.on_done(interaction, str(ap_int))
 
 
 # =========================
@@ -1074,13 +1318,12 @@ class StartSelect(discord.ui.Select):
             ))
 
         # Spots nur wenn Master an + mindestens ein Spot an
-        if FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN):
+        if FEATURE_SPOTS and (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN or FEATURE_SPOTS_EDANIA):
             options.append(discord.SelectOption(
-                label="Gruppenspots (Mirumok / Gyfin / Olun)",
+                label="Gruppenspots (Mirumok / Gyfin / Olun / Edania)",
                 value="spots",
                 emoji=CHEER_EMOJI,
             ))
-
         if FEATURE_PILAFE:
             options.append(discord.SelectOption(
                 label="Pila Fe Schriftrollen",
@@ -1149,12 +1392,13 @@ class StartView(WizardBaseView):
 
         # Gruppenspots (Master + mindestens ein Spot aktiv)
         spots_enabled = FEATURE_SPOTS and (
-            FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN)
+            FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN or FEATURE_SPOTS_EDANIA)
         if spots_enabled:
-            lines.append("• **Gruppenspots (Mirumok / Gyfin / Olun)**")
+            lines.append(
+                "• **Gruppenspots (Mirumok / Gyfin / Olun / Edania)**")
         else:
             lines.append(
-                "• ~~Gruppenspots (Mirumok / Gyfin / Olun)~~ *(Wartung)*")
+                "• ~~Gruppenspots (Mirumok / Gyfin / Olun / Edania)~~ *(Wartung)*")
 
         # Pila Fe
         if FEATURE_PILAFE:
@@ -1538,6 +1782,8 @@ class SpotSelectView(WizardBaseView):
             active_spots.append("gyfin")
         if FEATURE_SPOTS_OLUN:
             active_spots.append("olun")
+        if FEATURE_SPOTS_EDANIA:
+            active_spots.append("edania")
 
         # Keine Spots aktiv -> zurück ins Start-Menü
         if not active_spots:
@@ -1566,6 +1812,12 @@ class SpotSelectView(WizardBaseView):
                 label="Olun", style=discord.ButtonStyle.primary, row=0)
             olun_btn.callback = self._pick_olun
             self.add_item(olun_btn)
+
+        if FEATURE_SPOTS_EDANIA:
+            edania_btn = discord.ui.Button(
+                label="Edania", style=discord.ButtonStyle.primary, row=0)
+            edania_btn.callback = self._pick_edania
+            self.add_item(edania_btn)
 
         self.add_item(build_back_button(
             "Kategorie", BackTarget.START, self, row=1))
@@ -1609,6 +1861,11 @@ class SpotSelectView(WizardBaseView):
                 f"• Dehkia 2 → Empfohlen mind. {OLUN_REQ['dehkia2']} | {OLUN_TOTAL_AP['dehkia2']}\n"
             )
 
+        if FEATURE_SPOTS_EDANIA:
+            lines.append(
+                f"**Edania**\n• Empfohlen mind. {SPOT_REQ['edania']}\n• {SPOT_TOTAL_AP['edania']}\n"
+            )
+
         # Wenn nur einer aktiv ist, Text sauber halten
         desc = "\n".join(lines).strip()
 
@@ -1623,6 +1880,16 @@ class SpotSelectView(WizardBaseView):
             return
         self.session.spot_key = "olun"
         self.session.olun_tier = None  # wichtig: Stufe danach wählen
+        await self.cog._goto_next(interaction, self.session, Step.SPOT)
+
+    async def _pick_edania(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+        if not FEATURE_SPOTS_EDANIA:
+            await self.cog._ephemeral_notice(interaction, "Edania ist aktuell deaktiviert.", ephemeral=True)
+            return
+        self.session.spot_key = "edania"
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
 
@@ -1897,21 +2164,37 @@ class PartySizeSelect(discord.ui.Select):
 
         await self.host_view.cog._apply_edit_max_players(interaction, self.host_view.session)
 
+# 1) PartySizeView: Minimum für Admins auf 1 runterziehen (für ALLES)
+
 
 class PartySizeView(WizardBaseView):
-    def __init__(self, cog: "Gruppensuche", session: WizardSession, current: Optional[int] = None):
+    def __init__(
+        self,
+        cog: "Gruppensuche",
+        session: WizardSession,
+        current: Optional[int] = None,
+        *,
+        allow_one: bool = False,
+    ):
         super().__init__(cog, session)
+        self.allow_one = bool(allow_one)
 
         mn, mx = _allowed_party_range(session.category or "", session.spot_key)
-        self.add_item(PartySizeSelect(self, mn, mx, current=current))
 
-        # ✅ Einheitliches Wizard-Erlebnis:
-        # Nach "Tag" kommt "Max. Teilnehmer" (Party) – daher muss "Zurück" von Party IMMER zurück zu "Tag".
+        # ✅ Admin-only: 1 immer erlauben (kategorieneutral)
+        if self.allow_one:
+            mn = 1
+
+        self.add_item(PartySizeSelect(self, mn, mx, current=current))
         self.add_item(build_back_button("Tag", BackTarget.DAY, self, row=1))
 
     def embed(self) -> discord.Embed:
         mn, mx = _allowed_party_range(
             self.session.category or "", self.session.spot_key)
+
+        # ✅ Text soll die gleiche Range zeigen wie das Select
+        if self.allow_one:
+            mn = 1
 
         if self.session.category == "muhhelfer":
             diff = "Schwer" if self.session.difficulty == "schwer" else "Normal"
@@ -1990,6 +2273,7 @@ class EditMenuView(WizardBaseView):
     def __init__(self, cog: "Gruppensuche", session: WizardSession, post_data: dict):
         super().__init__(cog, session)
         self.post_data = post_data
+        self.message_id = int(session.edit_message_id or 0)
 
         tag_btn = discord.ui.Button(
             label="Tag ändern", style=discord.ButtonStyle.secondary, row=0)
@@ -2018,6 +2302,13 @@ class EditMenuView(WizardBaseView):
         back_btn.callback = self._back
         self.add_item(back_btn)
 
+    @discord.ui.button(label="AP anpassen", style=discord.ButtonStyle.secondary, row=1)
+    async def edit_ap(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.send_modal(APAdjustModal(self.cog, self.message_id))
+        except discord.InteractionResponded:
+            await interaction.followup.send_modal(APAdjustModal(self.cog, self.message_id))
+
     async def _tag(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
@@ -2026,15 +2317,22 @@ class EditMenuView(WizardBaseView):
         self.session.wizard_interaction = interaction
         await self.cog._send_day_selection(interaction, self.session)
 
+    # --- EditMenuView._size: allow_one berechnen und übergeben ---
     async def _size(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
-        # ✅ wichtig
+
         self.session.wizard_interaction = interaction
 
         current = int(self.post_data.get("max_players", 2))
-        view = PartySizeView(self.cog, self.session, current=current)
+
+        member = interaction.user if isinstance(
+            interaction.user, discord.Member) else None
+        allow_one = bool(member and _is_admin_only(member))
+
+        view = PartySizeView(self.cog, self.session,
+                             current=current, allow_one=allow_one)
         await self.cog._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _details(self, interaction: discord.Interaction):
@@ -2302,10 +2600,11 @@ class PublicPostView(discord.ui.View):
         await self.cog._ping_wait(interaction, self.message_id, data)
 
     async def _on_edit(self, interaction: discord.Interaction):
-        data = await self._ensure_owner_or_mod(interaction)
-        if not data:
+        if not interaction.guild:
             return
-        await self.cog._start_edit_flow(interaction, self.message_id, data)
+
+        mid = int(self.message_id)
+        await self.cog._start_edit_flow(interaction, mid)
 
     async def _on_close(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
@@ -2378,7 +2677,9 @@ class Gruppensuche(commands.Cog):
             self._locks_gc_loop())
         # --- Dashboard Debounce ---
         self._dashboard_refresh_tasks: Dict[int, asyncio.Task] = {}
+        self._dashboard_refresh_pending: Dict[int, bool] = {}
         self._dashboard_refresh_delay = 2  # Sekunden
+        self._dashboard_refresh_retry_delay = 5  # Sekunden
         self._startup_task: Optional[asyncio.Task] = self.bot.loop.create_task(
             self._startup_register_views())
         self._reminder_task: Optional[asyncio.Task] = self.bot.loop.create_task(
@@ -2386,6 +2687,10 @@ class Gruppensuche(commands.Cog):
         # --- Edit Notify Debounce (per Post) ---
         self._edit_notify_tasks: Dict[int, asyncio.Task] = {}
         self._edit_notify_delay = 45  # Sekunden
+
+        # --- Kurzer Interaction-Guard gegen Doppelklicks / Duplicate Interactions ---
+        self._interaction_guard: Dict[str, float] = {}
+        self._interaction_guard_window = 2.5
 
     def cog_unload(self):
         if getattr(self, "_locks_gc_task", None):
@@ -2398,6 +2703,80 @@ class Gruppensuche(commands.Cog):
             if t and not t.done():
                 t.cancel()
         self._edit_notify_tasks.clear()
+
+    def _log_console(self, level: str, module: str, event: str, **kwargs):
+        base = f"[KUHMUH][{module.upper()}][{event.upper()}][{level.upper()}]"
+        if kwargs:
+            details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+            getattr(log, level.lower(), log.info)(f"{base} {details}")
+        else:
+            getattr(log, level.lower(), log.info)(base)
+
+    async def _log_event(
+        self,
+        guild: discord.Guild,
+        level: str,
+        module: str,
+        event: str,
+        description: str,
+        *,
+        channel: Optional[discord.TextChannel] = None,
+    ):
+        self._log_console(level, module, event, guild_id=guild.id)
+
+        ch = guild.get_channel(LOG_CHANNEL_ID)
+        if not isinstance(ch, discord.TextChannel):
+            return
+
+        emoji_map = {
+            "info": "ℹ️",
+            "warn": "⚠️",
+            "error": "❌",
+        }
+        emoji = emoji_map.get(level.lower(), "ℹ️")
+
+        embed = discord.Embed(
+            title=f"{emoji} Kuhmuh System Log",
+            description=description + "\n\nTechnische Details siehe Serverkonsole.",
+            color=discord.Color.orange() if level.lower() != "error" else discord.Color.red(),
+        )
+
+        embed.add_field(name="Modul", value=module, inline=True)
+        embed.add_field(name="Event", value=event, inline=True)
+        embed.add_field(name="Server", value=guild.name, inline=True)
+
+        if channel:
+            embed.add_field(name="Channel", value=channel.mention, inline=True)
+
+        embed.set_footer(text="Kuhmuh Bot • Systemmeldung")
+
+        content = None
+        if level.lower() == "error" and DEV_ALERT_ROLE_ID:
+            content = f"<@&{DEV_ALERT_ROLE_ID}>"
+
+        try:
+            await ch.send(
+                content=content,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
+        except Exception:
+            pass
+
+    def _log_info(self, log_category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.info(f"[Kuhmuh-Gruppensuche][{log_category}] {message}{suffix}")
+
+    def _log_warning(self, log_category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.warning(f"[Kuhmuh-Gruppensuche][{log_category}] {message}{suffix}")
+
+    def _log_error(self, log_category: str, message: str, **fields):
+        parts = [f"{k}={v}" for k, v in fields.items()]
+        suffix = f" | {' '.join(parts)}" if parts else ""
+        log.error(f"[Kuhmuh-Gruppensuche][{log_category}] {message}{suffix}")
 
     async def _startup_register_views(self):
         await self.bot.wait_until_red_ready()
@@ -2433,6 +2812,43 @@ class Gruppensuche(commands.Cog):
     def _expire_session(self, user_id: int):
         if user_id in self._sessions:
             del self._sessions[user_id]
+
+    def _interaction_guard_key(
+        self,
+        *,
+        action: str,
+        user_id: int,
+        message_id: int = 0,
+    ) -> str:
+        return f"{action}:{int(user_id)}:{int(message_id)}"
+
+    def _interaction_guard_hit(
+        self,
+        *,
+        action: str,
+        user_id: int,
+        message_id: int = 0,
+    ) -> bool:
+        now_ts = _now_local().timestamp()
+        key = self._interaction_guard_key(
+            action=action,
+            user_id=user_id,
+            message_id=message_id,
+        )
+
+        last_ts = float(self._interaction_guard.get(key, 0.0))
+        if (now_ts - last_ts) < float(self._interaction_guard_window):
+            return True
+
+        self._interaction_guard[key] = now_ts
+
+        # kleine opportunistische Bereinigung
+        cutoff = now_ts - max(30.0, float(self._interaction_guard_window) * 4.0)
+        stale_keys = [k for k, ts in self._interaction_guard.items() if float(ts) < cutoff]
+        for stale in stale_keys:
+            self._interaction_guard.pop(stale, None)
+
+        return False
 
     def _lock_for(self, message_id: int) -> asyncio.Lock:
         mid = int(message_id)
@@ -2630,7 +3046,7 @@ class Gruppensuche(commands.Cog):
             if not FEATURE_SPOTS:
                 session.category = None
                 return Step.START
-            if not (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN):
+            if not (FEATURE_SPOTS_MIRUMOK or FEATURE_SPOTS_GYFIN or FEATURE_SPOTS_OLUN or FEATURE_SPOTS_EDANIA):
                 session.category = None
                 return Step.START
             # falls Spot schon gesetzt, aber Flag ist aus:
@@ -2641,6 +3057,9 @@ class Gruppensuche(commands.Cog):
                 session.spot_key = None
                 return Step.SPOT
             if session.spot_key == "olun" and not FEATURE_SPOTS_OLUN:
+                session.spot_key = None
+                return Step.SPOT
+            if session.spot_key == "edania" and not FEATURE_SPOTS_EDANIA:
                 session.spot_key = None
                 return Step.SPOT
 
@@ -2781,6 +3200,8 @@ class Gruppensuche(commands.Cog):
             active.append("gyfin")
         if FEATURE_SPOTS_OLUN:
             active.append("olun")
+        if FEATURE_SPOTS_EDANIA:
+            active.append("edania")
 
         if len(active) == 1 and session.mode == "create":
             session.spot_key = active[0]
@@ -2791,7 +3212,12 @@ class Gruppensuche(commands.Cog):
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _send_party_size(self, interaction: discord.Interaction, session: WizardSession):
-        view = PartySizeView(self, session)
+        member = interaction.user if isinstance(
+            interaction.user, discord.Member) else None
+        allow_one = bool(member and _is_admin_only(member))  # ✅ gilt für alles
+
+        view = PartySizeView(
+            self, session, current=session.max_players, allow_one=allow_one)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _send_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession, back_target: str = BackTarget.START):
@@ -2960,9 +3386,40 @@ class Gruppensuche(commands.Cog):
     async def _get_search(self, message_id: int) -> Optional[dict]:
         guild = self.bot.get_guild(GUILD_ID)
         if guild is None:
+            self._log_warning(
+                "STORAGE",
+                "guild not available while reading search",
+                message_id=message_id,
+                guild_id=GUILD_ID,
+            )
             return None
+
         searches = await self.config.guild(guild).searches()
-        return (searches or {}).get(str(message_id))
+        data = (searches or {}).get(str(message_id))
+
+        if data is None:
+            self._log_warning(
+                "STORAGE",
+                "search entry missing",
+                message_id=message_id,
+                guild_id=guild.id,
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "warn",
+                    "Gruppensuche",
+                    "Search Entry Missing",
+                    (
+                        "Ein Gruppensuche-Datensatz konnte nicht gefunden werden.\n\n"
+                        "Der Post existiert möglicherweise noch, der zugehörige Storage-Eintrag fehlt jedoch.\n"
+                        "Bitte Post und Storage prüfen."
+                    ),
+                )
+            except Exception:
+                pass
+
+        return data
 
     async def _set_search(self, message_id: int, data: dict):
         guild = self.bot.get_guild(GUILD_ID)
@@ -2988,6 +3445,21 @@ class Gruppensuche(commands.Cog):
         # Debounced Refresh starten
         self._schedule_dashboard_refresh(int(guild_id))
 
+    async def _is_owner_or_mod(self, interaction: discord.Interaction, message_id: int) -> bool:
+        data = await self._get_search(int(message_id))
+        if not data:
+            return False
+
+        uid = int(interaction.user.id)
+        owner_id = int(data.get("owner_id") or 0)
+        if uid == owner_id:
+            return True
+
+        member = _member_from_interaction(interaction)
+        if member and _has_mod_rights(member):
+            return True
+
+        return False
     # =========================
     # Edit Notifications (DM, debounced)
     # =========================
@@ -3132,27 +3604,9 @@ class Gruppensuche(commands.Cog):
 
         jump = self._build_jump(guild, data)
 
-        # Änderungen als Lines (vorher -> nachher)
-        lines: list[str] = []
-        for _, obj in pending.items():
-            if not isinstance(obj, dict):
-                continue
-            label = str(obj.get("label") or "Änderung")
-            old = self._truncate(self._norm_text(obj.get("old")), 180)
-            new = self._truncate(self._norm_text(obj.get("new")), 180)
-            if old == new:
-                continue
-            lines.append(f"• **{label}:** {old} → {new}")
+        # --- Kuhmuh-DM (einheitlich + hübsch + konsistente Emojis) ---
+        cat_emoji = _category_emoji(data)
 
-        if not lines:
-            # nichts wirklich geändert (oder alles zurückgedreht) -> pending clear
-            en["pending"] = {}
-            en["last_sent_at"] = int(_now_local().timestamp())
-            data["edit_notify"] = en
-            await self._set_search(int(message_id), data)
-            return
-
-        # --- Änderungs-Header (einheitlich, wiedererkennbar) ---
         cat = str(data.get("category", "") or "").lower()
         change_type = "Gruppensuche"
         if cat == "muhhelfer":
@@ -3160,26 +3614,78 @@ class Gruppensuche(commands.Cog):
             diff_label = "Schwer" if diff == "schwer" else "Normal"
             change_type = f"Muhhelfer ({diff_label})"
         elif cat == "spots":
-            spot = str(data.get("spot_key", "") or "")
+            spot = str(data.get("spot_key", "") or "").lower()
             if spot == "olun":
                 tier = str(data.get("olun_tier", "normal")).lower()
                 tier_label = _olun_tier_label(tier)
-                change_type = f"Spots – Olun ({tier_label})"
+                change_type = f"Gruppenspots – Olun ({tier_label})"
             else:
-                change_type = f"Spots – {_spot_name(spot) if spot else '—'}"
+                change_type = f"Gruppenspots – {_spot_name(spot) if spot else '—'}"
         elif cat == "pilafe":
             change_type = "Pila Fe"
+        elif cat == "atoraxxion":
+            change_type = "Atoraxxion"
+        elif cat == "altar":
+            change_type = "Altar des Blutes"
+
+        def _pretty(v: object) -> str:
+            """Kurze, saubere Anzeige. Zahlen DE-formatiert wenn möglich."""
+            s = self._norm_text(v)
+            # reine Zahlen hübsch formatieren
+            try:
+                if str(s).strip().isdigit():
+                    return _fmt_number(int(s))
+            except Exception:
+                pass
+            return s
+
+        # Änderungen: Label normal, nur neuer Wert fett
+        lines: list[str] = []
+        CHANGE_EMOJIS = {
+            "Tag": "📅",
+            "Startzeit": "⏰",
+            "Geplante Dauer": "⌛",
+            "Max. Teilnehmer": "👥",
+            "Gewünschte AP": "⚔️",
+            "Host AP": "💪",
+            "Notiz": "📝",
+            "Run": "🏛️",
+            "Menge": "📜",
+        }
+        for _, obj in pending.items():
+            if not isinstance(obj, dict):
+                continue
+
+            label = str(obj.get("label") or "Änderung")
+            old = self._truncate(self._norm_text(obj.get("old")), 180)
+            new = self._truncate(self._norm_text(obj.get("new")), 180)
+
+            if old == new:
+                continue
+
+            emoji = CHANGE_EMOJIS.get(label, "•")
+
+            lines.append(
+                f"{emoji} {label}: {old} → **{new}**"
+            )
+
+        if not lines:
+            en["pending"] = {}
+            en["last_sent_at"] = int(_now_local().timestamp())
+            data["edit_notify"] = en
+            await self._set_search(int(message_id), data)
+            return
 
         header = (
-            "✏️ **Änderungs-Header**\n"
-            f"**Typ:** {change_type}\n"
-            f"**Tag:** {day_str}\n"
-            f"**Start:** {start_text}\n"
-            f"**Frei:** {free}\n"
-            f"**Link:** {jump}\n"
+            f"{cat_emoji} **Die Herde hat etwas angepasst…** {MUHKUH_EMOJI}\n\n"
+            f"Typ: {change_type}\n"
+            f"📅 Tag: {day_str}\n"
+            f"⏰ Start: {start_text or '—'}\n"
+            f"👥 Frei: {_fmt_number(free)}\n"
+            f"🔗 {jump}\n"
         )
-
-        text = header + "\n" + "\n".join(lines)
+        changes_header = "\n── Geänderte Werte ──\n"
+        text = header + changes_header + "\n".join(lines)
 
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         failed: list[int] = []
@@ -3215,33 +3721,56 @@ class Gruppensuche(commands.Cog):
         await self._set_search(int(message_id), data)
 
     def _schedule_dashboard_refresh(self, guild_id: int):
-        # Wenn schon ein Task läuft → abbrechen
-        old_task = self._dashboard_refresh_tasks.get(guild_id)
-        if old_task and not old_task.done():
-            old_task.cancel()
+        guild_id = int(guild_id)
+        self._dashboard_refresh_pending[guild_id] = True
 
-        async def _debounced():
+        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][SCHEDULE] guild_id={guild_id}")
+
+        existing = self._dashboard_refresh_tasks.get(guild_id)
+        if existing and not existing.done():
+            return
+
+        async def _runner():
             try:
-                await asyncio.sleep(self._dashboard_refresh_delay)
+                while self._dashboard_refresh_pending.get(guild_id, False):
+                    self._dashboard_refresh_pending[guild_id] = False
 
-                dash = self.bot.get_cog("Gruppenübersicht")
-                if dash:
-                    await dash.force_refresh_all(int(guild_id))
+                    await asyncio.sleep(self._dashboard_refresh_delay)
+
+                    try:
+                        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][START] guild_id={guild_id}")
+
+                        dash = self.bot.get_cog("Gruppenübersicht")
+                        if dash is None:
+                            log.warning(f"[KUHMUH][DASHBOARD][DISPATCH][NO COG] guild_id={guild_id}")
+                            self._dashboard_refresh_pending[guild_id] = True
+                            await asyncio.sleep(self._dashboard_refresh_retry_delay)
+                            continue
+
+                        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][COG FOUND] guild_id={guild_id}")
+
+                        await dash.force_refresh_all(guild_id)
+
+                        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][DONE] guild_id={guild_id}")
+
+                    except Exception as e:
+                        log.exception(
+                            f"[KUHMUH][DASHBOARD][DISPATCH][ERROR] guild_id={guild_id} error={e}"
+                        )
+                        self._dashboard_refresh_pending[guild_id] = True
+                        await asyncio.sleep(self._dashboard_refresh_retry_delay)
+
             except asyncio.CancelledError:
+                log.info(f"[KUHMUH][DASHBOARD][DISPATCH][CANCELLED] guild_id={guild_id}")
                 return
-            except Exception:
-                pass
+            finally:
+                self._dashboard_refresh_tasks.pop(guild_id, None)
+                self._dashboard_refresh_pending.pop(guild_id, None)
 
-        task = self.bot.loop.create_task(_debounced())
+        task = self.bot.loop.create_task(_runner())
         self._dashboard_refresh_tasks[guild_id] = task
 
-    async def _save_refresh_dispatch(
-        self,
-        data: dict,
-        *,
-        refresh_public: bool = True,
-        refresh_dashboard: bool = True,
-    ):
+    async def _save_refresh_dispatch(self, data: dict):
         try:
             now_ts = int(_now_local().timestamp())
             data["updated_at"] = now_ts
@@ -3250,13 +3779,18 @@ class Gruppensuche(commands.Cog):
             if mid:
                 await self._set_search(mid, data)
 
-            if refresh_public and mid:
+        except Exception:
+            pass
+
+    async def _post_save_refresh_dispatch(self, data: dict):
+        try:
+            mid = int(data.get("message_id", 0))
+            if mid:
                 await self._refresh_public_message(data)
 
-            if refresh_dashboard:
-                gid = int(data.get("guild_id", 0))
-                if gid:
-                    self._dispatch_dashboard_update(gid)
+            gid = int(data.get("guild_id", 0))
+            if gid:
+                self._dispatch_dashboard_update(gid)
 
         except Exception:
             pass
@@ -3365,6 +3899,8 @@ class Gruppensuche(commands.Cog):
                     emoji = GYFIN_EMOJI
                 elif spot == "olun":
                     emoji = OLUN_EMOJI
+                elif spot == "edania":
+                    emoji = EDANIA_EMOJI
                 else:
                     emoji = CHEER_EMOJI
                 title = f"{emoji} Gruppensuche – {_spot_name(spot)}"
@@ -3561,10 +4097,16 @@ class Gruppensuche(commands.Cog):
     async def _refresh_public_post(self, *, guild: discord.Guild, channel: discord.abc.Messageable, message_id: int) -> None:
         """Baut Embed + View neu und editiert den Public-Post."""
         mid = int(message_id)
-        data = await self.config.custom("POST", str(mid)).all()
+        data = await self._get_search(mid)
+        if data is None:
+            return
 
         embed = await self._build_public_embed(guild, data)
-        view = PublicPostView(self, mid)
+        view = ClosedPostView(self, mid) if bool(
+            data.get("is_closed", False)) else PublicPostView(self, mid)
+
+        if isinstance(view, PublicPostView):
+            await self._apply_dynamic_button_labels(view, data)
 
         msg_obj = await channel.fetch_message(mid)
         await msg_obj.edit(embed=embed, view=view)
@@ -3573,13 +4115,18 @@ class Gruppensuche(commands.Cog):
         mid = int(message_id)
 
         async with self._lock_for(mid):
-            data = await self.config.custom("POST", str(mid)).all()
+            data = await self._get_search(mid)
+            if data is None:
+                return
+
             if bool(data.get("is_closed", False)):
                 return
 
-            await self.config.custom("POST", str(mid)).is_closed.set(True)
+            data["is_closed"] = True
+            data["updated_at"] = int(_now_local().timestamp())
+            await self._set_search(mid, data)
 
-            # Post direkt refreshen (zeigt "Geschlossen" + Buttons je nach View-Logik)
+            # Post direkt refreshen (zeigt "Geschlossen" + passende View)
             try:
                 await self._refresh_public_post(guild=guild, channel=channel, message_id=mid)
             except Exception:
@@ -3592,29 +4139,120 @@ class Gruppensuche(commands.Cog):
         guild = self.bot.get_guild(int(data.get("guild_id", 0)))
         if guild is None:
             return
+
         channel = guild.get_channel(int(data.get("channel_id", 0)))
         if not isinstance(channel, discord.TextChannel):
+            self._log_warning(
+                "REFRESH",
+                "public post refresh aborted because channel is unavailable",
+                guild_id=guild.id,
+                channel_id=int(data.get("channel_id", 0)),
+                message_id=int(data.get("message_id", 0)),
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Public Post Refresh Failed",
+                    (
+                        "Ein Gruppensuche-Post konnte nicht aktualisiert werden.\n\n"
+                        "Der Ziel-Channel war nicht verfügbar.\n"
+                        "Bitte Post und Channel prüfen."
+                    ),
+                )
+            except Exception:
+                pass
             return
 
         mid = int(data.get("message_id", 0))
         if mid == 0:
+            self._log_warning(
+                "REFRESH",
+                "public post refresh aborted because message id is missing",
+                guild_id=guild.id,
+                channel_id=channel.id,
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Public Post Refresh Failed",
+                    (
+                        "Ein Gruppensuche-Post konnte nicht aktualisiert werden.\n\n"
+                        "Die gespeicherte Message-ID fehlt.\n"
+                        "Bitte Post und Storage prüfen."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
             return
 
         try:
             msg = await channel.fetch_message(mid)
         except Exception:
+            self._log_warning(
+                "REFRESH",
+                "public post refresh failed because message fetch failed",
+                guild_id=guild.id,
+                channel_id=channel.id,
+                message_id=mid,
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Public Post Refresh Failed",
+                    (
+                        "Ein Gruppensuche-Post konnte nicht aktualisiert werden.\n\n"
+                        "Die gespeicherte Nachricht konnte nicht geladen werden.\n"
+                        "Bitte prüfen, ob der Post noch existiert."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
             return
 
         embed = await self._build_public_embed(guild, data)
 
-        if bool(data.get("is_closed", False)):
-            view = ClosedPostView(self, mid)
-            await msg.edit(embed=embed, view=view)
-            return
+        try:
+            if bool(data.get("is_closed", False)):
+                view = ClosedPostView(self, mid)
+                await msg.edit(embed=embed, view=view)
+                return
 
-        view = PublicPostView(self, mid)
-        await self._apply_dynamic_button_labels(view, data)
-        await msg.edit(embed=embed, view=view)
+            view = PublicPostView(self, mid)
+            await self._apply_dynamic_button_labels(view, data)
+            await msg.edit(embed=embed, view=view)
+
+        except Exception:
+            self._log_warning(
+                "REFRESH",
+                "public post refresh failed during message edit",
+                guild_id=guild.id,
+                channel_id=channel.id,
+                message_id=mid,
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Public Post Refresh Failed",
+                    (
+                        "Ein Gruppensuche-Post konnte nicht aktualisiert werden.\n\n"
+                        "Die bestehende Nachricht konnte nicht bearbeitet werden.\n"
+                        "Bitte Post und Bot-Rechte prüfen."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
+            return
 
     async def _apply_dynamic_button_labels(self, view: discord.ui.View, data: dict):
         label = "Rollen-Ping"
@@ -3679,6 +4317,12 @@ class Gruppensuche(commands.Cog):
                 return
             if session.spot_key == "gyfin" and not FEATURE_SPOTS_GYFIN:
                 await self._ephemeral_notice(interaction, "Gyfin ist aktuell deaktiviert.")
+                return
+            if session.spot_key == "olun" and not FEATURE_SPOTS_OLUN:
+                await self._ephemeral_notice(interaction, "Olun ist aktuell deaktiviert.")
+                return
+            if session.spot_key == "edania" and not FEATURE_SPOTS_EDANIA:
+                await self._ephemeral_notice(interaction, "Edania ist aktuell deaktiviert.")
                 return
 
         if cat == "altar" and not FEATURE_ALTAR:
@@ -3791,16 +4435,85 @@ class Gruppensuche(commands.Cog):
         allowed = discord.AllowedMentions(
             roles=True, users=False, everyone=False)
 
-        msg = await channel.send(content=content, embed=embed, allowed_mentions=allowed)
-        data["message_id"] = msg.id
+        msg: Optional[discord.Message] = None
 
-        view = PublicPostView(self, msg.id)
-        await self._apply_dynamic_button_labels(view, data)   # ✅ HIER
-        await msg.edit(view=view)
-        self.bot.add_view(view)
+        try:
+            # 1) Discord-Post senden
+            msg = await channel.send(
+                content=content,
+                embed=embed,
+                allowed_mentions=allowed,
+            )
+            data["message_id"] = msg.id
+            self._log_info(
+                "CREATE",
+                "message created",
+                message_id=msg.id,
+                guild_id=guild.id,
+                channel_id=channel.id,
+                owner_id=owner_id,
+                category=session.category,
+            )
 
-        async with self.config.guild(guild).searches() as searches:
-            searches[str(msg.id)] = data
+            # 2) View vorbereiten und am Post setzen
+            view = PublicPostView(self, msg.id)
+            await self._apply_dynamic_button_labels(view, data)
+            await msg.edit(view=view)
+
+            # 3) Erst jetzt persistent speichern
+            async with self.config.guild(guild).searches() as searches:
+                searches[str(msg.id)] = data
+            self._log_info(
+                "CREATE",
+                "search entry saved",
+                message_id=msg.id,
+                guild_id=guild.id,
+                channel_id=channel.id,
+            )
+            # 4) View erst nach erfolgreichem Save registrieren
+            self.bot.add_view(view)
+
+        except Exception:
+            self._log_error(
+                "CREATE",
+                "create flow failed",
+                message_id=(msg.id if msg is not None else 0),
+                guild_id=guild.id,
+                channel_id=channel.id,
+                owner_id=owner_id,
+                category=session.category,
+            )
+
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Create Failed",
+                    (
+                        "Eine Gruppensuche konnte nicht vollständig erstellt werden.\n\n"
+                        "Der Bot hat versucht, den Vorgang zurückzurollen, damit kein unvollständiger Post bestehen bleibt."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
+
+            # Rollback:
+            # Wenn der Discord-Post schon existiert, aber Save/Edit scheitert,
+            # versuchen wir die Nachricht wieder zu entfernen, damit kein "toter" Post stehen bleibt.
+            if msg is not None:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+
+            await self._ephemeral_notice(
+                interaction,
+                "❌ Die Gruppensuche konnte nicht vollständig erstellt werden. Bitte versuche es erneut.",
+                ephemeral=True,
+            )
+            return
 
         self._dispatch_dashboard_update(guild.id)
 
@@ -3903,6 +4616,7 @@ class Gruppensuche(commands.Cog):
         for mid_str, data in (searches or {}).items():
             try:
                 mid = int(mid_str)
+                fresh: Optional[dict] = None
 
                 # schon geschlossen? -> nix tun
                 if bool(data.get("is_closed", False)):
@@ -3935,6 +4649,8 @@ class Gruppensuche(commands.Cog):
                     fresh["auto_closed_at"] = int(_now_local().timestamp())
 
                     await self._save_refresh_dispatch(fresh)
+
+                await self._post_save_refresh_dispatch(fresh)
 
             except Exception:
                 continue
@@ -4014,6 +4730,20 @@ class Gruppensuche(commands.Cog):
                 pass
 
     async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
+        if self._interaction_guard_hit(
+            action="join",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Deine letzte Anmeldung wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
+        data: Optional[dict] = None
+
         lock = self._lock_for(message_id)
         async with lock:
             data = await self._get_search(message_id)
@@ -4025,20 +4755,49 @@ class Gruppensuche(commands.Cog):
                 await self._ephemeral_notice(interaction, "Diese Suche ist geschlossen.")
                 return
 
+            ap_val = str(ap_val or "").strip()
+            if not ap_val or not ap_val.isdigit():
+                await self._ephemeral_notice(interaction, "Bitte nur Zahlen bei AP eintragen (z.B. 301).")
+                return
+
             uid = interaction.user.id
             participants: List[int] = list(data.get("participants") or [])
             waitlist: List[int] = list(data.get("waitlist") or [])
             max_players = int(data.get("max_players", 2))
 
+            # ✅ Wenn schon eingetragen: AP aktualisieren (Teilnehmer ODER Warteschlange)
             if uid in participants:
-                await self._ephemeral_notice(interaction, "Du bist bereits Teilnehmer.")
-                return
+                ap_map = data.get("participant_ap") or {}
+                ap_map[str(uid)] = ap_val
+                data["participant_ap"] = ap_map
+                _sync_easter_egg_text(data, uid, ap_val)
 
-            if uid in waitlist:
-                await self._ephemeral_notice(interaction, "Du bist bereits in der Warteschlange.")
-                return
+                if _ap_triggers_easter_egg(ap_val):
+                    _ensure_easter_egg_text(data, uid, ap_val)
+                else:
+                    egg_map = data.get("easter_egg_texts")
+                    if isinstance(egg_map, dict):
+                        egg_map.pop(str(uid), None)
+                        data["easter_egg_texts"] = egg_map
 
-            if len(participants) < max_players:
+                await self._save_refresh_dispatch(data)
+
+            elif uid in waitlist:
+                wl_map = data.get("waitlist_ap") or {}
+                wl_map[str(uid)] = ap_val
+                data["waitlist_ap"] = wl_map
+
+                if _ap_triggers_easter_egg(ap_val):
+                    _ensure_easter_egg_text(data, uid, ap_val)
+                else:
+                    egg_map = data.get("easter_egg_texts")
+                    if isinstance(egg_map, dict):
+                        egg_map.pop(str(uid), None)
+                        data["easter_egg_texts"] = egg_map
+
+                await self._save_refresh_dispatch(data)
+
+            elif len(participants) < max_players:
                 participants.append(uid)
                 data["participants"] = participants
 
@@ -4049,32 +4808,91 @@ class Gruppensuche(commands.Cog):
                 _ensure_easter_egg_text(data, uid, ap_val)
 
                 await self._save_refresh_dispatch(data)
-                await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
-                return
 
-            waitlist.append(uid)
-            data["waitlist"] = waitlist
-            data["updated_at"] = int(_now_local().timestamp())
+            else:
+                waitlist.append(uid)
+                data["waitlist"] = waitlist
+                data["updated_at"] = int(_now_local().timestamp())
 
-            wl_map = data.get("waitlist_ap") or {}
-            wl_map[str(uid)] = ap_val
-            data["waitlist_ap"] = wl_map
+                wl_map = data.get("waitlist_ap") or {}
+                wl_map[str(uid)] = ap_val
+                data["waitlist_ap"] = wl_map
 
-            _ensure_easter_egg_text(data, uid, ap_val)
+                _ensure_easter_egg_text(data, uid, ap_val)
 
-            await self._save_refresh_dispatch(data)
-            await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
+                await self._save_refresh_dispatch(data)
+
+        await self._post_save_refresh_dispatch(data)
+
+        if uid in participants:
+            self._log_info(
+                "JOIN",
+                "participant ap updated",
+                message_id=message_id,
+                user_id=uid,
+                ap=ap_val,
+            )
+            await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Teilnehmer).")
+            return
+
+        if uid in waitlist:
+            self._log_info(
+                "JOIN",
+                "waitlist ap updated",
+                message_id=message_id,
+                user_id=uid,
+                ap=ap_val,
+            )
+            await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Warteschlange).")
+            return
+
+        if len(data.get("participants") or []) <= max_players and uid in list(data.get("participants") or []):
+            self._log_info(
+                "JOIN",
+                "user joined as participant",
+                message_id=message_id,
+                user_id=uid,
+                ap=ap_val,
+                participants=len(data.get("participants") or []),
+                max_players=max_players,
+            )
+            await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
+            return
+
+        self._log_info(
+            "JOIN",
+            "user added to waitlist",
+            message_id=message_id,
+            user_id=uid,
+            ap=ap_val,
+            waitlist=len(data.get("waitlist") or []),
+            max_players=max_players,
+        )
+        await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
 
     async def _leave(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="leave",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Deine letzte Abmeldung wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
-        lock = self._lock_for(message_id)
+        data: Optional[dict] = None
         promoted_id: Optional[int] = None
 
+        lock = self._lock_for(message_id)
         async with lock:
             data = await self._get_search(message_id)
             if data is None:
@@ -4109,13 +4927,11 @@ class Gruppensuche(commands.Cog):
             data["participant_ap"] = ap_map
             data["waitlist_ap"] = wl_map
 
-            # Easter-Egg entfernen -> neu würfeln bei neuer Anmeldung
             egg_map = data.get("easter_egg_texts")
             if isinstance(egg_map, dict):
                 egg_map.pop(str(uid), None)
                 data["easter_egg_texts"] = egg_map
 
-            # Promote aus Warteschlange
             if was_participant and len(participants) < max_players and waitlist:
                 promoted_id = int(waitlist.pop(0))
                 participants.append(promoted_id)
@@ -4135,11 +4951,90 @@ class Gruppensuche(commands.Cog):
 
             await self._save_refresh_dispatch(data)
 
+        await self._post_save_refresh_dispatch(data)
+
+        self._log_info(
+            "LEAVE",
+            "user removed from search",
+            message_id=message_id,
+            user_id=uid,
+            promoted_id=(promoted_id or 0),
+        )
+
         await self._ephemeral_notice(interaction, "✅ Du wurdest abgemeldet.", ephemeral=True)
 
-        # ✅ Promotion-Notify NACH Lock (verhindert Lock-Blocking bei DMs)
         if promoted_id:
             await self._notify_promotion(data, promoted_id)
+
+    async def _apply_ap_adjust(self, interaction: discord.Interaction, message_id: int, ap_val: int):
+        if self._interaction_guard_hit(
+            action="ap_adjust",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Deine letzte AP-Änderung wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
+        # ACK-safe
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        data: Optional[dict] = None
+
+        lock = self._lock_for(int(message_id))
+        uid = int(interaction.user.id)
+
+        async with lock:
+            data = await self._get_search(int(message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+                return
+
+            participants: List[int] = list(data.get("participants") or [])
+            waitlist: List[int] = list(data.get("waitlist") or [])
+
+            is_participant = uid in participants
+            is_wait = uid in waitlist
+
+            if not is_participant and not is_wait:
+                await self._ephemeral_notice(interaction, "Du bist nicht eingetragen.", ephemeral=True)
+                return
+
+            ap_map = data.get("participant_ap") or {}
+            wl_map = data.get("waitlist_ap") or {}
+
+            ap_clean = str(int(ap_val))
+
+            if is_participant:
+                ap_map[str(uid)] = ap_clean
+            else:
+                wl_map[str(uid)] = ap_clean
+
+            data["participant_ap"] = ap_map
+            data["waitlist_ap"] = wl_map
+
+            _sync_easter_egg_text(data, uid, ap_clean)
+
+            await self._save_refresh_dispatch(data)
+
+        await self._post_save_refresh_dispatch(data)
+
+        self._log_info(
+            "AP_EDIT",
+            "user ap adjusted",
+            message_id=message_id,
+            user_id=uid,
+            ap=ap_clean,
+            target=("participants" if is_participant else "waitlist"),
+        )
+
+        await self._ephemeral_notice(interaction, "✅ AP wurde aktualisiert.", ephemeral=True)
 
     async def _notify_promotion(self, data: dict, promoted_id: int):
         guild = self.bot.get_guild(int(data.get("guild_id", 0)))
@@ -4240,11 +5135,7 @@ class Gruppensuche(commands.Cog):
         cd["type"] = now_ts
         data["ping_cd"] = cd
 
-        await self._save_refresh_dispatch(
-            data,
-            refresh_public=False,
-            refresh_dashboard=False,
-        )
+        await self._save_refresh_dispatch(data)
 
         guild = interaction.guild
         if guild is None:
@@ -4310,11 +5201,7 @@ class Gruppensuche(commands.Cog):
         cd["wait"] = now_ts
         data["ping_cd"] = cd
 
-        await self._save_refresh_dispatch(
-            data,
-            refresh_public=False,
-            refresh_dashboard=False,
-        )
+        await self._save_refresh_dispatch(data)
 
         guild = interaction.guild
         if guild is None:
@@ -4340,97 +5227,264 @@ class Gruppensuche(commands.Cog):
         await channel.send(txt, allowed_mentions=discord.AllowedMentions.none())
 
     async def _close_search(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="close",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Die letzte Aktion zum Schließen wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
-        data = await self._get_search(message_id)
-        if data is None:
-            return
+        data: Optional[dict] = None
 
-        data["is_closed"] = True
-        await self._save_refresh_dispatch(data)
+        lock = self._lock_for(int(message_id))
+        async with lock:
+            data = await self._get_search(int(message_id))
+            if data is None:
+                return
+
+            data["is_closed"] = True
+            await self._save_refresh_dispatch(data)
+
+        await self._post_save_refresh_dispatch(data)
 
     async def _open_search(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="open",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Die letzte Aktion zum Öffnen wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
-        data = await self._get_search(message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
-            return
+        data: Optional[dict] = None
 
-        data["is_closed"] = False
-        await self._save_refresh_dispatch(data)
+        lock = self._lock_for(int(message_id))
+        async with lock:
+            data = await self._get_search(int(message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+                return
 
+            data["is_closed"] = False
+            await self._save_refresh_dispatch(data)
+
+        await self._post_save_refresh_dispatch(data)
         await self._ephemeral_notice(interaction, "✅ Suche wieder geöffnet.")
 
     async def _delete_search(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="delete",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Die letzte Löschaktion wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
         data = await self._get_search(message_id)
         if data is None:
             return
 
         guild = interaction.guild
         if guild is None:
-            await self._del_search(message_id)
-            return
-
-        channel = guild.get_channel(int(data.get("channel_id", 0)))
-        if isinstance(channel, discord.TextChannel):
+            # Ohne Guild-Kontext nichts löschen:
+            # sonst riskieren wir wieder "sichtbarer Post, aber Storage weg".
+            self._log_warning(
+                "DELETE",
+                "delete aborted because guild is unavailable",
+                message_id=message_id,
+            )
             try:
-                msg = await channel.fetch_message(int(data.get("message_id", 0)))
-                await msg.delete()
+                bot_guild = self.bot.get_guild(GUILD_ID)
+                if bot_guild is not None:
+                    await self._log_event(
+                        bot_guild,
+                        "error",
+                        "Gruppensuche",
+                        "Delete Failed",
+                        (
+                            "Eine Gruppensuche konnte nicht sicher gelöscht werden.\n\n"
+                            "Der Guild-Kontext war nicht verfügbar.\n"
+                            "Der Storage-Eintrag wurde nicht entfernt."
+                        ),
+                    )
             except Exception:
                 pass
 
+            await self._ephemeral_notice(
+                interaction,
+                "❌ Die Suche konnte nicht sicher gelöscht werden (Guild nicht verfügbar).",
+                ephemeral=True,
+            )
+            return
+
+        channel = guild.get_channel(int(data.get("channel_id", 0)))
+        if not isinstance(channel, discord.TextChannel):
+            self._log_warning(
+                "DELETE",
+                "delete aborted because channel is unavailable",
+                message_id=message_id,
+                guild_id=guild.id,
+                channel_id=int(data.get("channel_id", 0)),
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Delete Failed",
+                    (
+                        "Eine Gruppensuche konnte nicht sicher gelöscht werden.\n\n"
+                        "Der Ziel-Channel war nicht verfügbar.\n"
+                        "Der Storage-Eintrag wurde nicht entfernt."
+                    ),
+                )
+            except Exception:
+                pass
+
+            await self._ephemeral_notice(
+                interaction,
+                "❌ Die Suche konnte nicht sicher gelöscht werden (Channel nicht gefunden).",
+                ephemeral=True,
+            )
+            return
+
+        # Nachricht MUSS erfolgreich gelöscht werden,
+        # bevor der Storage-Eintrag entfernt wird.
+        try:
+            msg = await channel.fetch_message(int(data.get("message_id", 0)))
+            await msg.delete()
+        except Exception:
+            self._log_warning(
+                "DELETE",
+                "message delete failed, storage preserved",
+                message_id=message_id,
+                guild_id=guild.id,
+                channel_id=channel.id,
+            )
+            try:
+                await self._log_event(
+                    guild,
+                    "error",
+                    "Gruppensuche",
+                    "Delete Failed",
+                    (
+                        "Eine Gruppensuche konnte nicht vollständig gelöscht werden.\n\n"
+                        "Die Discord-Nachricht konnte nicht entfernt werden.\n"
+                        "Der Storage-Eintrag wurde deshalb bewusst beibehalten."
+                    ),
+                    channel=channel,
+                )
+            except Exception:
+                pass
+
+            await self._ephemeral_notice(
+                interaction,
+                "❌ Die Suche konnte nicht vollständig gelöscht werden. Der Post wurde nicht entfernt.",
+                ephemeral=True,
+            )
+            return
+
         await self._del_search(message_id)
+        self._log_info(
+            "DELETE",
+            "search deleted successfully",
+            message_id=message_id,
+            guild_id=guild.id,
+            channel_id=channel.id,
+        )
         self._dispatch_dashboard_update(int(data.get("guild_id", 0)))
 
     # =========================
     # Edit Flow
     # =========================
 
-    async def _start_edit_flow(self, interaction: discord.Interaction, message_id: int, data: dict):
+    async def _open_owner_edit_menu(self, interaction: discord.Interaction, message_id: int, data: dict):
         session = WizardSession(
-            user_id=interaction.user.id,
-            guild_id=interaction.guild_id or 0,
+            user_id=int(interaction.user.id),
+            guild_id=int(interaction.guild_id or 0),
             mode="edit",
-            edit_message_id=message_id,
-            category=str(data.get("category")),
-            day_date_iso=str(data.get("day_date_iso")),
-            difficulty=str(data.get("difficulty")) if data.get(
-                "category") == "muhhelfer" else None,
+            edit_message_id=int(message_id),
+
+            category=str(data.get("category") or ""),
+            day_date_iso=str(data.get("day_date_iso") or ""),
+            difficulty=str(data.get("difficulty") or "") if str(
+                data.get("category")) == "muhhelfer" else None,
             boss_runs=dict(data.get("boss_runs") or {}),
-            spot_key=str(data.get("spot_key")) if data.get(
-                "category") == "spots" else None,
+            spot_key=str(data.get("spot_key") or "") if str(
+                data.get("category")) == "spots" else None,
+            olun_tier=str(data.get("olun_tier") or "") if str(
+                data.get("spot_key")) == "olun" else None,
             max_players=int(data.get("max_players", 2)),
-            scroll_amount=str(data.get("scroll_amount")) if data.get(
-                "category") == "pilafe" else None,
+            scroll_amount=str(data.get("scroll_amount") or "") if str(
+                data.get("category")) == "pilafe" else None,
             duration_text=data.get("duration_text"),
             start_text=data.get("start_text"),
             req_text=data.get("req_text"),
             notes=data.get("notes"),
-            olun_tier=str(data.get("olun_tier")) if str(
-                data.get("spot_key")) == "olun" else None,
+            own_ap=str(data.get("owner_ap") or "") or None,
             atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
         )
 
         session.wizard_interaction = interaction
-        self._sessions[interaction.user.id] = session
+        self._sessions[int(interaction.user.id)] = session
 
         view = EditMenuView(self, session, data)
+        embed = view.embed()
 
-        # WICHTIG: NIE edit_message hier!
-        await interaction.response.send_message(
-            embed=view.embed(),
-            view=view,
-            ephemeral=True
+        # Ephemeral senden (ACK-safe)
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    async def _start_edit_flow(self, interaction: discord.Interaction, message_id: int, data: Optional[dict] = None):
+        if data is None:
+            data = await self._get_search(int(message_id))
+
+        if data is None:
+            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+            return
+        self._log_info(
+            "EDIT",
+            "edit flow started",
+            message_id=message_id,
+            user_id=int(interaction.user.id),
         )
+        # Owner/Admin/Offizier -> Owner Menü
+        if await self._is_owner_or_mod(interaction, int(message_id)):
+            await self._open_owner_edit_menu(interaction, int(message_id), data)
+            return
+
+        # Teilnehmer / Warteliste -> nur AP-Korrektur
+        try:
+            await interaction.response.send_modal(APAdjustModal(self, int(message_id)))
+        except discord.InteractionResponded:
+            await interaction.followup.send_modal(APAdjustModal(self, int(message_id)))
 
     async def _send_edit_menu(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
@@ -4452,72 +5506,96 @@ class Gruppensuche(commands.Cog):
     async def _apply_edit_day(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
-        data = await self._get_search(session.edit_message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
-        # --- alten Wert sichern (WICHTIG für "old -> new") ---
-        old_day_iso = str(data.get("day_date_iso") or "")
 
-        # --- neuen Wert setzen ---
-        data["day_date_iso"] = session.day_date_iso
+        data: Optional[dict] = None
 
-        # ✅ Reminder reset, weil Tag geändert wurde
-        rem = data.get("reminders")
-        if not isinstance(rem, dict):
-            rem = {}
-        rem.pop("start_30m", None)
-        data["reminders"] = rem
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(int(session.edit_message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        # --- Edit Notify (debounced) ---
-        try:
-            old_fmt = _format_day(dt.date.fromisoformat(
-                old_day_iso)) if old_day_iso else "—"
-        except Exception:
-            old_fmt = old_day_iso or "—"
+            # --- alten Wert sichern (WICHTIG für "old -> new") ---
+            old_day_iso = str(data.get("day_date_iso") or "")
 
-        try:
-            new_fmt = _format_day(dt.date.fromisoformat(
-                str(session.day_date_iso or ""))) if session.day_date_iso else "—"
-        except Exception:
-            new_fmt = str(session.day_date_iso or "—")
+            # --- neuen Wert setzen ---
+            data["day_date_iso"] = session.day_date_iso
 
-        self._schedule_edit_notify(
-            int(session.edit_message_id),
-            data,
-            changes=[{"key": "day", "label": "Tag",
-                      "old": old_fmt, "new": new_fmt}],
+            # ✅ Reminder reset, weil Tag geändert wurde
+            rem = data.get("reminders")
+            if not isinstance(rem, dict):
+                rem = {}
+            rem.pop("start_30m", None)
+            data["reminders"] = rem
+
+            # --- Edit Notify (debounced) ---
+            try:
+                old_fmt = _format_day(dt.date.fromisoformat(
+                    old_day_iso)) if old_day_iso else "—"
+            except Exception:
+                old_fmt = old_day_iso or "—"
+
+            try:
+                new_fmt = _format_day(dt.date.fromisoformat(
+                    str(session.day_date_iso or ""))) if session.day_date_iso else "—"
+            except Exception:
+                new_fmt = str(session.day_date_iso or "—")
+
+            self._schedule_edit_notify(
+                int(session.edit_message_id),
+                data,
+                changes=[{"key": "day", "label": "Tag",
+                          "old": old_fmt, "new": new_fmt}],
+            )
+
+            await self._save_refresh_dispatch(data)
+
+        await self._post_save_refresh_dispatch(data)
+
+        self._log_info(
+            "EDIT",
+            "day updated",
+            message_id=int(session.edit_message_id),
+            user_id=int(interaction.user.id),
+            old=old_fmt,
+            new=new_fmt,
         )
-
-        await self._save_refresh_dispatch(data)
 
         await self._send_edit_menu(interaction, session)
 
     async def _apply_edit_max_players(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
-        # ✅ ACK-safe (falls der Caller nicht deferred hat)
+
+        # ✅ ACK-safe
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.InteractionResponded:
             pass
 
         message_id = int(session.edit_message_id)
-        lock = self._lock_for(message_id)
-
-        # Zielwert früh bestimmen (Session kommt aus Select)
         desired_max = int(session.max_players or 0)
+        data: Optional[dict] = None
 
-        # ✅ Admin-only Absicherung: 1 Teilnehmer nur für Admin-Testzwecke
-        member = interaction.user if isinstance(
-            interaction.user, discord.Member) else None
-        if desired_max == 1 and not (member and _is_admin_only(member)):
+        # ✅ Admin-only: 1 Teilnehmer nur für Admin-Testzwecke
+        member = _member_from_interaction(interaction)
+        allow_one = bool(member and _is_admin_only(member))
+
+        # ✅ Range korrekt bestimmen (und Admin-Override sauber berücksichtigen)
+        mn, mx = _allowed_party_range(session.category or "", session.spot_key)
+        if allow_one:
+            mn = 1
+
+        if desired_max < mn or desired_max > mx:
             await self._ephemeral_notice(
                 interaction,
-                "1 Teilnehmer ist nur für Admin-Testzwecke erlaubt.",
+                "Ungültige Teilnehmerzahl.",
                 ephemeral=True,
             )
             return
+
+        lock = self._lock_for(message_id)
 
         async with lock:
             data = await self._get_search(message_id)
@@ -4525,21 +5603,10 @@ class Gruppensuche(commands.Cog):
                 await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
                 return
 
-            # --- alte Werte sichern (für "old -> new") ---
+            # --- alte Werte sichern (für Change-Notify) ---
             old_max = int(data.get("max_players", 2))
             old_part_count = len(list(data.get("participants") or []))
             old_wait_count = len(list(data.get("waitlist") or []))
-
-            # Range prüfen (abhängig von Kategorie/Spot)
-            mn, mx = _allowed_party_range(
-                str(data.get("category", "")),
-                str(data.get("spot_key", "")) if data.get(
-                    "category") == "spots" else None
-            )
-
-            if desired_max < mn or desired_max > mx:
-                await self._ephemeral_notice(interaction, "Ungültige Teilnehmerzahl.", ephemeral=True)
-                return
 
             # --- neue max setzen ---
             data["max_players"] = int(desired_max)
@@ -4594,129 +5661,155 @@ class Gruppensuche(commands.Cog):
 
             self._schedule_edit_notify(message_id, data, changes=changes)
 
+        await self._post_save_refresh_dispatch(data)
+
+        self._log_info(
+            "EDIT",
+            "max players updated",
+            message_id=message_id,
+            user_id=int(interaction.user.id),
+            new_max=desired_max,
+        )
         await self._send_edit_menu(interaction, session)
 
     async def _apply_edit_details(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
 
-        data = await self._get_search(session.edit_message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
+        data: Optional[dict] = None
 
-        cat = str(data.get("category", "")).lower()
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(int(session.edit_message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        # --- alte Werte sichern ---
-        old_duration = data.get("duration_text")
-        old_start = data.get("start_text")
-        old_req = data.get("req_text")
-        old_notes = data.get("notes")
-        old_day_iso = data.get("day_date_iso")
-        old_amount = data.get("scroll_amount") if cat == "pilafe" else None
-        old_owner_ap = data.get("owner_ap")
+            cat = str(data.get("category", "")).lower()
 
-        # --- Änderungen anwenden ---
-        if cat == "pilafe" and session.scroll_amount is not None:
-            data["scroll_amount"] = session.scroll_amount
+            # --- alte Werte sichern ---
+            old_duration = data.get("duration_text")
+            old_start = data.get("start_text")
+            old_req = data.get("req_text")
+            old_notes = data.get("notes")
+            old_day_iso = data.get("day_date_iso")
+            old_amount = data.get("scroll_amount") if cat == "pilafe" else None
+            old_owner_ap = data.get("owner_ap")
 
-        if session.duration_text is not None:
-            data["duration_text"] = session.duration_text
+            # --- Änderungen anwenden ---
+            if cat == "pilafe" and session.scroll_amount is not None:
+                data["scroll_amount"] = session.scroll_amount
 
-        if session.start_text is not None:
-            data["start_text"] = session.start_text
+            if session.duration_text is not None:
+                data["duration_text"] = session.duration_text
 
-        if session.req_text is not None:
-            data["req_text"] = session.req_text
+            if session.start_text is not None:
+                data["start_text"] = session.start_text
 
-        if session.notes is not None:
-            data["notes"] = session.notes
+            if session.req_text is not None:
+                data["req_text"] = session.req_text
 
-        # ✅ Host-AP korrekt übernehmen
-        if session.own_ap is not None:
-            owner_id = int(data.get("owner_id", 0))
-            data["owner_ap"] = session.own_ap
+            if session.notes is not None:
+                data["notes"] = session.notes
 
-            ap_map = data.get("participant_ap")
-            if not isinstance(ap_map, dict):
-                ap_map = {}
+            # ✅ Host-AP korrekt übernehmen
+            if session.own_ap is not None:
+                owner_id = int(data.get("owner_id", 0))
+                data["owner_ap"] = session.own_ap
 
-            ap_map[str(owner_id)] = session.own_ap
-            data["participant_ap"] = ap_map
+                ap_map = data.get("participant_ap")
+                if not isinstance(ap_map, dict):
+                    ap_map = {}
 
-        # ✅ Reminder reset bei Start/Tag-Änderung
-        if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day_iso):
-            rem = data.get("reminders")
-            if not isinstance(rem, dict):
-                rem = {}
-            rem.pop("start_30m", None)
-            data["reminders"] = rem
+                ap_map[str(owner_id)] = session.own_ap
+                data["participant_ap"] = ap_map
 
-        # --- Speichern ---
-        await self._save_refresh_dispatch(data)
+                # ✅ Easter-Egg Host: setzen ODER entfernen (bei AP-Korrektur)
+                _sync_easter_egg_text(data, owner_id, session.own_ap)
 
-        # --- Change-Liste bauen ---
-        changes: list[dict] = []
+            # ✅ Reminder reset bei Start/Tag-Änderung
+            if (data.get("start_text") != old_start) or (data.get("day_date_iso") != old_day_iso):
+                rem = data.get("reminders")
+                if not isinstance(rem, dict):
+                    rem = {}
+                rem.pop("start_30m", None)
+                data["reminders"] = rem
 
-        if cat == "pilafe":
-            if old_amount != data.get("scroll_amount"):
+            # --- Speichern ---
+            await self._save_refresh_dispatch(data)
+
+            # --- Change-Liste bauen ---
+            changes: list[dict] = []
+
+            if cat == "pilafe":
+                if old_amount != data.get("scroll_amount"):
+                    changes.append({
+                        "key": "scroll_amount",
+                        "label": "Menge",
+                        "old": old_amount,
+                        "new": data.get("scroll_amount")
+                    })
+
+            if old_duration != data.get("duration_text"):
                 changes.append({
-                    "key": "scroll_amount",
-                    "label": "Menge",
-                    "old": old_amount,
-                    "new": data.get("scroll_amount")
+                    "key": "duration",
+                    "label": "Geplante Dauer",
+                    "old": old_duration,
+                    "new": data.get("duration_text")
                 })
 
-        if old_duration != data.get("duration_text"):
-            changes.append({
-                "key": "duration",
-                "label": "Geplante Dauer",
-                "old": old_duration,
-                "new": data.get("duration_text")
-            })
+            if old_start != data.get("start_text"):
+                changes.append({
+                    "key": "start",
+                    "label": "Startzeit",
+                    "old": old_start,
+                    "new": data.get("start_text")
+                })
 
-        if old_start != data.get("start_text"):
-            changes.append({
-                "key": "start",
-                "label": "Startzeit",
-                "old": old_start,
-                "new": data.get("start_text")
-            })
+            # ✅ Kategorieabhängiges Label für req
+            if old_req != data.get("req_text"):
+                req_label = "Gewünschte AP" if cat in (
+                    "atoraxxion", "altar") else "Anforderung AK/VK"
+                changes.append({
+                    "key": "req",
+                    "label": req_label,
+                    "old": old_req,
+                    "new": data.get("req_text")
+                })
 
-        # ✅ Kategorieabhängiges Label für req
-        if old_req != data.get("req_text"):
-            req_label = "Gewünschte AP" if cat in (
-                "atoraxxion", "altar") else "Anforderung AK/VK"
-            changes.append({
-                "key": "req",
-                "label": req_label,
-                "old": old_req,
-                "new": data.get("req_text")
-            })
+            if old_notes != data.get("notes"):
+                changes.append({
+                    "key": "notes",
+                    "label": "Notiz",
+                    "old": old_notes,
+                    "new": data.get("notes")
+                })
 
-        if old_notes != data.get("notes"):
-            changes.append({
-                "key": "notes",
-                "label": "Notiz",
-                "old": old_notes,
-                "new": data.get("notes")
-            })
+            # ✅ Host-AP Change-Notify
+            if old_owner_ap != data.get("owner_ap"):
+                changes.append({
+                    "key": "owner_ap",
+                    "label": "Host AP",
+                    "old": old_owner_ap,
+                    "new": data.get("owner_ap"),
+                })
 
-        # ✅ Host-AP Change-Notify
-        if old_owner_ap != data.get("owner_ap"):
-            changes.append({
-                "key": "owner_ap",
-                "label": "Host AP",
-                "old": old_owner_ap,
-                "new": data.get("owner_ap"),
-            })
+            if changes:
+                self._schedule_edit_notify(
+                    int(session.edit_message_id),
+                    data,
+                    changes=changes
+                )
 
-        if changes:
-            self._schedule_edit_notify(
-                int(session.edit_message_id),
-                data,
-                changes=changes
-            )
+        await self._post_save_refresh_dispatch(data)
+
+        self._log_info(
+            "EDIT",
+            "details updated",
+            message_id=int(session.edit_message_id),
+            user_id=int(interaction.user.id),
+            category=cat,
+        )
 
         # Zurück ins Edit-Menü (ohne neues Ephemeral)
         await self._send_edit_menu(interaction, session)
@@ -4724,41 +5817,47 @@ class Gruppensuche(commands.Cog):
     async def _apply_edit_bosses(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
             return
-        data = await self._get_search(session.edit_message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
 
-        if data.get("category") != "muhhelfer":
-            await self._ephemeral_notice(interaction, "Bossbearbeitung ist nur für Muhhelfer.", ephemeral=True)
-            return
+        data: Optional[dict] = None
 
-        if not session.boss_runs:
-            await self._ephemeral_notice(interaction, "Bitte mindestens 1 Boss auswählen.", ephemeral=True)
-            return
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(int(session.edit_message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        def _fmt_boss_runs(br: dict) -> str:
-            if not isinstance(br, dict) or not br:
-                return "—"
-            parts = []
-            for k, v in br.items():
-                name = _boss_name(str(k))
-                runs = int(v or 1)
-                parts.append(f"{name}{' (2x)' if runs >= 2 else ''}")
-            return ", ".join(parts)
+            if data.get("category") != "muhhelfer":
+                await self._ephemeral_notice(interaction, "Bossbearbeitung ist nur für Muhhelfer.", ephemeral=True)
+                return
 
-        old_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
-        data["boss_runs"] = dict(session.boss_runs)
-        data["updated_at"] = int(_now_local().timestamp())
-        await self._save_refresh_dispatch(data)
-        new_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
-        self._schedule_edit_notify(
-            int(session.edit_message_id),
-            data,
-            changes=[{"key": "bosses", "label": "Bosse",
-                      "old": old_bosses, "new": new_bosses}],
-        )
+            if not session.boss_runs:
+                await self._ephemeral_notice(interaction, "Bitte mindestens 1 Boss auswählen.", ephemeral=True)
+                return
 
+            def _fmt_boss_runs(br: dict) -> str:
+                if not isinstance(br, dict) or not br:
+                    return "—"
+                parts = []
+                for k, v in br.items():
+                    name = _boss_name(str(k))
+                    runs = int(v or 1)
+                    parts.append(f"{name}{' (2x)' if runs >= 2 else ''}")
+                return ", ".join(parts)
+
+            old_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
+            data["boss_runs"] = dict(session.boss_runs)
+            data["updated_at"] = int(_now_local().timestamp())
+            await self._save_refresh_dispatch(data)
+            new_bosses = _fmt_boss_runs(data.get("boss_runs") or {})
+            self._schedule_edit_notify(
+                int(session.edit_message_id),
+                data,
+                changes=[{"key": "bosses", "label": "Bosse",
+                          "old": old_bosses, "new": new_bosses}],
+            )
+
+        await self._post_save_refresh_dispatch(data)
         await self._send_edit_menu(interaction, session)
 
     async def _apply_edit_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession):
@@ -4771,55 +5870,59 @@ class Gruppensuche(commands.Cog):
         if not session.edit_message_id:
             return
 
-        data = await self._get_search(session.edit_message_id)
-        if data is None:
-            await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
-            return
+        data: Optional[dict] = None
 
-        if str(data.get("category", "")).lower() != "atoraxxion":
-            await self._ephemeral_notice(interaction, "Dungeon-Bearbeitung ist nur für Atoraxxion.", ephemeral=True)
-            return
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(int(session.edit_message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
 
-        # alte / neue Auswahl normalisieren
-        old_runs = _normalize_atoraxxion_runs(data)
-        new_runs = list(session.atoraxxion_runs or [])
+            if str(data.get("category", "")).lower() != "atoraxxion":
+                await self._ephemeral_notice(interaction, "Dungeon-Bearbeitung ist nur für Atoraxxion.", ephemeral=True)
+                return
 
-        # nur erlaubte Keys + stabile Reihenfolge
-        allowed_order = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
-        new_runs = [k for k in allowed_order if k in {
-            str(x).lower().strip() for x in new_runs}]
+            # alte / neue Auswahl normalisieren
+            old_runs = _normalize_atoraxxion_runs(data)
+            new_runs = list(session.atoraxxion_runs or [])
 
-        # wenn nichts gewählt -> Fehlermeldung
-        if not new_runs:
-            await self._ephemeral_notice(interaction, "Bitte wähle mindestens einen Dungeon aus.", ephemeral=True)
-            return
+            # nur erlaubte Keys + stabile Reihenfolge
+            allowed_order = ["vahmalkea", "sycrakea", "yolunakea", "orzekea"]
+            new_runs = [k for k in allowed_order if k in {
+                str(x).lower().strip() for x in new_runs}]
 
-        data["atoraxxion_runs"] = new_runs
-        data["updated_at"] = int(_now_local().timestamp())
+            # wenn nichts gewählt -> Fehlermeldung
+            if not new_runs:
+                await self._ephemeral_notice(interaction, "Bitte wähle mindestens einen Dungeon aus.", ephemeral=True)
+                return
 
-        await self._save_refresh_dispatch(data)
+            data["atoraxxion_runs"] = new_runs
+            data["updated_at"] = int(_now_local().timestamp())
 
-        def _fmt(keys: list[str]) -> str:
-            if set(keys) == set(allowed_order):
-                return "Kompletter Run"
-            m = {
-                "vahmalkea": "Vahmalkea",
-                "sycrakea": "Sycrakea",
-                "yolunakea": "Yolunakea",
-                "orzekea": "Orzekea",
-            }
-            return ", ".join(m.get(k, k) for k in keys) if keys else "—"
+            await self._save_refresh_dispatch(data)
 
-        self._schedule_edit_notify(
-            int(session.edit_message_id),
-            data,
-            changes=[{
-                "key": "atoraxxion_runs",
-                "label": "Atoraxxion Auswahl",
-                "old": _fmt(old_runs),
-                "new": _fmt(new_runs),
-            }],
-        )
+            def _fmt(keys: list[str]) -> str:
+                if set(keys) == set(allowed_order):
+                    return "Kompletter Run"
+                m = {
+                    "vahmalkea": "Vahmalkea",
+                    "sycrakea": "Sycrakea",
+                    "yolunakea": "Yolunakea",
+                    "orzekea": "Orzekea",
+                }
+                return ", ".join(m.get(k, k) for k in keys) if keys else "—"
 
+            self._schedule_edit_notify(
+                int(session.edit_message_id),
+                data,
+                changes=[{
+                    "key": "atoraxxion_runs",
+                    "label": "Atoraxxion Auswahl",
+                    "old": _fmt(old_runs),
+                    "new": _fmt(new_runs),
+                }],
+            )
+
+        await self._post_save_refresh_dispatch(data)
         await self._send_edit_menu(interaction, session)
-
