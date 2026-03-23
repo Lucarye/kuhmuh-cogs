@@ -664,7 +664,14 @@ class Gruppenübersicht(commands.Cog):
                 msg = await ch.fetch_message(int(msg_id))
             except Exception:
                 try:
-                    await self._clear_dashboard_target(guild, which)
+                    self._log_warning(
+                        "FETCH",
+                        "dashboard target fetch_message failed - keeping stored target for retry",
+                        which=which,
+                        guild_id=guild.id,
+                        channel_id=ch.id,
+                        message_id=msg_id,
+                    )
                 except Exception:
                     pass
 
@@ -677,7 +684,7 @@ class Gruppenübersicht(commands.Cog):
                         (
                             f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
                             "Die gespeicherte Dashboard-Nachricht konnte nicht geladen werden.\n"
-                            "Das Dashboard konnte nicht automatisch repariert werden."
+                            "Es wird automatisch erneut versucht."
                         ),
                         channel=ch,
                     )
@@ -713,7 +720,14 @@ class Gruppenübersicht(commands.Cog):
 
             except Exception:
                 try:
-                    await self._clear_dashboard_target(guild, which)
+                    self._log_warning(
+                        "EDIT",
+                        "dashboard target edit failed - keeping stored target for retry",
+                        which=which,
+                        guild_id=guild.id,
+                        channel_id=ch.id,
+                        message_id=msg_id,
+                    )
                 except Exception:
                     pass
 
@@ -726,7 +740,7 @@ class Gruppenübersicht(commands.Cog):
                         (
                             f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
                             "Die bestehende Dashboard-Nachricht konnte nicht bearbeitet werden.\n"
-                            "Das Dashboard konnte nicht automatisch repariert werden."
+                            "Es wird automatisch erneut versucht."
                         ),
                         channel=ch,
                     )
