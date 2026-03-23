@@ -9,7 +9,6 @@ import json
 import logging
 
 
-
 import discord
 from discord.ext import tasks
 from redbot.core import commands, Config
@@ -625,9 +624,7 @@ class Gruppenübersicht(commands.Cog):
     # =========================
 
     async def _refresh_dashboard(self, guild: discord.Guild, which: str):
-        log.info(
-            f"[KUHMUH][DASHBOARD][REFRESH][START] guild_id={guild.id} which={which}"
-        )
+        # kein Start-Log – reduziert Dashboard-Logspam
         ch_id, msg_id = await self._get_dashboard_target(guild, which)
         if not ch_id or not msg_id:
             return
@@ -707,17 +704,12 @@ class Gruppenübersicht(commands.Cog):
                 sig = hashlib.sha256(raw).hexdigest()
 
                 if self._last_sig.get(which) == sig:
-                    log.info(
-                        f"[KUHMUH][DASHBOARD][REFRESH][SKIP NO CHANGES] guild_id={guild.id} which={which}"
-                    )
                     return  # kein Edit nötig
 
                 await msg.edit(embed=embed, view=view)
                 self._last_sig[which] = sig
 
-                log.info(
-                    f"[KUHMUH][DASHBOARD][REFRESH][EDIT DONE] guild_id={guild.id} which={which}"
-                )
+                # kein Erfolgs-Log – Änderungen sind im Dashboard sichtbar
 
             except Exception:
                 try:
