@@ -289,6 +289,14 @@ class Gruppenübersicht(commands.Cog):
             "live": None,
             "test": None,
         }
+        self._fetch_fail_count: Dict[str, int] = {
+            "live": 0,
+            "test": 0,
+        }
+        self._edit_fail_count: Dict[str, int] = {
+            "live": 0,
+            "test": 0,
+        }
 
     def _log_info(self, category: str, message: str, **fields):
         parts = [f"{k}={v}" for k, v in fields.items()]
@@ -660,7 +668,11 @@ class Gruppenübersicht(commands.Cog):
         async with lock:
             try:
                 msg = await ch.fetch_message(int(msg_id))
+                self._fetch_fail_count[which] = 0
             except Exception:
+                self._fetch_fail_count[which] = int(self._fetch_fail_count.get(which, 0)) + 1
+                fail_count = int(self._fetch_fail_count.get(which, 0))
+
                 try:
                     self._log_warning(
                         "FETCH",
@@ -669,25 +681,28 @@ class Gruppenübersicht(commands.Cog):
                         guild_id=guild.id,
                         channel_id=ch.id,
                         message_id=msg_id,
+                        fail_count=fail_count,
                     )
                 except Exception:
                     pass
 
-                try:
-                    await self._log_event(
-                        guild,
-                        "warn",
-                        "Dashboard",
-                        "Message Fetch Failed",
-                        (
-                            f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
-                            "Die gespeicherte Dashboard-Nachricht konnte nicht geladen werden.\n"
-                            "Es wird automatisch erneut versucht."
-                        ),
-                        channel=ch,
-                    )
-                except Exception:
-                    pass
+                # Nur bei echtem Dauerfehler eine Discord-Systemmeldung posten
+                if fail_count >= 3:
+                    try:
+                        await self._log_event(
+                            guild,
+                            "warn",
+                            "Dashboard",
+                            "Message Fetch Failed",
+                            (
+                                f"Das {which.upper()}-Dashboard konnte wiederholt nicht aktualisiert werden.\n\n"
+                                "Die gespeicherte Dashboard-Nachricht konnte mehrfach nicht geladen werden.\n"
+                                "Das System versucht weiterhin eine automatische Wiederherstellung."
+                            ),
+                            channel=ch,
+                        )
+                    except Exception:
+                        pass
                 return
 
             try:
@@ -708,10 +723,14 @@ class Gruppenübersicht(commands.Cog):
 
                 await msg.edit(embed=embed, view=view)
                 self._last_sig[which] = sig
+                self._edit_fail_count[which] = 0
 
                 # kein Erfolgs-Log – Änderungen sind im Dashboard sichtbar
 
             except Exception:
+                self._edit_fail_count[which] = int(self._edit_fail_count.get(which, 0)) + 1
+                fail_count = int(self._edit_fail_count.get(which, 0))
+
                 try:
                     self._log_warning(
                         "EDIT",
@@ -720,25 +739,28 @@ class Gruppenübersicht(commands.Cog):
                         guild_id=guild.id,
                         channel_id=ch.id,
                         message_id=msg_id,
+                        fail_count=fail_count,
                     )
                 except Exception:
                     pass
 
-                try:
-                    await self._log_event(
-                        guild,
-                        "error",
-                        "Dashboard",
-                        "Message Edit Failed",
-                        (
-                            f"Das {which.upper()}-Dashboard konnte nicht aktualisiert werden.\n\n"
-                            "Die bestehende Dashboard-Nachricht konnte nicht bearbeitet werden.\n"
-                            "Es wird automatisch erneut versucht."
-                        ),
-                        channel=ch,
-                    )
-                except Exception:
-                    pass
+                # Nur bei echtem Dauerfehler eine Discord-Systemmeldung posten
+                if fail_count >= 3:
+                    try:
+                        await self._log_event(
+                            guild,
+                            "error",
+                            "Dashboard",
+                            "Message Edit Failed",
+                            (
+                                f"Das {which.upper()}-Dashboard konnte wiederholt nicht aktualisiert werden.\n\n"
+                                "Die bestehende Dashboard-Nachricht konnte mehrfach nicht bearbeitet werden.\n"
+                                "Das System versucht weiterhin eine automatische Wiederherstellung."
+                            ),
+                            channel=ch,
+                        )
+                    except Exception:
+                        pass
                 return
 
     # =========================
