@@ -285,6 +285,12 @@ WIZARD_UI = {
         "party_text": "Wähle die maximale Teilnehmerzahl **2–5**.",
         "title_fn": _pilafe_title,
     },
+    "altar": {
+        "party_min": 2,
+        "party_max": 3,
+        "party_text": "Wähle die maximale Teilnehmerzahl **2–3**.",
+        "title_fn": lambda s: "🩸 Gruppensuche – Altar des Blutes",
+    },
 }
 
 
@@ -427,9 +433,11 @@ class BackTarget:
     BOSSES = "bosses"
     DOUBLE = "double"
     DAY = "day"
+    PARTY = "party"
     EDIT_MENU = "edit_menu"
     OLUN_TIER = "olun_tier"
     atoraxxion_runs = "atoraxxion_runs"
+    ALTAR_STEP = "altar_step"
 
 
 class Step:
@@ -444,6 +452,7 @@ class Step:
     EDIT_MENU = "edit_menu"
     OLUN_TIER = "olun_tier"
     atoraxxion_runs = "atoraxxion_runs"
+    ALTAR_STEP = "altar_step"
 
 
 def _now_utc() -> dt.datetime:
@@ -940,6 +949,10 @@ class WizardSession:
     # "t1" | "t2" | "t3" | "t4" | "full"
     atoraxxion_runs: List[str] = field(default_factory=list)
 
+    # Altar des Blutes
+    altar_cleared_step: Optional[int] = None
+    altar_target_step: Optional[int] = None
+
 
 # =========================
 # Modals
@@ -1371,6 +1384,8 @@ class StartSelect(discord.ui.Select):
         self.host_view.session.max_players = None
         self.host_view.session.olun_tier = None
         self.host_view.session.atoraxxion_runs.clear()
+        self.host_view.session.altar_cleared_step = None
+        self.host_view.session.altar_target_step = None
 
         # und weiter im Flow (zentraler Router)
         await self.host_view.cog._goto_next(interaction, self.host_view.session, Step.START)
@@ -2127,7 +2142,109 @@ class AtoraxxionRunView(WizardBaseView):
 
         await self.cog._goto_next(interaction, self.session, Step.atoraxxion_runs)
 
+class AltarStepSelect(discord.ui.Select):
+    def __init__(self, host_view: "AltarStepView", which: str, current: Optional[int] = None):
+        self.host_view = host_view
+        self.which = which
 
+        options = []
+        for n in range(1, 22):
+            label = f"Step {n}"
+            desc = "Höchster geclearter Step" if which == "cleared" else "Geplanter Ziel-Step"
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    value=str(n),
+                    description=desc,
+                    default=(current == n),
+                )
+            )
+
+        placeholder = "Höchster geclearter Step..." if which == "cleared" else "Geplanter Ziel-Step..."
+        super().__init__(
+            placeholder=placeholder,
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0 if which == "cleared" else 1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.host_view.session.user_id:
+            await self.host_view.cog._ephemeral_notice(interaction, "Das kannst nur du bedienen.")
+            return
+
+        picked = int(self.values[0])
+
+        if self.which == "cleared":
+            self.host_view.session.altar_cleared_step = picked
+        else:
+            self.host_view.session.altar_target_step = picked
+
+        await interaction.response.edit_message(embed=self.host_view.embed(), view=self.host_view)
+
+
+class AltarStepView(WizardBaseView):
+    def __init__(self, cog: "GruppensucheTest", session: WizardSession):
+        super().__init__(cog, session)
+
+        self.add_item(AltarStepSelect(self, "cleared", session.altar_cleared_step))
+        self.add_item(AltarStepSelect(self, "target", session.altar_target_step))
+
+        self.add_item(build_back_button("Größe", BackTarget.PARTY, self, row=2))
+
+        next_label = "Speichern" if session.mode == "edit" else "Weiter"
+        next_btn = discord.ui.Button(
+            label=next_label,
+            style=discord.ButtonStyle.success,
+            row=2,
+        )
+        next_btn.callback = self._next
+        self.add_item(next_btn)
+
+    async def _next(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        if self.session.altar_cleared_step is None:
+            await self.cog._ephemeral_notice(interaction, "Bitte wähle den höchsten geclearten Step.")
+            return
+
+        if self.session.altar_target_step is None:
+            await self.cog._ephemeral_notice(interaction, "Bitte wähle den Ziel-Step.")
+            return
+
+        if self.session.altar_target_step <= self.session.altar_cleared_step:
+            await self.cog._ephemeral_notice(
+                interaction,
+                "Der Ziel-Step muss höher sein als der bereits geclearte Step.",
+            )
+            return
+
+        if self.session.mode == "edit":
+            await self.cog._apply_edit_altar_steps(interaction, self.session)
+            return
+
+        await self.cog._goto_next(interaction, self.session, Step.ALTAR_STEP)
+
+    def embed(self) -> discord.Embed:
+        cleared = self.session.altar_cleared_step
+        target = self.session.altar_target_step
+
+        cleared_txt = f"Step {cleared}" if cleared is not None else "—"
+        target_txt = f"Step {target}" if target is not None else "—"
+
+        return discord.Embed(
+            title="🩸 Gruppensuche – Altar des Blutes",
+            description=(
+                "Wähle den Fortschritt für den Altar.\n\n"
+                f"**Höchster geclearter Step:** {cleared_txt}\n"
+                f"**Geplanter Ziel-Step:** {target_txt}\n\n"
+                "Der Ziel-Step muss höher sein als der bereits geclearte Step."
+            ),
+        )
+    
 class PartySizeSelect(discord.ui.Select):
     def __init__(self, host_view: "PartySizeView", min_n: int, max_n: int, current: Optional[int] = None):
         options = []
@@ -2297,6 +2414,13 @@ class EditMenuView(WizardBaseView):
             dungeons_btn.callback = self._atoraxxion
             self.add_item(dungeons_btn)
 
+        if str(post_data.get("category", "")).lower() == "altar":
+            altar_btn = discord.ui.Button(
+                label="Altar-Step bearbeiten", style=discord.ButtonStyle.secondary, row=1
+            )
+            altar_btn.callback = self._altar
+            self.add_item(altar_btn)
+
         back_btn = discord.ui.Button(
             label="Bearbeitung beenden", style=discord.ButtonStyle.secondary, row=2)
         back_btn.callback = self._back
@@ -2358,6 +2482,13 @@ class EditMenuView(WizardBaseView):
         # ✅ wichtig
         self.session.wizard_interaction = interaction
         await self.cog._send_atoraxxion_runs(interaction, self.session, back_target=BackTarget.EDIT_MENU)
+
+    async def _altar(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+        self.session.wizard_interaction = interaction
+        await self.cog._send_altar_steps(interaction, self.session)
 
     async def _back(self, interaction: discord.Interaction):
         await interaction.response.edit_message(content="Bearbeitung beendet.", embed=None, view=None)
@@ -2904,8 +3035,8 @@ class GruppensucheTest(commands.Cog):
         if target == BackTarget.DOUBLE:
             await self._send_step(interaction, session, Step.DOUBLE)
             return
-        if target == BackTarget.DAY:
-            await self._send_step(interaction, session, Step.DAY)
+        if target == BackTarget.PARTY:
+            await self._send_step(interaction, session, Step.PARTY)
             return
         if target == BackTarget.EDIT_MENU:
             await self._send_step(interaction, session, Step.EDIT_MENU)
@@ -2915,6 +3046,9 @@ class GruppensucheTest(commands.Cog):
             return
         if target == BackTarget.atoraxxion_runs:
             await self._send_step(interaction, session, Step.atoraxxion_runs)
+            return
+        if target == BackTarget.ALTAR_STEP:
+            await self._send_step(interaction, session, Step.ALTAR_STEP)
             return
 
     # =========================
@@ -2973,6 +3107,10 @@ class GruppensucheTest(commands.Cog):
 
         if step == Step.PARTY:
             await self._send_party_size(interaction, session)
+            return
+
+        if step == Step.ALTAR_STEP:
+            await self._send_altar_steps(interaction, session)
             return
 
         if step == Step.DETAILS:
@@ -3076,6 +3214,8 @@ class GruppensucheTest(commands.Cog):
             if current_step == Step.DAY:
                 return Step.PARTY
             if current_step == Step.PARTY:
+                return Step.ALTAR_STEP
+            if current_step == Step.ALTAR_STEP:
                 return Step.DETAILS if session.mode == "create" else Step.EDIT_MENU
 
         # -------- START --------
@@ -3218,6 +3358,10 @@ class GruppensucheTest(commands.Cog):
 
         view = PartySizeView(
             self, session, current=session.max_players, allow_one=allow_one)
+        await self._edit_or_send_ephemeral(interaction, view.embed(), view)
+
+    async def _send_altar_steps(self, interaction: discord.Interaction, session: WizardSession):
+        view = AltarStepView(self, session)
         await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _send_atoraxxion_runs(self, interaction: discord.Interaction, session: WizardSession, back_target: str = BackTarget.START):
@@ -4002,14 +4146,28 @@ class GruppensucheTest(commands.Cog):
             req_text = data.get("req_text") or ""
             req_line = f"**Gewünschte AP:** {req_text}\n" if req_text else "**Gewünschte AP:** —\n"
 
+            cleared = data.get("altar_cleared_step")
+            target = data.get("altar_target_step")
+
+            cleared_txt = f"Step {cleared}" if cleared is not None else "—"
+            target_txt = f"Step {target}" if target is not None else "—"
+
             header = (
                 f"**Suchender:** {owner_display}\n"
                 f"**Kategorie:** Altar des Blutes\n"
+                + req_line +
                 f"**Max. Teilnehmer:** {max_players}\n\n"
+            )
+
+            altar_block = (
+                f"**Fortschritt:**\n"
+                f"• Höchster geclearter Step: {cleared_txt}\n"
+                f"• Ziel-Step: {target_txt}\n\n"
             )
 
             e.description = (
                 header
+                + altar_block
                 + times_block
                 + notes_block
                 + status_block
@@ -4414,6 +4572,8 @@ class GruppensucheTest(commands.Cog):
             "participant_ap": {str(owner_id): session.own_ap or ""},
             "waitlist_ap": {},
             "atoraxxion_runs": list(session.atoraxxion_runs or []),
+            "altar_cleared_step": session.altar_cleared_step,
+            "altar_target_step": session.altar_target_step,
         }
         # ✅ Easteregg beim Ersteller (nur wenn AP > 396)
         _ensure_easter_egg_text(data, owner_id, session.own_ap)
@@ -5448,6 +5608,8 @@ class GruppensucheTest(commands.Cog):
             notes=data.get("notes"),
             own_ap=str(data.get("owner_ap") or "") or None,
             atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
+            altar_cleared_step=int(data.get("altar_cleared_step")) if data.get("altar_cleared_step") is not None else None,
+            altar_target_step=int(data.get("altar_target_step")) if data.get("altar_target_step") is not None else None,
         )
 
         session.wizard_interaction = interaction
@@ -5922,6 +6084,73 @@ class GruppensucheTest(commands.Cog):
                     "old": _fmt(old_runs),
                     "new": _fmt(new_runs),
                 }],
+            )
+
+        await self._post_save_refresh_dispatch(data)
+        await self._send_edit_menu(interaction, session)
+
+    async def _apply_edit_altar_steps(self, interaction: discord.Interaction, session: WizardSession):
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        if not session.edit_message_id:
+            return
+
+        data: Optional[dict] = None
+
+        lock = self._lock_for(int(session.edit_message_id))
+        async with lock:
+            data = await self._get_search(int(session.edit_message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+                return
+
+            if str(data.get("category", "")).lower() != "altar":
+                await self._ephemeral_notice(interaction, "Step-Bearbeitung ist nur für Altar des Blutes.")
+                return
+
+            old_cleared = data.get("altar_cleared_step")
+            old_target = data.get("altar_target_step")
+
+            if session.altar_cleared_step is None:
+                await self._ephemeral_notice(interaction, "Bitte wähle den höchsten geclearten Step.")
+                return
+
+            if session.altar_target_step is None:
+                await self._ephemeral_notice(interaction, "Bitte wähle den Ziel-Step.")
+                return
+
+            if session.altar_target_step <= session.altar_cleared_step:
+                await self._ephemeral_notice(
+                    interaction,
+                    "Der Ziel-Step muss höher sein als der bereits geclearte Step.",
+                )
+                return
+
+            data["altar_cleared_step"] = int(session.altar_cleared_step)
+            data["altar_target_step"] = int(session.altar_target_step)
+
+            await self._save_refresh_dispatch(data)
+
+            self._schedule_edit_notify(
+                int(session.edit_message_id),
+                data,
+                changes=[
+                    {
+                        "key": "altar_cleared_step",
+                        "label": "Altar gecleart",
+                        "old": f"Step {old_cleared}" if old_cleared is not None else "—",
+                        "new": f"Step {data['altar_cleared_step']}",
+                    },
+                    {
+                        "key": "altar_target_step",
+                        "label": "Altar Ziel",
+                        "old": f"Step {old_target}" if old_target is not None else "—",
+                        "new": f"Step {data['altar_target_step']}",
+                    },
+                ],
             )
 
         await self._post_save_refresh_dispatch(data)
