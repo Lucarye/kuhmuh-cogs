@@ -1,0 +1,1 @@
+from .nachrichteninfo import setup

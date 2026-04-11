@@ -1,0 +1,11 @@
+{
+  "author": ["Kuhmuhnisten"],
+  "name": "Gruppenübersicht",
+  "short": "Dashboard-Übersicht für aktive Gruppensuchen (nur ab heute).",
+  "description": "Erstellt ein Dashboard mit allen aktiven Gruppensuchen ab dem heutigen Datum. Liest die Daten aus dem Gruppensuche-Cog (shared Config identifier).",
+  "install_msg": "✅ Gruppenübersicht geladen. Nutze /gruppenübersicht um das Dashboard zu posten/aktualisieren.",
+  "requirements": [],
+  "tags": ["dashboard", "gruppensuche", "overview"],
+  "min_bot_version": "3.5.0",
+  "end_user_data_statement": "Speichert ggf. die Message-ID des Dashboard-Posts, um ihn aktualisieren zu können."
+}

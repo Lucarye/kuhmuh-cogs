@@ -1,0 +1,15 @@
+{
+  "author": [
+    "Shadow_Blood"
+  ],
+  "install_msg": "Nachrichteninfo installiert – verwende /nachrichteninfoh oder °nachrichteninfo.",
+  "name": "nachrichteninfo",
+  "short": "Zeigt Embed- und Button-Infos einer Nachricht.",
+  "description": "Listet alle Custom-IDs, Emojis, Labels und Embed-Daten einer Nachricht auf.",
+  "tags": [
+    "utility",
+    "debug",
+    "discord",
+    "buttons"
+  ]
+}
