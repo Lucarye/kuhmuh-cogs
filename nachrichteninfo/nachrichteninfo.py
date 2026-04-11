@@ -1,18 +1,13 @@
 import re
-<<<<<<< HEAD
-=======
 import io
 import json
 from typing import Any, Dict, List, Optional
 
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
 import discord
 from redbot.core import commands
 
 MSG_RE = re.compile(r"channels/(\d+)/(\d+)")
 
-<<<<<<< HEAD
-=======
 
 def _discord_ts(dt: Optional[discord.utils.utcnow().__class__]) -> str:
     """Formats a datetime as Discord timestamp, if possible."""
@@ -34,27 +29,11 @@ def _iso(dt) -> str:
         return str(dt)
 
 
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
 def _fmt_embed_info(e: discord.Embed) -> str:
     parts = []
     if e.title:
         parts.append(f"Titel: {e.title}")
     if e.description:
-<<<<<<< HEAD
-        parts.append(f"Beschreibung: {e.description[:300]}{'…' if len(e.description) > 300 else ''}")
-    if e.color:
-        parts.append(f"Farbe: #{e.color.value:06X}")
-    if e.author and (e.author.name or e.author.url):
-        parts.append(f"Author: {e.author.name or ''} {f'({e.author.url})' if e.author.url else ''}".strip())
-    if e.footer and (e.footer.text or e.footer.icon_url):
-        parts.append(f"Footer: {e.footer.text or ''}")
-    if e.fields:
-        parts.append(f"Felder: {len(e.fields)}")
-        for i, f in enumerate(e.fields, start=1):
-            parts.append(f"  [{i}] {f.name} | inline={f.inline} | Wert: {(f.value or '')[:120]}{'…' if f.value and len(f.value)>120 else ''}")
-    return "\n".join(parts) if parts else "(kein Embed-Inhalt)"
-
-=======
         parts.append(f"Beschreibung: {e.description}")
     if e.url:
         parts.append(f"URL: {e.url}")
@@ -79,7 +58,6 @@ def _fmt_embed_info(e: discord.Embed) -> str:
     return "\n".join(parts) if parts else "(kein Embed-Inhalt)"
 
 
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
 def _fmt_components(components) -> str:
     lines = []
     for row_i, row in enumerate(components or [], start=1):
@@ -88,16 +66,6 @@ def _fmt_components(components) -> str:
             if isinstance(comp, discord.Button):
                 emoji = ""
                 if comp.emoji:
-<<<<<<< HEAD
-                    emoji = comp.emoji.name or str(comp.emoji.id)
-                lines.append(
-                    f"Reihe {row_i} | Label: '{comp.label}' | Emoji: '{emoji}' | Style: {comp.style} | Custom-ID: '{comp.custom_id}' | URL: '{comp.url}'"
-                )
-    return "\n".join(lines) if lines else "(keine Buttons/Komponenten)"
-
-class NachrichtenInfo(commands.Cog):
-    """Zeigt Buttons (custom_id) und Embed-Infos einer Nachricht an."""
-=======
                     emoji = comp.emoji.name or str(getattr(comp.emoji, "id", "")) or str(comp.emoji)
                 lines.append(
                     f"Reihe {row_i} | Label: '{comp.label}' | Emoji: '{emoji}' | "
@@ -246,7 +214,6 @@ def _components_to_dict(components) -> List[Dict[str, Any]]:
 
 class NachrichtenInfo(commands.Cog):
     """Zeigt Buttons (custom_id) und Embed-Infos einer Nachricht an. Optional: JSON-Export."""
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
 
     def __init__(self, bot):
         self.bot = bot
@@ -254,18 +221,6 @@ class NachrichtenInfo(commands.Cog):
     @commands.is_owner()
     @commands.command(name="nachrichteninfo")
     async def nachrichteninfo_prefix(self, ctx: commands.Context, *, nachricht: str):
-<<<<<<< HEAD
-        """Owner: Nachricht analysieren (Nachrichtenlink ODER 'channel_id message_id')."""
-        await self._run(ctx, nachricht, ephemeral=False)
-
-    @commands.is_owner()
-    @commands.hybrid_command(name="nachrichteninfo", with_app_command=True, description="Analysiert eine Nachricht (Buttons & Embed-Infos).")
-    async def nachrichteninfo_hybrid(self, ctx: commands.Context, *, nachricht: str):
-        await ctx.defer(ephemeral=True)
-        await self._run(ctx, nachricht, ephemeral=True)
-
-    async def _run(self, ctx: commands.Context, nachricht: str, ephemeral: bool):
-=======
         """
         Owner: Nachricht analysieren (Nachrichtenlink ODER 'channel_id message_id').
         Flags:
@@ -275,7 +230,6 @@ class NachrichtenInfo(commands.Cog):
         await self._run(ctx, clean, do_json=flags["json"])
 
     async def _run(self, ctx: commands.Context, nachricht: str, do_json: bool):
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
         ch_id = msg_id = None
         m = MSG_RE.search(nachricht)
         if m:
@@ -286,21 +240,12 @@ class NachrichtenInfo(commands.Cog):
                 ch_id, msg_id = int(parts[0]), int(parts[1])
 
         if not ch_id or not msg_id:
-<<<<<<< HEAD
-            return await self._send(ctx, "❌ Bitte gültigen **Nachrichtenlink** oder `channel_id message_id` angeben.", ephemeral)
-=======
             return await ctx.send("❌ Bitte gültigen **Nachrichtenlink** oder `channel_id message_id` angeben.")
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
 
         try:
             channel = await self.bot.fetch_channel(ch_id)
             message = await channel.fetch_message(msg_id)
         except Exception as e:
-<<<<<<< HEAD
-            return await self._send(ctx, f"⚠️ Nachricht konnte nicht geladen werden:\n`{e}`", ephemeral)
-
-        comp_txt = _fmt_components(message.components)
-=======
             return await ctx.send(f"⚠️ Nachricht konnte nicht geladen werden:\n`{e}`")
 
         # ---- Meta ----
@@ -334,36 +279,17 @@ class NachrichtenInfo(commands.Cog):
         # ---- Components & Embeds (Text) ----
         comp_txt = _fmt_components(message.components)
 
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
         emb_txts = []
         for idx, emb in enumerate(message.embeds, start=1):
             emb_txts.append(f"[Embed {idx}]\n{_fmt_embed_info(emb)}")
         embeds_block = "\n\n".join(emb_txts) if emb_txts else "(kein Embed vorhanden)"
 
         out = []
-<<<<<<< HEAD
-=======
         out.extend(meta_lines)
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
         out.append("=== Komponenten ===")
         out.append(comp_txt)
         out.append("\n=== Embed-Infos ===")
         out.append(embeds_block)
-<<<<<<< HEAD
-        text = "\n".join(out)
-        if len(text) > 1900:
-            text = text[:1900] + "\n… (gekürzt)"
-
-        await self._send(ctx, f"```\n{text}\n```", ephemeral)
-
-    async def _send(self, ctx: commands.Context, content: str, ephemeral: bool):
-        try:
-            if hasattr(ctx, "interaction") and ctx.interaction is not None:
-                return await ctx.interaction.followup.send(content, ephemeral=ephemeral)
-        except Exception:
-            pass
-        await ctx.send(content)
-=======
 
         text = "\n".join(out)
 
@@ -403,7 +329,6 @@ class NachrichtenInfo(commands.Cog):
 
             await ctx.send(f"📎 JSON-Export: `{filename}`", file=file)
 
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
 
 async def setup(bot):
     await bot.add_cog(NachrichtenInfo(bot))
