@@ -670,6 +670,88 @@ def _fmt_player_with_ap(mention: str, ap_val: Optional[str]) -> str:
     return f"{mention} ({ap_disp} AP)" if ap_disp else mention
 
 
+def _fmt_altar_stage(stage_val: object) -> str:
+    try:
+        n = int(stage_val)
+        if n < 1:
+            return "—"
+        return f"S{n}"
+    except Exception:
+        return "—"
+
+
+def _fmt_player_with_ap_stage_and_egg(
+    mention: str,
+    ap_val: Optional[str],
+    stage_val: object,
+    egg_text: Optional[str],
+) -> str:
+    ap_disp = _fmt_thousands_de(ap_val) if ap_val else None
+    stage_disp = _fmt_altar_stage(stage_val)
+
+    parts = [mention]
+    if ap_disp:
+        parts.append(f"({ap_disp} AP)")
+    if stage_disp != "—":
+        parts.append(f"({stage_disp})")
+
+    base = " ".join(parts)
+    if egg_text:
+        return f"{base} ✨ {egg_text}"
+    return base
+
+
+def _fmt_duration_minutes(total_minutes: int) -> str:
+    total_minutes = max(0, int(total_minutes))
+    hours, minutes = divmod(total_minutes, 60)
+    if hours > 0:
+        return f"~{hours}h {minutes:02d}m"
+    return f"~{minutes}m"
+
+
+def _altar_current_start_stage(data: dict) -> Optional[int]:
+    participants = [int(x) for x in (data.get("participants") or [])]
+
+    participant_stage = data.get("participant_altar_stage")
+    if not isinstance(participant_stage, dict):
+        participant_stage = {}
+
+    stages: list[int] = []
+    for uid in participants:
+        raw = participant_stage.get(str(uid))
+        try:
+            n = int(raw)
+            if n >= 1:
+                stages.append(n)
+        except Exception:
+            continue
+
+    if not stages:
+        return None
+
+    return min(stages)
+
+
+def _altar_estimated_duration_minutes(data: dict) -> Optional[int]:
+    start_stage = _altar_current_start_stage(data)
+
+    try:
+        target_stage = int(data.get("altar_target_step"))
+    except Exception:
+        return None
+
+    if target_stage < 1:
+        return None
+
+    if start_stage is None:
+        return None
+
+    if target_stage <= start_stage:
+        return 0
+
+    return (target_stage - start_stage) * 8
+
+
 def _parse_time_token(token: str) -> Optional[tuple[int, int]]:
     token = (token or "").strip().lower()
     m = _TIME_RE.search(token)
@@ -950,7 +1032,9 @@ class WizardSession:
     atoraxxion_runs: List[str] = field(default_factory=list)
 
     # Altar des Blutes
+    # eigene höchste Stufe des Erstellers
     altar_cleared_step: Optional[int] = None
+    # geplante Ziel-Stufe der Gruppe
     altar_target_step: Optional[int] = None
 
 
@@ -1249,10 +1333,18 @@ class EditDetailsModal(discord.ui.Modal):
 
 
 class APAdjustModal(discord.ui.Modal):
-    def __init__(self, cog: "GruppensucheTest", message_id: int):
+    def __init__(
+        self,
+        cog: "GruppensucheTest",
+        message_id: int,
+        *,
+        include_altar_stage: bool = False,
+        current_stage: Optional[int] = None,
+    ):
         super().__init__(title="AP anpassen")
         self.cog = cog
         self.message_id = int(message_id)
+        self.include_altar_stage = bool(include_altar_stage)
 
         self.ap_value = discord.ui.TextInput(
             label="Deine AP (nur Zahlen)",
@@ -1262,21 +1354,61 @@ class APAdjustModal(discord.ui.Modal):
         )
         self.add_item(self.ap_value)
 
+        if self.include_altar_stage:
+            self.altar_stage = discord.ui.TextInput(
+                label="Deine höchste Altar-Stufe",
+                placeholder="z.B. 21",
+                required=True,
+                max_length=4,
+                default=(str(current_stage)
+                         if current_stage is not None else None),
+            )
+            self.add_item(self.altar_stage)
+
     async def on_submit(self, interaction: discord.Interaction):
         ap_val = _parse_int_strict(self.ap_value.value)
         if ap_val is None:
-            # Modal direkt erneut öffnen (so “fühlt” es sich wie ein Feld-Fehler an)
-            await interaction.response.send_modal(APAdjustModal(self.cog, self.message_id))
+            await interaction.response.send_modal(
+                APAdjustModal(
+                    self.cog,
+                    self.message_id,
+                    include_altar_stage=self.include_altar_stage,
+                )
+            )
             return
 
-        await self.cog._apply_ap_adjust(interaction, self.message_id, ap_val)
+        altar_stage: Optional[int] = None
+        if self.include_altar_stage:
+            raw_stage = str(self.altar_stage.value).strip()
+            if not raw_stage.isdigit():
+                await interaction.response.send_modal(
+                    APAdjustModal(
+                        self.cog,
+                        self.message_id,
+                        include_altar_stage=True,
+                    )
+                )
+                return
+            altar_stage = int(raw_stage)
+            if altar_stage < 1 or altar_stage > 21:
+                await interaction.response.send_modal(
+                    APAdjustModal(
+                        self.cog,
+                        self.message_id,
+                        include_altar_stage=True,
+                    )
+                )
+                return
+
+        await self.cog._apply_ap_adjust(interaction, self.message_id, ap_val, altar_stage=altar_stage)
 
 
 class JoinApModal(discord.ui.Modal):
-    def __init__(self, cog, on_done):
+    def __init__(self, cog, on_done, *, include_altar_stage: bool = False, current_stage: Optional[int] = None):
         super().__init__(title="AP bei Anmeldung")
         self.cog = cog
         self.on_done = on_done
+        self.include_altar_stage = bool(include_altar_stage)
 
         self.ap = discord.ui.TextInput(
             label="Deine AP (Pflicht)",
@@ -1286,6 +1418,17 @@ class JoinApModal(discord.ui.Modal):
         )
         self.add_item(self.ap)
 
+        if self.include_altar_stage:
+            self.altar_stage = discord.ui.TextInput(
+                label="Deine höchste Altar-Stufe",
+                placeholder="z.B. 21",
+                required=True,
+                max_length=4,
+                default=(str(current_stage)
+                         if current_stage is not None else None),
+            )
+            self.add_item(self.altar_stage)
+
     async def on_submit(self, interaction: discord.Interaction):
         raw = str(self.ap.value).strip()
         ap_int = _parse_int_strict(raw)
@@ -1294,11 +1437,48 @@ class JoinApModal(discord.ui.Modal):
                 "❌ **AP ungültig.** Erlaubt: `3245`, `3.245`, `3 245`, `3,245`.",
                 ephemeral=True,
                 view=_ReopenModalView(
-                    lambda: JoinApModal(self.cog, self.on_done)),
+                    lambda: JoinApModal(
+                        self.cog,
+                        self.on_done,
+                        include_altar_stage=self.include_altar_stage,
+                    )
+                ),
             )
             return
 
-        await self.on_done(interaction, str(ap_int))
+        stage_int: Optional[int] = None
+        if self.include_altar_stage:
+            raw_stage = str(self.altar_stage.value).strip()
+            if not raw_stage.isdigit():
+                await interaction.response.send_message(
+                    "❌ **Altar-Stufe ungültig.** Bitte nur Zahlen von `1` bis `21` eintragen.",
+                    ephemeral=True,
+                    view=_ReopenModalView(
+                        lambda: JoinApModal(
+                            self.cog,
+                            self.on_done,
+                            include_altar_stage=True,
+                        )
+                    ),
+                )
+                return
+
+            stage_int = int(raw_stage)
+            if stage_int < 1 or stage_int > 21:
+                await interaction.response.send_message(
+                    "❌ **Altar-Stufe ungültig.** Bitte eine Stufe zwischen `1` und `21` eintragen.",
+                    ephemeral=True,
+                    view=_ReopenModalView(
+                        lambda: JoinApModal(
+                            self.cog,
+                            self.on_done,
+                            include_altar_stage=True,
+                        )
+                    ),
+                )
+                return
+
+        await self.on_done(interaction, str(ap_int), stage_int)
 
 
 # =========================
@@ -2150,8 +2330,8 @@ class AltarStepSelect(discord.ui.Select):
 
         options = []
         for n in range(1, 22):
-            label = f"Step {n}"
-            desc = "Höchster geclearter Step" if which == "cleared" else "Geplanter Ziel-Step"
+            label = f"Stufe {n}"
+            desc = "Deine höchste Altar-Stufe" if which == "cleared" else "Geplante Ziel-Stufe"
             options.append(
                 discord.SelectOption(
                     label=label,
@@ -2161,7 +2341,7 @@ class AltarStepSelect(discord.ui.Select):
                 )
             )
 
-        placeholder = "Höchster geclearter Step..." if which == "cleared" else "Geplanter Ziel-Step..."
+        placeholder = "Deine höchste Altar-Stufe..." if which == "cleared" else "Geplante Ziel-Stufe..."
         super().__init__(
             placeholder=placeholder,
             min_values=1,
@@ -2212,17 +2392,17 @@ class AltarStepView(WizardBaseView):
             return
 
         if self.session.altar_cleared_step is None:
-            await self.cog._ephemeral_notice(interaction, "Bitte wähle den höchsten geclearten Step.")
+            await self.cog._ephemeral_notice(interaction, "Bitte wähle deine höchste Altar-Stufe.")
             return
 
         if self.session.altar_target_step is None:
-            await self.cog._ephemeral_notice(interaction, "Bitte wähle den Ziel-Step.")
+            await self.cog._ephemeral_notice(interaction, "Bitte wähle die geplante Ziel-Stufe.")
             return
 
         if self.session.altar_target_step <= self.session.altar_cleared_step:
             await self.cog._ephemeral_notice(
                 interaction,
-                "Der Ziel-Step muss höher sein als der bereits geclearte Step.",
+                "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe.",
             )
             return
 
@@ -2236,16 +2416,16 @@ class AltarStepView(WizardBaseView):
         cleared = self.session.altar_cleared_step
         target = self.session.altar_target_step
 
-        cleared_txt = f"Step {cleared}" if cleared is not None else "—"
-        target_txt = f"Step {target}" if target is not None else "—"
+        cleared_txt = _fmt_altar_stage(cleared)
+        target_txt = _fmt_altar_stage(target)
 
         return discord.Embed(
             title="🩸 Gruppensuche – Altar des Blutes",
             description=(
-                "Wähle den Fortschritt für den Altar.\n\n"
-                f"**Höchster geclearter Step:** {cleared_txt}\n"
-                f"**Geplanter Ziel-Step:** {target_txt}\n\n"
-                "Der Ziel-Step muss höher sein als der bereits geclearte Step."
+                "Wähle die Altar-Stufen für deine Suche.\n\n"
+                f"**Deine höchste Altar-Stufe:** {cleared_txt}\n"
+                f"**Geplante Ziel-Stufe:** {target_txt}\n\n"
+                "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe."
             ),
         )
 
@@ -2433,10 +2613,37 @@ class EditMenuView(WizardBaseView):
 
     @discord.ui.button(label="AP anpassen", style=discord.ButtonStyle.secondary, row=1)
     async def edit_ap(self, interaction: discord.Interaction, button: discord.ui.Button):
+        include_altar_stage = str(self.post_data.get(
+            "category", "")).lower() == "altar"
+        owner_id = int(self.post_data.get("owner_id", 0))
+        current_stage = None
+
+        if include_altar_stage:
+            p_stage = self.post_data.get("participant_altar_stage") or {}
+            current_stage = p_stage.get(str(owner_id))
+            try:
+                current_stage = int(current_stage)
+            except Exception:
+                current_stage = None
+
         try:
-            await interaction.response.send_modal(APAdjustModal(self.cog, self.message_id))
+            await interaction.response.send_modal(
+                APAdjustModal(
+                    self.cog,
+                    self.message_id,
+                    include_altar_stage=include_altar_stage,
+                    current_stage=current_stage,
+                )
+            )
         except discord.InteractionResponded:
-            await interaction.followup.send_modal(APAdjustModal(self.cog, self.message_id))
+            await interaction.followup.send_modal(
+                APAdjustModal(
+                    self.cog,
+                    self.message_id,
+                    include_altar_stage=include_altar_stage,
+                    current_stage=current_stage,
+                )
+            )
 
     async def _tag(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -2701,14 +2908,45 @@ class PublicPostView(discord.ui.View):
 
         mid = int(self.message_id)
 
-        # AP Modal -> danach in cog._join speichern/refreshen
-        async def _done(modal_interaction: discord.Interaction, ap_val: str):
-            await self.cog._join(modal_interaction, mid, ap_val)
+        data = await self.cog._get_search(mid)
+        if data is None:
+            await self.cog._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+            return
+
+        is_altar = str(data.get("category", "")).lower() == "altar"
+        uid = int(interaction.user.id)
+
+        current_stage = None
+        if is_altar:
+            p_stage = data.get("participant_altar_stage") or {}
+            w_stage = data.get("waitlist_altar_stage") or {}
+            raw_stage = p_stage.get(str(uid), w_stage.get(str(uid)))
+            try:
+                current_stage = int(raw_stage)
+            except Exception:
+                current_stage = None
+
+        async def _done(modal_interaction: discord.Interaction, ap_val: str, altar_stage: Optional[int] = None):
+            await self.cog._join(modal_interaction, mid, ap_val, altar_stage=altar_stage)
 
         try:
-            await interaction.response.send_modal(JoinApModal(self.cog, _done))
+            await interaction.response.send_modal(
+                JoinApModal(
+                    self.cog,
+                    _done,
+                    include_altar_stage=is_altar,
+                    current_stage=current_stage,
+                )
+            )
         except discord.InteractionResponded:
-            await interaction.followup.send_modal(JoinApModal(self.cog, _done))
+            await interaction.followup.send_modal(
+                JoinApModal(
+                    self.cog,
+                    _done,
+                    include_altar_stage=is_altar,
+                    current_stage=current_stage,
+                )
+            )
 
     async def _on_leave(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -4003,15 +4241,31 @@ class GruppensucheTest(commands.Cog):
             txt = str(egg_map.get(str(uid)) or "").strip()
             return txt or None
 
-        def _build_user_lines(user_ids: list[int], ap_dict: dict) -> list[str]:
+        def _build_user_lines(user_ids: list[int], ap_dict: dict, stage_dict: Optional[dict] = None) -> list[str]:
             lines_out: list[str] = []
+            use_altar = cat == "altar"
+
             for uid in user_ids:
                 uid_int = int(uid)
                 m = guild.get_member(uid_int)
                 mention = (m.mention if m else f"<@{uid_int}>")
                 ap = ap_dict.get(str(uid_int))
-                lines_out.append(_fmt_player_with_ap_and_egg(
-                    mention, ap, _egg_for(uid_int)))
+
+                if use_altar:
+                    raw_stage = None
+                    if isinstance(stage_dict, dict):
+                        raw_stage = stage_dict.get(str(uid_int))
+                    lines_out.append(
+                        _fmt_player_with_ap_stage_and_egg(
+                            mention,
+                            ap,
+                            raw_stage,
+                            _egg_for(uid_int),
+                        )
+                    )
+                else:
+                    lines_out.append(_fmt_player_with_ap_and_egg(
+                        mention, ap, _egg_for(uid_int)))
             return lines_out
 
         # Kopfblock: Suchender (ohne Easter Egg)
@@ -4023,7 +4277,10 @@ class GruppensucheTest(commands.Cog):
         status_block = f"**Status**\n{status_line}\n\n"
 
         part_lines = _build_user_lines(
-            participants, data.get("participant_ap") or {})
+            participants,
+            data.get("participant_ap") or {},
+            data.get("participant_altar_stage") or {},
+        )
         participants_block = (
             f"**Teilnehmer ({len(participants)}/{max_players})**\n"
             + ("\n".join([f"• {x}" for x in part_lines])
@@ -4031,7 +4288,11 @@ class GruppensucheTest(commands.Cog):
             + "\n\n"
         )
 
-        wait_lines = _build_user_lines(waitlist, data.get("waitlist_ap") or {})
+        wait_lines = _build_user_lines(
+            waitlist,
+            data.get("waitlist_ap") or {},
+            data.get("waitlist_altar_stage") or {},
+        )
         wait_block = (
             f"**Warteschlange ({len(waitlist)})**\n"
             + ("\n".join([f"• {x}" for x in wait_lines])
@@ -4159,14 +4420,30 @@ class GruppensucheTest(commands.Cog):
             req_text = data.get("req_text") or ""
             req_line = f"**Gewünschte AP:** {req_text}\n" if req_text else "**Gewünschte AP:** —\n"
 
-            cleared = data.get("altar_cleared_step")
             target = data.get("altar_target_step")
+            target_txt = _fmt_altar_stage(target)
 
-            cleared_txt = f"Step {cleared}" if cleared is not None else "—"
-            target_txt = f"Step {target}" if target is not None else "—"
+            owner_display_altar = _fmt_player_with_ap_stage_and_egg(
+                owner_txt,
+                owner_ap,
+                data.get("altar_cleared_step"),
+                _egg_for(owner_id),
+            )
+
+            start_stage = _altar_current_start_stage(data)
+            start_stage_txt = _fmt_altar_stage(start_stage)
+
+            duration_minutes = _altar_estimated_duration_minutes(data)
+            duration_calc_txt = _fmt_duration_minutes(
+                duration_minutes) if duration_minutes is not None else "—"
+
+            current_group_size = len(list(data.get("participants") or []))
+            duration_hint = ""
+            if current_group_size < max_players:
+                duration_hint = f"⚠️ Berechnung basiert auf aktueller Gruppenzusammensetzung ({current_group_size}/{max_players}).\n\n"
 
             header = (
-                f"**Suchender:** {owner_display}\n"
+                f"**Suchender:** {owner_display_altar}\n"
                 f"**Kategorie:** Altar des Blutes\n"
                 + req_line +
                 f"**Max. Teilnehmer:** {max_players}\n\n"
@@ -4174,8 +4451,10 @@ class GruppensucheTest(commands.Cog):
 
             altar_block = (
                 f"**Fortschritt:**\n"
-                f"• Höchster geclearter Step: {cleared_txt}\n"
-                f"• Ziel-Step: {target_txt}\n\n"
+                f"• Start-Stufe: {start_stage_txt}\n"
+                f"• Ziel-Stufe: {target_txt}\n"
+                f"• Geschätzte Dauer: {duration_calc_txt}\n\n"
+                + duration_hint
             )
 
             e.description = (
@@ -4584,6 +4863,8 @@ class GruppensucheTest(commands.Cog):
             "owner_ap": session.own_ap,
             "participant_ap": {str(owner_id): session.own_ap or ""},
             "waitlist_ap": {},
+            "participant_altar_stage": {str(owner_id): session.altar_cleared_step} if session.category == "altar" and session.altar_cleared_step is not None else {},
+            "waitlist_altar_stage": {},
             "atoraxxion_runs": list(session.atoraxxion_runs or []),
             "altar_cleared_step": session.altar_cleared_step,
             "altar_target_step": session.altar_target_step,
@@ -4902,7 +5183,8 @@ class GruppensucheTest(commands.Cog):
             except Exception:
                 pass
 
-    async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str):
+    async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str, altar_stage: Optional[int] = None):
+        result_state: Optional[str] = None
         if self._interaction_guard_hit(
             action="join",
             user_id=int(interaction.user.id),
@@ -4937,12 +5219,27 @@ class GruppensucheTest(commands.Cog):
             participants: List[int] = list(data.get("participants") or [])
             waitlist: List[int] = list(data.get("waitlist") or [])
             max_players = int(data.get("max_players", 2))
+            was_new_join = False
+            moved_from_waitlist = False
+            ap_updated = False            
+            is_altar = str(data.get("category", "")).lower() == "altar"
+            participant_stage = data.get("participant_altar_stage")
+            if not isinstance(participant_stage, dict):
+                participant_stage = {}
+            waitlist_stage = data.get("waitlist_altar_stage")
+            if not isinstance(waitlist_stage, dict):
+                waitlist_stage = {}
 
             # ✅ Wenn schon eingetragen: AP aktualisieren (Teilnehmer ODER Warteschlange)
             if uid in participants:
                 ap_map = data.get("participant_ap") or {}
                 ap_map[str(uid)] = ap_val
                 data["participant_ap"] = ap_map
+
+                if is_altar and altar_stage is not None:
+                    participant_stage[str(uid)] = int(altar_stage)
+                    data["participant_altar_stage"] = participant_stage
+
                 _sync_easter_egg_text(data, uid, ap_val)
 
                 if _ap_triggers_easter_egg(ap_val):
@@ -4954,11 +5251,16 @@ class GruppensucheTest(commands.Cog):
                         data["easter_egg_texts"] = egg_map
 
                 await self._save_refresh_dispatch(data)
+                result_state = "updated_participant"
 
             elif uid in waitlist:
                 wl_map = data.get("waitlist_ap") or {}
                 wl_map[str(uid)] = ap_val
                 data["waitlist_ap"] = wl_map
+
+                if is_altar and altar_stage is not None:
+                    waitlist_stage[str(uid)] = int(altar_stage)
+                    data["waitlist_altar_stage"] = waitlist_stage
 
                 if _ap_triggers_easter_egg(ap_val):
                     _ensure_easter_egg_text(data, uid, ap_val)
@@ -4969,6 +5271,7 @@ class GruppensucheTest(commands.Cog):
                         data["easter_egg_texts"] = egg_map
 
                 await self._save_refresh_dispatch(data)
+                result_state = "updated_waitlist"
 
             elif len(participants) < max_players:
                 participants.append(uid)
@@ -4978,9 +5281,14 @@ class GruppensucheTest(commands.Cog):
                 ap_map[str(uid)] = ap_val
                 data["participant_ap"] = ap_map
 
+                if is_altar and altar_stage is not None:
+                    participant_stage[str(uid)] = int(altar_stage)
+                    data["participant_altar_stage"] = participant_stage
+
                 _ensure_easter_egg_text(data, uid, ap_val)
 
                 await self._save_refresh_dispatch(data)
+                result_state = "joined_participant"
 
             else:
                 waitlist.append(uid)
@@ -4991,13 +5299,18 @@ class GruppensucheTest(commands.Cog):
                 wl_map[str(uid)] = ap_val
                 data["waitlist_ap"] = wl_map
 
+                if is_altar and altar_stage is not None:
+                    waitlist_stage[str(uid)] = int(altar_stage)
+                    data["waitlist_altar_stage"] = waitlist_stage
+
                 _ensure_easter_egg_text(data, uid, ap_val)
 
                 await self._save_refresh_dispatch(data)
+                result_state = "joined_waitlist"
 
         await self._post_save_refresh_dispatch(data)
 
-        if uid in participants:
+        if result_state == "updated_participant":
             self._log_info(
                 "JOIN",
                 "participant ap updated",
@@ -5008,7 +5321,7 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Teilnehmer).")
             return
 
-        if uid in waitlist:
+        if result_state == "updated_waitlist":
             self._log_info(
                 "JOIN",
                 "waitlist ap updated",
@@ -5019,7 +5332,7 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Warteschlange).")
             return
 
-        if len(data.get("participants") or []) <= max_players and uid in list(data.get("participants") or []):
+        if result_state == "joined_participant":
             self._log_info(
                 "JOIN",
                 "user joined as participant",
@@ -5032,16 +5345,20 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
             return
 
-        self._log_info(
-            "JOIN",
-            "user added to waitlist",
-            message_id=message_id,
-            user_id=uid,
-            ap=ap_val,
-            waitlist=len(data.get("waitlist") or []),
-            max_players=max_players,
-        )
-        await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
+        if result_state == "joined_waitlist":
+            self._log_info(
+                "JOIN",
+                "user added to waitlist",
+                message_id=message_id,
+                user_id=uid,
+                ap=ap_val,
+                waitlist=len(data.get("waitlist") or []),
+                max_players=max_players,
+            )
+            await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
+            return
+
+        await self._ephemeral_notice(interaction, "ℹ️ Anmeldung verarbeitet.")
 
     async def _leave(self, interaction: discord.Interaction, message_id: int):
         if self._interaction_guard_hit(
@@ -5091,14 +5408,20 @@ class GruppensucheTest(commands.Cog):
 
             ap_map = data.get("participant_ap") or {}
             wl_map = data.get("waitlist_ap") or {}
+            p_stage_map = data.get("participant_altar_stage") or {}
+            w_stage_map = data.get("waitlist_altar_stage") or {}
 
             if was_participant:
                 ap_map.pop(str(uid), None)
+                p_stage_map.pop(str(uid), None)
             if was_wait:
                 wl_map.pop(str(uid), None)
+                w_stage_map.pop(str(uid), None)
 
             data["participant_ap"] = ap_map
             data["waitlist_ap"] = wl_map
+            data["participant_altar_stage"] = p_stage_map
+            data["waitlist_altar_stage"] = w_stage_map
 
             egg_map = data.get("easter_egg_texts")
             if isinstance(egg_map, dict):
@@ -5111,13 +5434,21 @@ class GruppensucheTest(commands.Cog):
 
                 wl_map = data.get("waitlist_ap") or {}
                 ap_map = data.get("participant_ap") or {}
+                w_stage_map = data.get("waitlist_altar_stage") or {}
+                p_stage_map = data.get("participant_altar_stage") or {}
 
                 promoted_ap = wl_map.pop(str(promoted_id), None)
                 if promoted_ap:
                     ap_map[str(promoted_id)] = promoted_ap
 
+                promoted_stage = w_stage_map.pop(str(promoted_id), None)
+                if promoted_stage is not None:
+                    p_stage_map[str(promoted_id)] = promoted_stage
+
                 data["waitlist_ap"] = wl_map
                 data["participant_ap"] = ap_map
+                data["waitlist_altar_stage"] = w_stage_map
+                data["participant_altar_stage"] = p_stage_map
 
             data["participants"] = participants
             data["waitlist"] = waitlist
@@ -5139,7 +5470,7 @@ class GruppensucheTest(commands.Cog):
         if promoted_id:
             await self._notify_promotion(data, promoted_id)
 
-    async def _apply_ap_adjust(self, interaction: discord.Interaction, message_id: int, ap_val: int):
+    async def _apply_ap_adjust(self, interaction: discord.Interaction, message_id: int, ap_val: int, altar_stage: Optional[int] = None):
         if self._interaction_guard_hit(
             action="ap_adjust",
             user_id=int(interaction.user.id),
@@ -5181,16 +5512,25 @@ class GruppensucheTest(commands.Cog):
 
             ap_map = data.get("participant_ap") or {}
             wl_map = data.get("waitlist_ap") or {}
+            p_stage_map = data.get("participant_altar_stage") or {}
+            w_stage_map = data.get("waitlist_altar_stage") or {}
 
             ap_clean = str(int(ap_val))
+            is_altar = str(data.get("category", "")).lower() == "altar"
 
             if is_participant:
                 ap_map[str(uid)] = ap_clean
+                if is_altar and altar_stage is not None:
+                    p_stage_map[str(uid)] = int(altar_stage)
             else:
                 wl_map[str(uid)] = ap_clean
+                if is_altar and altar_stage is not None:
+                    w_stage_map[str(uid)] = int(altar_stage)
 
             data["participant_ap"] = ap_map
             data["waitlist_ap"] = wl_map
+            data["participant_altar_stage"] = p_stage_map
+            data["waitlist_altar_stage"] = w_stage_map
 
             _sync_easter_egg_text(data, uid, ap_clean)
 
@@ -5793,6 +6133,8 @@ class GruppensucheTest(commands.Cog):
 
             ap_map = data.get("participant_ap") or {}
             wl_map = data.get("waitlist_ap") or {}
+            participant_stage = data.get("participant_altar_stage") or {}
+            waitlist_stage = data.get("waitlist_altar_stage") or {}
 
             # 1) Wenn new_max kleiner ist: zu viele Teilnehmer -> in Warteschlange schieben (letzte zuerst)
             while len(participants) > desired_max:
@@ -5800,6 +6142,11 @@ class GruppensucheTest(commands.Cog):
                 demoted_ap = ap_map.pop(str(demoted_id), None)
                 if demoted_ap is not None:
                     wl_map[str(demoted_id)] = demoted_ap
+
+                demoted_stage = participant_stage.pop(str(demoted_id), None)
+                if demoted_stage is not None:
+                    waitlist_stage[str(demoted_id)] = demoted_stage
+
                 waitlist.insert(0, demoted_id)
 
             # 2) Wenn new_max größer ist: aus Warteschlange auffüllen
@@ -5811,10 +6158,16 @@ class GruppensucheTest(commands.Cog):
                 if promoted_ap is not None:
                     ap_map[str(pid)] = promoted_ap
 
+                promoted_stage = waitlist_stage.pop(str(pid), None)
+                if promoted_stage is not None:
+                    participant_stage[str(pid)] = promoted_stage
+
             data["participants"] = participants
             data["waitlist"] = waitlist
             data["participant_ap"] = ap_map
             data["waitlist_ap"] = wl_map
+            data["participant_altar_stage"] = participant_stage
+            data["waitlist_altar_stage"] = waitlist_stage
 
             await self._save_refresh_dispatch(data)
 
@@ -6123,24 +6476,24 @@ class GruppensucheTest(commands.Cog):
                 return
 
             if str(data.get("category", "")).lower() != "altar":
-                await self._ephemeral_notice(interaction, "Step-Bearbeitung ist nur für Altar des Blutes.")
+                await self._ephemeral_notice(interaction, "Stufen-Bearbeitung ist nur für Altar des Blutes.")
                 return
 
             old_cleared = data.get("altar_cleared_step")
             old_target = data.get("altar_target_step")
 
             if session.altar_cleared_step is None:
-                await self._ephemeral_notice(interaction, "Bitte wähle den höchsten geclearten Step.")
+                await self._ephemeral_notice(interaction, "Bitte wähle deine höchste Altar-Stufe.")
                 return
 
             if session.altar_target_step is None:
-                await self._ephemeral_notice(interaction, "Bitte wähle den Ziel-Step.")
+                await self._ephemeral_notice(interaction, "Bitte wähle die Ziel-Stufe.")
                 return
 
             if session.altar_target_step <= session.altar_cleared_step:
                 await self._ephemeral_notice(
                     interaction,
-                    "Der Ziel-Step muss höher sein als der bereits geclearte Step.",
+                    "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe.",
                 )
                 return
 
@@ -6155,15 +6508,15 @@ class GruppensucheTest(commands.Cog):
                 changes=[
                     {
                         "key": "altar_cleared_step",
-                        "label": "Altar gecleart",
-                        "old": f"Step {old_cleared}" if old_cleared is not None else "—",
-                        "new": f"Step {data['altar_cleared_step']}",
+                        "label": "Eigene Altar-Stufe",
+                        "old": _fmt_altar_stage(old_cleared),
+                        "new": _fmt_altar_stage(data['altar_cleared_step']),
                     },
                     {
                         "key": "altar_target_step",
-                        "label": "Altar Ziel",
-                        "old": f"Step {old_target}" if old_target is not None else "—",
-                        "new": f"Step {data['altar_target_step']}",
+                        "label": "Ziel-Stufe",
+                        "old": _fmt_altar_stage(old_target),
+                        "new": _fmt_altar_stage(data['altar_target_step']),
                     },
                 ],
             )
