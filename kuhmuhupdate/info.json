@@ -1,43 +1,12 @@
-<<<<<<< HEAD
 {
-  "name": "KuhmuhUpdate",
-  "short": "Admin-Tool: einzelne Cogs updaten (uninstall → repo update → install → load).",
-  "description": "Ein administratives System-Cog für Kuhmuh, das Updates für einzelne, gespeicherte Cogs automatisiert. Unterstützt /update run mit Dropdown-Auswahl und /update manage (add/remove/list). Führt sequenziell Uninstall, Repo Update, Install und Load aus und gibt ein Status-Embed mit ✅⚠️❌⏭️ aus. Enthält einen Lock gegen parallele Updates.",
-  "end_user_data_statement": "Dieses Cog speichert keine personenbezogenen Daten. Es speichert ausschließlich technische Zuordnungen (Cog-Name → Repository-Name) sowie ggf. Konfiguration (z. B. Admin-Role-ID) zur Ausführung von Updates.",
-  "author": [
-    ""
-  ],
-  "version": "1.0.0",
-  "min_bot_version": "3.5.0",
+  "author": ["Lucarye"],
+  "install_msg": "triggerpost installiert. Nutze °load triggerpost, dann °triggerpost setchannel #hilfe.",
+  "name": "triggerpost",
+  "short": "Postet/aktualisiert eine Aushilfe-Liste per Trigger.",
+  "description": "Listet online Mitglieder zweier Rollen (Normal/Schwer) bei Triggerworten. Enthält Cooldown, Channel-Gating und Admin/Offiziere-Bypass.",
+  "tags": ["utility", "trigger", "roles", "presence"],
   "requirements": [],
-  "tags": [
-    "admin",
-    "maintenance",
-    "updater",
-    "kuhmuh"
-  ],
-  "hidden": false,
-  "install_msg": "✅ KuhmuhUpdate installiert. Konfiguriere zuerst /update manage add und stelle sicher, dass die Admin-Role korrekt gesetzt ist."
-}
-=======
-{
-  "name": "KuhmuhUpdate",
-  "short": "Admin-Tool: einzelne Cogs updaten (uninstall → repo update → install → load).",
-  "description": "Ein administratives System-Cog für Kuhmuh, das Updates für einzelne, gespeicherte Cogs automatisiert. Unterstützt /update run mit Dropdown-Auswahl und /update manage (add/remove/list). Führt sequenziell Uninstall, Repo Update, Install und Load aus und gibt ein Status-Embed mit ✅⚠️❌⏭️ aus. Enthält einen Lock gegen parallele Updates.",
-  "end_user_data_statement": "Dieses Cog speichert keine personenbezogenen Daten. Es speichert ausschließlich technische Zuordnungen (Cog-Name → Repository-Name) sowie ggf. Konfiguration (z. B. Admin-Role-ID) zur Ausführung von Updates.",
-  "author": [
-    "Julian Winkel"
-  ],
-  "version": "1.0.0",
   "min_bot_version": "3.5.0",
-  "requirements": [],
-  "tags": [
-    "admin",
-    "maintenance",
-    "updater",
-    "kuhmuh"
-  ],
-  "hidden": false,
-  "install_msg": "✅ KuhmuhUpdate installiert. Konfiguriere zuerst /update manage add und stelle sicher, dass die Admin-Role korrekt gesetzt ist."
+  "end_user_data_statement": "Speichert pro Guild: Trigger, Ziel-Channel, Message-ID, Cooldown.",
+  "type": "COG"
 }
->>>>>>> cadcd4a738f1706c3e2b001611a283e46086c7e2
