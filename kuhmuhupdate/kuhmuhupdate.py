@@ -9,12 +9,12 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-import discord
-from discord import app_commands
+import discord # pyright: ignore[reportMissingImports]
+from discord import app_commands # pyright: ignore[reportMissingImports]
 
-from redbot.core import commands, Config
-from redbot.core.bot import Red
-from discord.ext.commands.view import StringView
+from redbot.core import commands, Config # pyright: ignore[reportMissingImports]
+from redbot.core.bot import Red # pyright: ignore[reportMissingImports]
+from discord.ext.commands.view import StringView # pyright: ignore[reportMissingImports]
 
 log = logging.getLogger("red.kuhmuh.kuhmuhupdate")
 

@@ -9,10 +9,10 @@ import json
 import logging
 
 
-import discord
-from discord.ext import tasks
-from redbot.core import commands, Config
-from discord import app_commands
+import discord # pyright: ignore[reportMissingImports]
+from discord.ext import tasks # pyright: ignore[reportMissingImports]
+from redbot.core import commands, Config # pyright: ignore[reportMissingImports]
+from discord import app_commands # pyright: ignore[reportMissingImports]
 
 log = logging.getLogger("red.kuhmuh.dashboard")
 

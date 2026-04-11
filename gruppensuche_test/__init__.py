@@ -1,4 +1,4 @@
-from redbot.core.bot import Red
+from redbot.core.bot import Red # pyright: ignore[reportMissingImports]
 from .GruppensucheModule import GruppensucheTest
 
 async def setup(bot: Red) -> None:

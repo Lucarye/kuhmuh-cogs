@@ -12,7 +12,7 @@ from discord import PartialEmoji  # pyright: ignore[reportMissingImports]
 
 import discord  # pyright: ignore[reportMissingImports]
 # pyright: ignore[reportMissingImports]
-from redbot.core import commands, Config
+from redbot.core import commands, Config  # type: ignore
 import random
 import logging
 
@@ -2142,6 +2142,7 @@ class AtoraxxionRunView(WizardBaseView):
 
         await self.cog._goto_next(interaction, self.session, Step.atoraxxion_runs)
 
+
 class AltarStepSelect(discord.ui.Select):
     def __init__(self, host_view: "AltarStepView", which: str, current: Optional[int] = None):
         self.host_view = host_view
@@ -2188,10 +2189,13 @@ class AltarStepView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
 
-        self.add_item(AltarStepSelect(self, "cleared", session.altar_cleared_step))
-        self.add_item(AltarStepSelect(self, "target", session.altar_target_step))
+        self.add_item(AltarStepSelect(
+            self, "cleared", session.altar_cleared_step))
+        self.add_item(AltarStepSelect(
+            self, "target", session.altar_target_step))
 
-        self.add_item(build_back_button("Größe", BackTarget.PARTY, self, row=2))
+        self.add_item(build_back_button(
+            "Größe", BackTarget.PARTY, self, row=2))
 
         next_label = "Speichern" if session.mode == "edit" else "Weiter"
         next_btn = discord.ui.Button(
@@ -2244,7 +2248,8 @@ class AltarStepView(WizardBaseView):
                 "Der Ziel-Step muss höher sein als der bereits geclearte Step."
             ),
         )
-    
+
+
 class PartySizeSelect(discord.ui.Select):
     def __init__(self, host_view: "PartySizeView", min_n: int, max_n: int, current: Optional[int] = None):
         options = []
@@ -2974,8 +2979,10 @@ class GruppensucheTest(commands.Cog):
         self._interaction_guard[key] = now_ts
 
         # kleine opportunistische Bereinigung
-        cutoff = now_ts - max(30.0, float(self._interaction_guard_window) * 4.0)
-        stale_keys = [k for k, ts in self._interaction_guard.items() if float(ts) < cutoff]
+        cutoff = now_ts - \
+            max(30.0, float(self._interaction_guard_window) * 4.0)
+        stale_keys = [k for k, ts in self._interaction_guard.items()
+                      if float(ts) < cutoff]
         for stale in stale_keys:
             self._interaction_guard.pop(stale, None)
 
@@ -3868,7 +3875,8 @@ class GruppensucheTest(commands.Cog):
         guild_id = int(guild_id)
         self._dashboard_refresh_pending[guild_id] = True
 
-        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][SCHEDULE] guild_id={guild_id}")
+        log.info(
+            f"[KUHMUH][DASHBOARD][DISPATCH][SCHEDULE] guild_id={guild_id}")
 
         existing = self._dashboard_refresh_tasks.get(guild_id)
         if existing and not existing.done():
@@ -3882,20 +3890,24 @@ class GruppensucheTest(commands.Cog):
                     await asyncio.sleep(self._dashboard_refresh_delay)
 
                     try:
-                        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][START] guild_id={guild_id}")
+                        log.info(
+                            f"[KUHMUH][DASHBOARD][DISPATCH][START] guild_id={guild_id}")
 
                         dash = self.bot.get_cog("Gruppenübersicht")
                         if dash is None:
-                            log.warning(f"[KUHMUH][DASHBOARD][DISPATCH][NO COG] guild_id={guild_id}")
+                            log.warning(
+                                f"[KUHMUH][DASHBOARD][DISPATCH][NO COG] guild_id={guild_id}")
                             self._dashboard_refresh_pending[guild_id] = True
                             await asyncio.sleep(self._dashboard_refresh_retry_delay)
                             continue
 
-                        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][COG FOUND] guild_id={guild_id}")
+                        log.info(
+                            f"[KUHMUH][DASHBOARD][DISPATCH][COG FOUND] guild_id={guild_id}")
 
                         await dash.force_refresh_all(guild_id)
 
-                        log.info(f"[KUHMUH][DASHBOARD][DISPATCH][DONE] guild_id={guild_id}")
+                        log.info(
+                            f"[KUHMUH][DASHBOARD][DISPATCH][DONE] guild_id={guild_id}")
 
                     except Exception as e:
                         log.exception(
@@ -3905,7 +3917,8 @@ class GruppensucheTest(commands.Cog):
                         await asyncio.sleep(self._dashboard_refresh_retry_delay)
 
             except asyncio.CancelledError:
-                log.info(f"[KUHMUH][DASHBOARD][DISPATCH][CANCELLED] guild_id={guild_id}")
+                log.info(
+                    f"[KUHMUH][DASHBOARD][DISPATCH][CANCELLED] guild_id={guild_id}")
                 return
             finally:
                 self._dashboard_refresh_tasks.pop(guild_id, None)
@@ -5608,8 +5621,10 @@ class GruppensucheTest(commands.Cog):
             notes=data.get("notes"),
             own_ap=str(data.get("owner_ap") or "") or None,
             atoraxxion_runs=list(_normalize_atoraxxion_runs(data)),
-            altar_cleared_step=int(data.get("altar_cleared_step")) if data.get("altar_cleared_step") is not None else None,
-            altar_target_step=int(data.get("altar_target_step")) if data.get("altar_target_step") is not None else None,
+            altar_cleared_step=int(data.get("altar_cleared_step")) if data.get(
+                "altar_cleared_step") is not None else None,
+            altar_target_step=int(data.get("altar_target_step")) if data.get(
+                "altar_target_step") is not None else None,
         )
 
         session.wizard_interaction = interaction

@@ -3,8 +3,8 @@ import io
 import json
 from typing import Any, Dict, List, Optional
 
-import discord
-from redbot.core import commands
+import discord # pyright: ignore[reportMissingImports]
+from redbot.core import commands # pyright: ignore[reportMissingImports]
 
 MSG_RE = re.compile(r"channels/(\d+)/(\d+)")
 

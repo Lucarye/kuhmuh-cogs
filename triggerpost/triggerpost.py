@@ -3,11 +3,11 @@ import time
 from datetime import datetime
 from typing import Optional
 
-import discord
-from discord import ui, AllowedMentions
-from discord.ext import tasks
-from redbot.core import commands, Config
-from redbot.core.bot import Red
+import discord # pyright: ignore[reportMissingImports]
+from discord import ui, AllowedMentions # pyright: ignore[reportMissingImports]
+from discord.ext import tasks # pyright: ignore[reportMissingImports]
+from redbot.core import commands, Config # pyright: ignore[reportMissingImports]
+from redbot.core.bot import Red # pyright: ignore[reportMissingImports]
 
 # ====== Server-spezifische IDs ======
 ROLE_NORMAL = 1424768638157852682            # Muhhelfer – Normal
