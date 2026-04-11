@@ -493,6 +493,8 @@ def build_back_button(
             await interaction.response.defer()
             return
 
+        view.session.wizard_interaction = interaction
+
         # --- target auflösen (statisch / tuple / callable) ---
         spec: Any = target(view.session) if callable(target) else target
 
@@ -2601,7 +2603,7 @@ class EditMenuView(WizardBaseView):
 
         if str(post_data.get("category", "")).lower() == "altar":
             altar_btn = discord.ui.Button(
-                label="Altar-Step bearbeiten", style=discord.ButtonStyle.secondary, row=1
+                label="Altar-Stufe bearbeiten", style=discord.ButtonStyle.secondary, row=1
             )
             altar_btn.callback = self._altar
             self.add_item(altar_btn)
@@ -2611,7 +2613,7 @@ class EditMenuView(WizardBaseView):
         back_btn.callback = self._back
         self.add_item(back_btn)
 
-    @discord.ui.button(label="AP anpassen", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="AP anpassen", style=discord.ButtonStyle.secondary, row=0)
     async def edit_ap(self, interaction: discord.Interaction, button: discord.ui.Button):
         include_altar_stage = str(self.post_data.get(
             "category", "")).lower() == "altar"
@@ -4135,9 +4137,7 @@ class GruppensucheTest(commands.Cog):
                         if dash is None:
                             log.warning(
                                 f"[KUHMUH][DASHBOARD][DISPATCH][NO COG] guild_id={guild_id}")
-                            self._dashboard_refresh_pending[guild_id] = True
-                            await asyncio.sleep(self._dashboard_refresh_retry_delay)
-                            continue
+                            return
 
                         log.info(
                             f"[KUHMUH][DASHBOARD][DISPATCH][COG FOUND] guild_id={guild_id}")
@@ -6499,6 +6499,16 @@ class GruppensucheTest(commands.Cog):
 
             data["altar_cleared_step"] = int(session.altar_cleared_step)
             data["altar_target_step"] = int(session.altar_target_step)
+
+            participant_stage = data.get("participant_altar_stage")
+            if not isinstance(participant_stage, dict):
+                participant_stage = {}
+
+            owner_id = int(data.get("owner_id", 0))
+            if owner_id > 0:
+                participant_stage[str(owner_id)] = int(session.altar_cleared_step)
+
+            data["participant_altar_stage"] = participant_stage
 
             await self._save_refresh_dispatch(data)
 
