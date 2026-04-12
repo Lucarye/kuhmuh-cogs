@@ -772,6 +772,39 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
     return lines
 
 
+def _altar_recommended_ap_columns(*, start_step: Optional[object] = None, target_step: Optional[object] = None) -> tuple[str, str]:
+    lines = _altar_recommended_ap_lines(start_step=start_step, target_step=target_step)
+    left = "\n".join(lines[:10]) if lines[:10] else "—"
+    right = "\n".join(lines[10:]) if lines[10:] else "—"
+    return left, right
+
+
+def _altar_selected_ap_lines(*, start_step: Optional[object] = None, target_step: Optional[object] = None) -> list[str]:
+    lines: list[str] = []
+
+    try:
+        start_n = int(start_step) if start_step is not None else None
+    except Exception:
+        start_n = None
+
+    try:
+        target_n = int(target_step) if target_step is not None else None
+    except Exception:
+        target_n = None
+
+    if start_n is not None:
+        start_ap = ALTAR_REQUIRED_AP_BY_STEP.get(start_n)
+        if start_ap is not None:
+            lines.append(f"• Start-Stufe {start_n}: {start_ap} AP")
+
+    if target_n is not None:
+        target_ap = ALTAR_REQUIRED_AP_BY_STEP.get(target_n)
+        if target_ap is not None:
+            lines.append(f"• Ziel-Stufe {target_n}: {target_ap} AP")
+
+    return lines
+
+
 def _altar_ap_warning_for_target(target_step: object, ap_val: object) -> Optional[str]:
     try:
         step = int(target_step)
@@ -2729,11 +2762,9 @@ class AltarStepView(WizardBaseView):
 
         cleared_txt = _fmt_altar_stage(cleared)
         target_txt = _fmt_altar_stage(target)
-        recommended_block = "\n".join(
-            _altar_recommended_ap_lines(
-                start_step=cleared,
-                target_step=target,
-            )
+        recommended_left, recommended_right = _altar_recommended_ap_columns(
+            start_step=cleared,
+            target_step=target,
         )
 
         embed = discord.Embed(
@@ -2746,9 +2777,14 @@ class AltarStepView(WizardBaseView):
             ),
         )
         embed.add_field(
-            name="Empfohlene AP",
-            value=recommended_block,
-            inline=False,
+            name="Empfohlene AP 1-10",
+            value=recommended_left,
+            inline=True,
+        )
+        embed.add_field(
+            name="Empfohlene AP 11-21",
+            value=recommended_right,
+            inline=True,
         )
         return embed
 
@@ -4937,12 +4973,11 @@ class GruppensucheTest(commands.Cog):
             if current_group_size < max_players:
                 duration_hint = f"⚠️ Berechnung basiert auf aktueller Gruppenzusammensetzung ({current_group_size}/{max_players}).\n\n"
 
-            recommended_lines = "\n".join(
-                _altar_recommended_ap_lines(
-                    start_step=start_stage,
-                    target_step=target,
-                )
+            selected_ap_lines = _altar_selected_ap_lines(
+                start_step=start_stage,
+                target_step=target,
             )
+            recommended_lines = "\n".join(selected_ap_lines) if selected_ap_lines else "—"
 
             header = (
                 f"**Suchender:** {owner_display_altar}\n"
