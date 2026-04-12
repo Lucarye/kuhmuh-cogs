@@ -748,8 +748,6 @@ ALTAR_REQUIRED_AP_BY_STEP = {
 
 
 def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_step: Optional[object] = None) -> list[str]:
-    lines: list[str] = []
-
     try:
         start_n = int(start_step) if start_step is not None else None
     except Exception:
@@ -760,19 +758,16 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
     except Exception:
         target_n = None
 
-    if start_n is not None:
-        start_ap = ALTAR_REQUIRED_AP_BY_STEP.get(start_n)
-        if start_ap is not None:
-            lines.append(f"• Start-Stufe {start_n}: empfohlen {start_ap} AP")
+    lines: list[str] = []
+    for step, ap in ALTAR_REQUIRED_AP_BY_STEP.items():
+        marks: list[str] = []
+        if start_n == step:
+            marks.append("Dein Stand")
+        if target_n == step:
+            marks.append("Ziel")
 
-    if target_n is not None:
-        target_ap = ALTAR_REQUIRED_AP_BY_STEP.get(target_n)
-        if target_ap is not None:
-            lines.append(f"• Ziel-Stufe {target_n}: empfohlen {target_ap} AP")
-
-    if not lines:
-        for step, ap in ALTAR_REQUIRED_AP_BY_STEP.items():
-            lines.append(f"• Stufe {step}: {ap} AP")
+        suffix = f" ({', '.join(marks)})" if marks else ""
+        lines.append(f"• Stufe {step}: {ap} AP{suffix}")
 
     return lines
 
