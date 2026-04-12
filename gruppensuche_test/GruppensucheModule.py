@@ -2706,17 +2706,21 @@ class AltarStepView(WizardBaseView):
             )
         )
 
-        return discord.Embed(
+        embed = discord.Embed(
             title="🩸 Gruppensuche – Altar des Blutes",
             description=(
                 "Wähle die Altar-Stufen für deine Suche.\n\n"
                 f"**Deine höchste Altar-Stufe:** {cleared_txt}\n"
                 f"**Geplante Ziel-Stufe:** {target_txt}\n\n"
-                "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe.\n\n"
-                "**Empfohlene AP:**\n"
-                f"{recommended_block}"
+                "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe."
             ),
         )
+        embed.add_field(
+            name="Empfohlene AP",
+            value=recommended_block,
+            inline=False,
+        )
+        return embed
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -4042,7 +4046,10 @@ class GruppensucheTest(commands.Cog):
         # Das verhindert "zweites Ephemeral" nach Modal-Submit.
         if msg is not None and getattr(msg.flags, "ephemeral", False):
             try:
-                await msg.edit(embed=embed, view=view)
+                if not interaction.response.is_done():
+                    await interaction.response.edit_message(embed=embed, view=view)
+                else:
+                    await msg.edit(embed=embed, view=view)
                 return
             except Exception as exc:
                 self._log_warning(
