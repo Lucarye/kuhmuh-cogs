@@ -780,7 +780,10 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
             marks.append("Ziel")
 
         suffix = f" ({', '.join(marks)})" if marks else ""
-        lines.append(f"• Stufe {step}: {ap} AP / {dp} VK{suffix}")
+        line = f"• Stufe {step}: {ap} AP / {dp} VK{suffix}"
+        if marks:
+            line = f"**{line}**"
+        lines.append(line)
 
     return lines
 
@@ -5014,9 +5017,9 @@ class GruppensucheTest(commands.Cog):
                 f"• Geplante Start-Stufe: {start_stage_txt}\n"
                 f"• Ziel-Stufe: {target_txt}\n"
                 f"• Geschätzte Dauer: {duration_calc_txt}\n\n"
+                + duration_hint +
                 f"**Empfohlene AP:**\n"
                 f"{recommended_lines}\n\n"
-                + duration_hint
             )
 
             e.description = (
