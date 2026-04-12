@@ -495,7 +495,7 @@ def build_back_button(
             await interaction.response.defer()
             return
 
-        view.session.wizard_interaction = interaction
+        view.cog._remember_wizard_interaction(view.session, interaction)
 
         # --- target auflösen (statisch / tuple / callable) ---
         spec: Any = target(view.session) if callable(target) else target
@@ -505,11 +505,6 @@ def build_back_button(
             kwargs = dict(kwargs or {})
         else:
             resolved_target, kwargs = spec, {}
-
-        # --- Edit-Mode: Back IMMER ins Edit-Menü (keine Mischlogik mehr) ---
-        if view.session.mode == "edit":
-            resolved_target = BackTarget.EDIT_MENU
-            kwargs = {}
 
         await view.cog._go_back(interaction, view.session, resolved_target, **kwargs)
 
@@ -1055,6 +1050,7 @@ class WizardSession:
     mode: str = "create"  # "create" | "edit"
     edit_message_id: Optional[int] = None
     wizard_interaction: Optional[discord.Interaction] = None
+    current_step: Optional[str] = None
 
     category: Optional[str] = None  # "muhhelfer" | "spots" | "pilafe"
     day_date_iso: Optional[str] = None
@@ -2747,7 +2743,7 @@ class EditMenuView(WizardBaseView):
             await interaction.response.defer()
             return
         # ✅ wichtig: wizard_interaction auf die aktuelle Ephemeral-Message setzen
-        self.session.wizard_interaction = interaction
+        self.cog._remember_wizard_interaction(self.session, interaction)
         await self.cog._send_day_selection(interaction, self.session)
 
     # --- EditMenuView._size: allow_one berechnen und übergeben ---
@@ -2756,7 +2752,7 @@ class EditMenuView(WizardBaseView):
             await interaction.response.defer()
             return
 
-        self.session.wizard_interaction = interaction
+        self.cog._remember_wizard_interaction(self.session, interaction)
 
         current = int(self.post_data.get("max_players", 2))
 
@@ -2774,9 +2770,9 @@ class EditMenuView(WizardBaseView):
             return
 
         # ✅ wichtig
-        self.session.wizard_interaction = interaction
+        self.cog._remember_wizard_interaction(self.session, interaction)
 
-        defaults = dict(self.post_data)
+        defaults = self.cog._build_session_view_data(self.session, self.post_data)
         defaults["req_default"] = _default_req_for(self.post_data)
 
         try:
@@ -2789,14 +2785,14 @@ class EditMenuView(WizardBaseView):
             await interaction.response.defer()
             return
         # ✅ wichtig
-        self.session.wizard_interaction = interaction
+        self.cog._remember_wizard_interaction(self.session, interaction)
         await self.cog._send_atoraxxion_runs(interaction, self.session, back_target=BackTarget.EDIT_MENU)
 
     async def _altar(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
-        self.session.wizard_interaction = interaction
+        self.cog._remember_wizard_interaction(self.session, interaction)
         await self.cog._send_altar_steps(interaction, self.session)
 
     async def _back(self, interaction: discord.Interaction):
@@ -3292,6 +3288,51 @@ class GruppensucheTest(commands.Cog):
         if user_id in self._sessions:
             del self._sessions[user_id]
 
+    def _remember_wizard_interaction(self, session: WizardSession, interaction: discord.Interaction) -> None:
+        msg = getattr(interaction, "message", None)
+
+        if msg is not None and getattr(msg.flags, "ephemeral", False):
+            session.wizard_interaction = interaction
+            return
+
+        if session.wizard_interaction is None:
+            session.wizard_interaction = interaction
+
+    def _build_session_view_data(self, session: WizardSession, data: dict) -> dict:
+        merged = dict(data)
+
+        if session.category is not None:
+            merged["category"] = session.category
+        if session.day_date_iso is not None:
+            merged["day_date_iso"] = session.day_date_iso
+        if session.difficulty is not None:
+            merged["difficulty"] = session.difficulty
+        if session.spot_key is not None:
+            merged["spot_key"] = session.spot_key
+        if session.olun_tier is not None:
+            merged["olun_tier"] = session.olun_tier
+        if session.max_players is not None:
+            merged["max_players"] = int(session.max_players)
+        if session.scroll_amount is not None:
+            merged["scroll_amount"] = session.scroll_amount
+        if session.duration_text is not None:
+            merged["duration_text"] = session.duration_text
+        if session.start_text is not None:
+            merged["start_text"] = session.start_text
+        if session.req_text is not None:
+            merged["req_text"] = session.req_text
+        if session.notes is not None:
+            merged["notes"] = session.notes
+        if session.own_ap is not None:
+            merged["owner_ap"] = session.own_ap
+
+        merged["boss_runs"] = dict(session.boss_runs or {})
+        merged["atoraxxion_runs"] = list(session.atoraxxion_runs or [])
+        merged["altar_cleared_step"] = session.altar_cleared_step
+        merged["altar_target_step"] = session.altar_target_step
+
+        return merged
+
     def _interaction_guard_key(
         self,
         *,
@@ -3369,6 +3410,8 @@ class GruppensucheTest(commands.Cog):
             await asyncio.sleep(60 * 60)  # 1h
 
     async def _go_back(self, interaction: discord.Interaction, session: WizardSession, target: str, **kwargs):
+        self._remember_wizard_interaction(session, interaction)
+
         # Edit-Mode Back bleibt wie bei euch über build_back_button geregelt.
         if target == BackTarget.START:
             await self._send_step(interaction, session, Step.START)
@@ -3431,6 +3474,9 @@ class GruppensucheTest(commands.Cog):
         Zentrale Render-Funktion für Wizard-Steps.
         kwargs sind nur für spezielle Steps (z.B. back_target bei DAY).
         """
+        session.current_step = step
+        self._remember_wizard_interaction(session, interaction)
+
         if step == Step.START:
             await self._send_start(interaction, session)
             return
@@ -3744,7 +3790,19 @@ class GruppensucheTest(commands.Cog):
 
         # 🔒 Wenn Interaction vom PUBLIC POST kommt → NIEMALS editieren!
         if msg is not None and not getattr(msg.flags, "ephemeral", False):
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            except Exception as exc:
+                self._log_warning(
+                    "WIZARD_UI",
+                    "public interaction could not open ephemeral wizard view",
+                    user_id=int(interaction.user.id),
+                    step=getattr(view, "session", None).current_step if hasattr(view, "session") else None,
+                    error=type(exc).__name__,
+                )
             return
 
         # ✅ WICHTIG: Wenn wir eine Ephemeral-Message haben, editieren wir DIE direkt.
@@ -3753,8 +3811,14 @@ class GruppensucheTest(commands.Cog):
             try:
                 await msg.edit(embed=embed, view=view)
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_warning(
+                    "WIZARD_UI",
+                    "ephemeral message edit failed",
+                    user_id=int(interaction.user.id),
+                    step=getattr(view, "session", None).current_step if hasattr(view, "session") else None,
+                    error=type(exc).__name__,
+                )
 
         # Normalfall: Wizard-Ephemeral wird editiert
         try:
@@ -3762,8 +3826,27 @@ class GruppensucheTest(commands.Cog):
                 await interaction.response.edit_message(embed=embed, view=view)
             else:
                 await interaction.edit_original_response(embed=embed, view=view)
-        except Exception:
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        except Exception as exc:
+            self._log_warning(
+                "WIZARD_UI",
+                "wizard interaction edit failed, trying fallback send",
+                user_id=int(interaction.user.id),
+                step=getattr(view, "session", None).current_step if hasattr(view, "session") else None,
+                error=type(exc).__name__,
+            )
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            except Exception as fallback_exc:
+                self._log_error(
+                    "WIZARD_UI",
+                    "wizard fallback send failed",
+                    user_id=int(interaction.user.id),
+                    step=getattr(view, "session", None).current_step if hasattr(view, "session") else None,
+                    error=type(fallback_exc).__name__,
+                )
 
     async def _ephemeral_notice(
         self,
@@ -3798,9 +3881,13 @@ class GruppensucheTest(commands.Cog):
             else:
                 await interaction.response.send_message(**payload)
 
-        except Exception:
-            # bewusst still
-            pass
+        except Exception as exc:
+            self._log_warning(
+                "WIZARD_UI",
+                "ephemeral notice failed",
+                user_id=int(interaction.user.id),
+                error=type(exc).__name__,
+            )
 
     async def _send_ephemeral_new(self, interaction: discord.Interaction, embed: discord.Embed, view: discord.ui.View):
         try:
@@ -6069,6 +6156,7 @@ class GruppensucheTest(commands.Cog):
             guild_id=int(interaction.guild_id or 0),
             mode="edit",
             edit_message_id=int(message_id),
+            current_step=Step.EDIT_MENU,
 
             category=str(data.get("category") or ""),
             day_date_iso=str(data.get("day_date_iso") or ""),
@@ -6094,7 +6182,7 @@ class GruppensucheTest(commands.Cog):
                 "altar_target_step") is not None else None,
         )
 
-        session.wizard_interaction = interaction
+        self._remember_wizard_interaction(session, interaction)
         self._sessions[int(interaction.user.id)] = session
 
         view = EditMenuView(self, session, data)
@@ -6140,7 +6228,8 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
             return
 
-        view = EditMenuView(self, session, data)
+        session.current_step = Step.EDIT_MENU
+        view = EditMenuView(self, session, self._build_session_view_data(session, data))
 
         # ✅ wichtig: wenn möglich immer die Interaction nehmen,
         # die zur Wizard-Ephemeral-Message gehört
