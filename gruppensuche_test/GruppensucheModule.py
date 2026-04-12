@@ -722,29 +722,40 @@ def _fmt_duration_minutes(total_minutes: int) -> str:
         return f"~{hours}h {minutes:02d}m"
     return f"~{minutes}m"
 
-ALTAR_REQUIRED_AP_BY_STEP = {
-    1: 300,
-    2: 305,
-    3: 310,
-    4: 315,
-    5: 320,
-    6: 325,
-    7: 330,
-    8: 335,
-    9: 340,
-    10: 345,
-    11: 350,
-    12: 355,
-    13: 360,
-    14: 365,
-    15: 370,
-    16: 375,
-    17: 380,
-    18: 385,
-    19: 390,
-    20: 395,
-    21: 400,
+ALTAR_REQUIRED_STATS_BY_STEP = {
+    1: {"division": "general", "ap": 300, "dp": 390},
+    2: {"division": "general", "ap": 305, "dp": 390},
+    3: {"division": "head", "ap": 310, "dp": 400},
+    4: {"division": "general", "ap": 315, "dp": 400},
+    5: {"division": "general", "ap": 320, "dp": 400},
+    6: {"division": "head", "ap": 325, "dp": 410},
+    7: {"division": "general", "ap": 330, "dp": 410},
+    8: {"division": "general", "ap": 335, "dp": 420},
+    9: {"division": "head", "ap": 340, "dp": 430},
+    10: {"division": "general", "ap": 345, "dp": 430},
+    11: {"division": "general", "ap": 350, "dp": 430},
+    12: {"division": "head", "ap": 355, "dp": 430},
+    13: {"division": "general", "ap": 360, "dp": 430},
+    14: {"division": "general", "ap": 365, "dp": 440},
+    15: {"division": "head", "ap": 370, "dp": 440},
+    16: {"division": "general", "ap": 375, "dp": 440},
+    17: {"division": "general", "ap": 380, "dp": 440},
+    18: {"division": "head", "ap": 385, "dp": 450},
+    19: {"division": "general", "ap": 390, "dp": 450},
+    20: {"division": "general", "ap": 395, "dp": 450},
+    21: {"division": "head", "ap": 400, "dp": 460},
 }
+
+
+def _altar_required_stats_for_step(step: Optional[object]) -> Optional[dict]:
+    try:
+        step_n = int(step) if step is not None else None
+    except Exception:
+        return None
+    if step_n is None:
+        return None
+    stats = ALTAR_REQUIRED_STATS_BY_STEP.get(step_n)
+    return dict(stats) if isinstance(stats, dict) else None
 
 
 def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_step: Optional[object] = None) -> list[str]:
@@ -759,7 +770,9 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
         target_n = None
 
     lines: list[str] = []
-    for step, ap in ALTAR_REQUIRED_AP_BY_STEP.items():
+    for step, stats in ALTAR_REQUIRED_STATS_BY_STEP.items():
+        ap = stats.get("ap")
+        dp = stats.get("dp")
         marks: list[str] = []
         if start_n == step:
             marks.append("Dein Stand")
@@ -767,7 +780,7 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
             marks.append("Ziel")
 
         suffix = f" ({', '.join(marks)})" if marks else ""
-        lines.append(f"• Stufe {step}: {ap} AP{suffix}")
+        lines.append(f"• Stufe {step}: {ap} AP / {dp} VK{suffix}")
 
     return lines
 
@@ -793,14 +806,18 @@ def _altar_selected_ap_lines(*, start_step: Optional[object] = None, target_step
         target_n = None
 
     if start_n is not None:
-        start_ap = ALTAR_REQUIRED_AP_BY_STEP.get(start_n)
-        if start_ap is not None:
-            lines.append(f"• Start-Stufe {start_n}: {start_ap} AP")
+        start_stats = _altar_required_stats_for_step(start_n)
+        if start_stats is not None:
+            lines.append(
+                f"• Start-Stufe {start_n}: {start_stats['ap']} AP / {start_stats['dp']} VK"
+            )
 
     if target_n is not None:
-        target_ap = ALTAR_REQUIRED_AP_BY_STEP.get(target_n)
-        if target_ap is not None:
-            lines.append(f"• Ziel-Stufe {target_n}: {target_ap} AP")
+        target_stats = _altar_required_stats_for_step(target_n)
+        if target_stats is not None:
+            lines.append(
+                f"• Ziel-Stufe {target_n}: {target_stats['ap']} AP / {target_stats['dp']} VK"
+            )
 
     return lines
 
@@ -812,15 +829,16 @@ def _altar_ap_warning_for_target(target_step: object, ap_val: object) -> Optiona
     except Exception:
         return None
 
-    required = ALTAR_REQUIRED_AP_BY_STEP.get(step)
-    if required is None:
+    required_stats = _altar_required_stats_for_step(step)
+    if required_stats is None:
         return None
+    required = required_stats["ap"]
 
     diff = required - ap
     if diff > 20:
         return (
             f"⚠️ Deine AP liegt **{diff}** unter der empfohlenen AP für "
-            f"**Stufe {step}** ({required} AP)."
+            f"**Stufe {step}** ({required_stats['ap']} AP / {required_stats['dp']} VK)."
         )
     return None
 
@@ -861,8 +879,11 @@ def _altar_estimated_duration_minutes(data: dict) -> Optional[int]:
     if start_stage is None:
         return None
 
-    if target_stage <= start_stage:
-        return 0
+    if target_stage < start_stage:
+        return None
+
+    if target_stage == start_stage:
+        return 8
 
     return (target_stage - start_stage) * 8
 
@@ -1243,6 +1264,7 @@ class DetailsModal(discord.ui.Modal):
                 req_default_value = existing_req
 
         cat = (session.category or "").lower()
+        is_altar_create = cat == "altar" and session.mode == "create"
 
         # Standard (muhhelfer/spots): AK/VK
         req_label = "Gewünschte AK/VK (optional)"
@@ -1278,7 +1300,8 @@ class DetailsModal(discord.ui.Modal):
             self.add_item(self.start_text)
             self.add_item(self.notes)
         else:
-            self.add_item(self.duration_text)
+            if not is_altar_create:
+                self.add_item(self.duration_text)
             self.add_item(self.start_text)
             self.add_item(self.req_text)
             self.add_item(self.notes)
@@ -1333,7 +1356,7 @@ class DetailsModal(discord.ui.Modal):
         except discord.InteractionResponded:
             pass
 
-        duration_val = str(self.duration_text.value).strip()
+        duration_val = str(self.duration_text.value).strip() if hasattr(self, "duration_text") else ""
         start_val = str(self.start_text.value).strip()
         req_val = str(self.req_text.value).strip()
         notes_val = str(self.notes.value).strip()
