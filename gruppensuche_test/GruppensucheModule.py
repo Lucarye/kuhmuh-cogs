@@ -732,6 +732,36 @@ ALTAR_REQUIRED_AP_BY_STEP = {
 }
 
 
+def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_step: Optional[object] = None) -> list[str]:
+    lines: list[str] = []
+
+    try:
+        start_n = int(start_step) if start_step is not None else None
+    except Exception:
+        start_n = None
+
+    try:
+        target_n = int(target_step) if target_step is not None else None
+    except Exception:
+        target_n = None
+
+    if start_n is not None:
+        start_ap = ALTAR_REQUIRED_AP_BY_STEP.get(start_n)
+        if start_ap is not None:
+            lines.append(f"• Start-Stufe {start_n}: empfohlen {start_ap} AP")
+
+    if target_n is not None:
+        target_ap = ALTAR_REQUIRED_AP_BY_STEP.get(target_n)
+        if target_ap is not None:
+            lines.append(f"• Ziel-Stufe {target_n}: empfohlen {target_ap} AP")
+
+    if not lines:
+        for step, ap in ALTAR_REQUIRED_AP_BY_STEP.items():
+            lines.append(f"• Stufe {step}: {ap} AP")
+
+    return lines
+
+
 def _altar_ap_warning_for_target(target_step: object, ap_val: object) -> Optional[str]:
     try:
         step = int(target_step)
@@ -1401,8 +1431,8 @@ class APAdjustModal(discord.ui.Modal):
 
         if self.include_altar_stage:
             self.altar_stage = discord.ui.TextInput(
-                label="Deine höchste Altar-Stufe",
-                placeholder="z.B. 21",
+                label="Deine höchste Altar-Stufe (1-21)",
+                placeholder="Nur Zahl eingeben, z.B. 21",
                 required=True,
                 max_length=4,
                 default=(str(current_stage)
@@ -1480,8 +1510,8 @@ class JoinApModal(discord.ui.Modal):
 
         if self.include_altar_stage:
             self.altar_stage = discord.ui.TextInput(
-                label="Deine höchste Altar-Stufe",
-                placeholder="z.B. 21",
+                label="Deine höchste Altar-Stufe (1-21)",
+                placeholder="Nur Zahl eingeben, z.B. 21",
                 required=True,
                 max_length=4,
                 default=(str(current_stage)
@@ -2577,7 +2607,7 @@ class AltarStepSelect(discord.ui.Select):
         options = []
         for n in range(1, 22):
             label = f"Stufe {n}"
-            desc = "Deine höchste Altar-Stufe" if which == "cleared" else "Geplante Ziel-Stufe"
+            desc = "Eigene höchste Altar-Stufe (1-21)" if which == "cleared" else "Geplante Ziel-Stufe (1-21)"
             options.append(
                 discord.SelectOption(
                     label=label,
@@ -2587,7 +2617,7 @@ class AltarStepSelect(discord.ui.Select):
                 )
             )
 
-        placeholder = "Deine höchste Altar-Stufe..." if which == "cleared" else "Geplante Ziel-Stufe..."
+        placeholder = "Deine höchste Altar-Stufe (1-21)..." if which == "cleared" else "Geplante Ziel-Stufe (1-21)..."
         super().__init__(
             placeholder=placeholder,
             min_values=1,
@@ -2669,6 +2699,12 @@ class AltarStepView(WizardBaseView):
 
         cleared_txt = _fmt_altar_stage(cleared)
         target_txt = _fmt_altar_stage(target)
+        recommended_block = "\n".join(
+            _altar_recommended_ap_lines(
+                start_step=cleared,
+                target_step=target,
+            )
+        )
 
         return discord.Embed(
             title="🩸 Gruppensuche – Altar des Blutes",
@@ -2676,7 +2712,9 @@ class AltarStepView(WizardBaseView):
                 "Wähle die Altar-Stufen für deine Suche.\n\n"
                 f"**Deine höchste Altar-Stufe:** {cleared_txt}\n"
                 f"**Geplante Ziel-Stufe:** {target_txt}\n\n"
-                "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe."
+                "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe.\n\n"
+                "**Empfohlene AP:**\n"
+                f"{recommended_block}"
             ),
         )
 
@@ -2899,8 +2937,6 @@ class EditMenuView(WizardBaseView):
         self.add_item(back_btn)
 
     async def edit_ap(self, interaction: discord.Interaction):
-        include_altar_stage = str(self.post_data.get(
-            "category", "")).lower() == "altar"
         owner_id = int(self.post_data.get("owner_id", 0))
         current_stage = None
         current_ap = None
@@ -2908,20 +2944,12 @@ class EditMenuView(WizardBaseView):
         p_ap = self.post_data.get("participant_ap") or {}
         current_ap = p_ap.get(str(owner_id))
 
-        if include_altar_stage:
-            p_stage = self.post_data.get("participant_altar_stage") or {}
-            current_stage = p_stage.get(str(owner_id))
-            try:
-                current_stage = int(current_stage)
-            except Exception:
-                current_stage = None
-
         try:
             await interaction.response.send_modal(
                 APAdjustModal(
                     self.cog,
                     self.message_id,
-                    include_altar_stage=include_altar_stage,
+                    include_altar_stage=False,
                     current_stage=current_stage,
                     current_ap=current_ap,
                 )
@@ -2931,7 +2959,7 @@ class EditMenuView(WizardBaseView):
                 APAdjustModal(
                     self.cog,
                     self.message_id,
-                    include_altar_stage=include_altar_stage,
+                    include_altar_stage=False,
                     current_stage=current_stage,
                     current_ap=current_ap,
                 )
@@ -3965,6 +3993,12 @@ class GruppensucheTest(commands.Cog):
 
     async def _send_final_form(self, interaction: discord.Interaction, session: WizardSession):
         defaults = {
+            "own_ap": session.own_ap,
+            "duration_text": session.duration_text,
+            "start_text": session.start_text,
+            "req_text": session.req_text,
+            "notes": session.notes,
+            "scroll_amount": session.scroll_amount,
             "req_default": _default_req_for(
                 {
                     "category": session.category,
@@ -4831,6 +4865,13 @@ class GruppensucheTest(commands.Cog):
             if current_group_size < max_players:
                 duration_hint = f"⚠️ Berechnung basiert auf aktueller Gruppenzusammensetzung ({current_group_size}/{max_players}).\n\n"
 
+            recommended_lines = "\n".join(
+                _altar_recommended_ap_lines(
+                    start_step=start_stage,
+                    target_step=target,
+                )
+            )
+
             header = (
                 f"**Suchender:** {owner_display_altar}\n"
                 f"**Kategorie:** Altar des Blutes\n"
@@ -4843,6 +4884,8 @@ class GruppensucheTest(commands.Cog):
                 f"• Geplante Start-Stufe: {start_stage_txt}\n"
                 f"• Ziel-Stufe: {target_txt}\n"
                 f"• Geschätzte Dauer: {duration_calc_txt}\n\n"
+                f"**Empfohlene AP:**\n"
+                f"{recommended_lines}\n\n"
                 + duration_hint
             )
 
