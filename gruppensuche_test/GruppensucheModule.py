@@ -482,8 +482,10 @@ def build_back_button(
     *,
     row: int = 2,
 ) -> discord.ui.Button:
+    button_label = "Zurück (Bearbeiten)" if view.session.mode == "edit" else f"Zurück ({label})"
+
     btn = discord.ui.Button(
-        label=f"Zurück ({label})",
+        label=button_label,
         style=discord.ButtonStyle.secondary,
         row=row,
     )
@@ -710,6 +712,49 @@ def _fmt_duration_minutes(total_minutes: int) -> str:
         return f"~{hours}h {minutes:02d}m"
     return f"~{minutes}m"
 
+ALTAR_REQUIRED_AP_BY_STEP = {
+    1: 300,
+    2: 305,
+    3: 310,
+    4: 315,
+    5: 320,
+    6: 325,
+    7: 330,
+    8: 335,
+    9: 340,
+    10: 345,
+    11: 350,
+    12: 355,
+    13: 360,
+    14: 365,
+    15: 370,
+    16: 375,
+    17: 380,
+    18: 385,
+    19: 390,
+    20: 395,
+    21: 400,
+}
+
+
+def _altar_ap_warning_for_target(target_step: object, ap_val: object) -> Optional[str]:
+    try:
+        step = int(target_step)
+        ap = int(str(ap_val).replace(".", "").replace(" ", "").replace(",", ""))
+    except Exception:
+        return None
+
+    required = ALTAR_REQUIRED_AP_BY_STEP.get(step)
+    if required is None:
+        return None
+
+    diff = required - ap
+    if diff > 20:
+        return (
+            f"⚠️ Deine AP liegt **{diff}** unter der empfohlenen AP für "
+            f"**Stufe {step}** ({required} AP)."
+        )
+    return None
 
 def _altar_current_start_stage(data: dict) -> Optional[int]:
     participants = [int(x) for x in (data.get("participants") or [])]
@@ -1342,6 +1387,7 @@ class APAdjustModal(discord.ui.Modal):
         *,
         include_altar_stage: bool = False,
         current_stage: Optional[int] = None,
+        current_ap: Optional[str] = None,
     ):
         super().__init__(title="AP anpassen")
         self.cog = cog
@@ -1353,6 +1399,7 @@ class APAdjustModal(discord.ui.Modal):
             placeholder="z.B. 301",
             required=True,
             max_length=16,
+            default=(str(current_ap) if current_ap is not None else None),
         )
         self.add_item(self.ap_value)
 
@@ -1375,6 +1422,8 @@ class APAdjustModal(discord.ui.Modal):
                     self.cog,
                     self.message_id,
                     include_altar_stage=self.include_altar_stage,
+                    current_stage=(int(self.altar_stage.value) if self.include_altar_stage and str(self.altar_stage.value).strip().isdigit() else None),
+                    current_ap=str(self.ap_value.value).strip(),
                 )
             )
             return
@@ -1388,6 +1437,8 @@ class APAdjustModal(discord.ui.Modal):
                         self.cog,
                         self.message_id,
                         include_altar_stage=True,
+                        current_stage=None,
+                        current_ap=str(self.ap_value.value).strip(),
                     )
                 )
                 return
@@ -1398,6 +1449,8 @@ class APAdjustModal(discord.ui.Modal):
                         self.cog,
                         self.message_id,
                         include_altar_stage=True,
+                        current_stage=altar_stage,
+                        current_ap=str(self.ap_value.value).strip(),
                     )
                 )
                 return
@@ -1406,7 +1459,15 @@ class APAdjustModal(discord.ui.Modal):
 
 
 class JoinApModal(discord.ui.Modal):
-    def __init__(self, cog, on_done, *, include_altar_stage: bool = False, current_stage: Optional[int] = None):
+    def __init__(
+        self,
+        cog,
+        on_done,
+        *,
+        include_altar_stage: bool = False,
+        current_stage: Optional[int] = None,
+        current_ap: Optional[str] = None,
+    ):
         super().__init__(title="AP bei Anmeldung")
         self.cog = cog
         self.on_done = on_done
@@ -1417,6 +1478,7 @@ class JoinApModal(discord.ui.Modal):
             placeholder="z.B. 301",
             required=True,
             max_length=16,
+            default=(str(current_ap) if current_ap is not None else None),
         )
         self.add_item(self.ap)
 
@@ -1443,6 +1505,13 @@ class JoinApModal(discord.ui.Modal):
                         self.cog,
                         self.on_done,
                         include_altar_stage=self.include_altar_stage,
+                        current_stage=(
+                            int(self.altar_stage.value)
+                            if self.include_altar_stage
+                            and str(self.altar_stage.value).strip().isdigit()
+                            else None
+                        ),
+                        current_ap=str(self.ap.value).strip(),
                     )
                 ),
             )
@@ -1456,10 +1525,12 @@ class JoinApModal(discord.ui.Modal):
                     "❌ **Altar-Stufe ungültig.** Bitte nur Zahlen von `1` bis `21` eintragen.",
                     ephemeral=True,
                     view=_ReopenModalView(
-                        lambda: JoinApModal(
-                            self.cog,
-                            self.on_done,
-                            include_altar_stage=True,
+                    lambda: JoinApModal(
+                        self.cog,
+                        self.on_done,
+                        include_altar_stage=self.include_altar_stage,
+                        current_stage=(int(self.altar_stage.value) if self.include_altar_stage and str(self.altar_stage.value).strip().isdigit() else None),
+                        current_ap=str(self.ap.value).strip(),
                         )
                     ),
                 )
@@ -1475,6 +1546,8 @@ class JoinApModal(discord.ui.Modal):
                             self.cog,
                             self.on_done,
                             include_altar_stage=True,
+                            current_stage=stage_int,
+                            current_ap=str(self.ap.value).strip(),
                         )
                     ),
                 )
@@ -2364,7 +2437,8 @@ class AltarStepSelect(discord.ui.Select):
         else:
             self.host_view.session.altar_target_step = picked
 
-        await interaction.response.edit_message(embed=self.host_view.embed(), view=self.host_view)
+        new_view = AltarStepView(self.host_view.cog, self.host_view.session)
+        await interaction.response.edit_message(embed=new_view.embed(), view=new_view)
 
 
 class AltarStepView(WizardBaseView):
@@ -2377,7 +2451,11 @@ class AltarStepView(WizardBaseView):
             self, "target", session.altar_target_step))
 
         self.add_item(build_back_button(
-            "Größe", BackTarget.PARTY, self, row=2))
+            "Bearbeiten" if session.mode == "edit" else "Größe",
+            BackTarget.EDIT_MENU if session.mode == "edit" else BackTarget.PARTY,
+            self,
+            row=2,
+        ))
 
         next_label = "Speichern" if session.mode == "edit" else "Weiter"
         next_btn = discord.ui.Button(
@@ -2490,7 +2568,12 @@ class PartySizeView(WizardBaseView):
             mn = 1
 
         self.add_item(PartySizeSelect(self, mn, mx, current=current))
-        self.add_item(build_back_button("Tag", BackTarget.DAY, self, row=1))
+        self.add_item(build_back_button(
+            "Bearbeiten" if session.mode == "edit" else "Tag",
+            BackTarget.EDIT_MENU if session.mode == "edit" else BackTarget.DAY,
+            self,
+            row=1,
+        ))
 
     def embed(self) -> discord.Embed:
         mn, mx = _allowed_party_range(
@@ -2590,6 +2673,11 @@ class EditMenuView(WizardBaseView):
         size_btn.callback = self._size
         details_btn.callback = self._details
 
+        ap_btn = discord.ui.Button(
+            label="AP anpassen", style=discord.ButtonStyle.secondary, row=0
+        )
+        ap_btn.callback = self.edit_ap
+
         self.add_item(tag_btn)
         self.add_item(size_btn)
         self.add_item(details_btn)
@@ -2608,17 +2696,22 @@ class EditMenuView(WizardBaseView):
             altar_btn.callback = self._altar
             self.add_item(altar_btn)
 
+        self.add_item(ap_btn)
+
         back_btn = discord.ui.Button(
             label="Bearbeitung beenden", style=discord.ButtonStyle.secondary, row=2)
         back_btn.callback = self._back
         self.add_item(back_btn)
 
-    @discord.ui.button(label="AP anpassen", style=discord.ButtonStyle.secondary, row=0)
-    async def edit_ap(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def edit_ap(self, interaction: discord.Interaction):
         include_altar_stage = str(self.post_data.get(
             "category", "")).lower() == "altar"
         owner_id = int(self.post_data.get("owner_id", 0))
         current_stage = None
+        current_ap = None
+
+        p_ap = self.post_data.get("participant_ap") or {}
+        current_ap = p_ap.get(str(owner_id))
 
         if include_altar_stage:
             p_stage = self.post_data.get("participant_altar_stage") or {}
@@ -2635,6 +2728,7 @@ class EditMenuView(WizardBaseView):
                     self.message_id,
                     include_altar_stage=include_altar_stage,
                     current_stage=current_stage,
+                    current_ap=current_ap,
                 )
             )
         except discord.InteractionResponded:
@@ -2644,6 +2738,7 @@ class EditMenuView(WizardBaseView):
                     self.message_id,
                     include_altar_stage=include_altar_stage,
                     current_stage=current_stage,
+                    current_ap=current_ap,
                 )
             )
 
@@ -2919,6 +3014,12 @@ class PublicPostView(discord.ui.View):
         uid = int(interaction.user.id)
 
         current_stage = None
+        current_ap = None
+
+        p_ap = data.get("participant_ap") or {}
+        w_ap = data.get("waitlist_ap") or {}
+        current_ap = p_ap.get(str(uid), w_ap.get(str(uid)))
+
         if is_altar:
             p_stage = data.get("participant_altar_stage") or {}
             w_stage = data.get("waitlist_altar_stage") or {}
@@ -2938,6 +3039,7 @@ class PublicPostView(discord.ui.View):
                     _done,
                     include_altar_stage=is_altar,
                     current_stage=current_stage,
+                    current_ap=current_ap,
                 )
             )
         except discord.InteractionResponded:
@@ -2947,6 +3049,7 @@ class PublicPostView(discord.ui.View):
                     _done,
                     include_altar_stage=is_altar,
                     current_stage=current_stage,
+                    current_ap=current_ap,
                 )
             )
 
@@ -4451,7 +4554,7 @@ class GruppensucheTest(commands.Cog):
 
             altar_block = (
                 f"**Fortschritt:**\n"
-                f"• Start-Stufe: {start_stage_txt}\n"
+                f"• Geplante Start-Stufe: {start_stage_txt}\n"
                 f"• Ziel-Stufe: {target_txt}\n"
                 f"• Geschätzte Dauer: {duration_calc_txt}\n\n"
                 + duration_hint
@@ -5342,7 +5445,15 @@ class GruppensucheTest(commands.Cog):
                 participants=len(data.get("participants") or []),
                 max_players=max_players,
             )
-            await self._ephemeral_notice(interaction, "✅ Du bist jetzt Teilnehmer.")
+            warn_text = None
+            if str(data.get("category", "")).lower() == "altar":
+                warn_text = _altar_ap_warning_for_target(data.get("altar_target_step"), ap_val)
+
+            msg = "✅ Du bist jetzt Teilnehmer."
+            if warn_text:
+                msg += f"\n\n{warn_text}"
+
+            await self._ephemeral_notice(interaction, msg)
             return
 
         if result_state == "joined_waitlist":
@@ -5355,7 +5466,15 @@ class GruppensucheTest(commands.Cog):
                 waitlist=len(data.get("waitlist") or []),
                 max_players=max_players,
             )
-            await self._ephemeral_notice(interaction, "ℹ️ Gruppe ist voll. Du bist in der Warteschlange.")
+            warn_text = None
+            if str(data.get("category", "")).lower() == "altar":
+                warn_text = _altar_ap_warning_for_target(data.get("altar_target_step"), ap_val)
+
+            msg = "ℹ️ Gruppe ist voll. Du bist in der Warteschlange."
+            if warn_text:
+                msg += f"\n\n{warn_text}"
+
+            await self._ephemeral_notice(interaction, msg)
             return
 
         await self._ephemeral_notice(interaction, "ℹ️ Anmeldung verarbeitet.")
@@ -5547,7 +5666,15 @@ class GruppensucheTest(commands.Cog):
             target=("participants" if is_participant else "waitlist"),
         )
 
-        await self._ephemeral_notice(interaction, "✅ AP wurde aktualisiert.", ephemeral=True)
+        warn_text = None
+        if str(data.get("category", "")).lower() == "altar":
+            warn_text = _altar_ap_warning_for_target(data.get("altar_target_step"), ap_clean)
+
+        msg = "✅ AP wurde aktualisiert."
+        if warn_text:
+            msg += f"\n\n{warn_text}"
+
+        await self._ephemeral_notice(interaction, msg, ephemeral=True)
 
     async def _notify_promotion(self, data: dict, promoted_id: int):
         guild = self.bot.get_guild(int(data.get("guild_id", 0)))
