@@ -6587,11 +6587,44 @@ class GruppensucheTest(commands.Cog):
             await self._open_owner_edit_menu(interaction, int(message_id), data)
             return
 
-        # Teilnehmer / Warteliste -> nur AP-Korrektur
+        # Teilnehmer / Warteliste -> AP-Korrektur, bei Altar inkl. Stufe
+        is_altar = str(data.get("category", "")).lower() == "altar"
+        uid = int(interaction.user.id)
+
+        p_ap = data.get("participant_ap") or {}
+        w_ap = data.get("waitlist_ap") or {}
+        current_ap = p_ap.get(str(uid), w_ap.get(str(uid)))
+
+        current_stage = None
+        if is_altar:
+            p_stage = data.get("participant_altar_stage") or {}
+            w_stage = data.get("waitlist_altar_stage") or {}
+            raw_stage = p_stage.get(str(uid), w_stage.get(str(uid)))
+            try:
+                current_stage = int(raw_stage)
+            except Exception:
+                current_stage = None
+
         try:
-            await interaction.response.send_modal(APAdjustModal(self, int(message_id)))
+            await interaction.response.send_modal(
+                APAdjustModal(
+                    self,
+                    int(message_id),
+                    include_altar_stage=is_altar,
+                    current_stage=current_stage,
+                    current_ap=current_ap,
+                )
+            )
         except discord.InteractionResponded:
-            await interaction.followup.send_modal(APAdjustModal(self, int(message_id)))
+            await interaction.followup.send_modal(
+                APAdjustModal(
+                    self,
+                    int(message_id),
+                    include_altar_stage=is_altar,
+                    current_stage=current_stage,
+                    current_ap=current_ap,
+                )
+            )
 
     async def _send_edit_menu(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
