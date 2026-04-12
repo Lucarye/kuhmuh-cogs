@@ -2571,6 +2571,30 @@ class PartySizeView(WizardBaseView):
             row=1,
         ))
 
+        if session.mode == "create" and session.max_players is not None:
+            next_btn = discord.ui.Button(
+                label="Weiter",
+                style=discord.ButtonStyle.success,
+                row=1,
+            )
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+
+    async def _next(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        if self.session.max_players is None:
+            await self.cog._ephemeral_notice(
+                interaction,
+                "Bitte wähle zuerst die maximale Teilnehmerzahl.",
+                ephemeral=True,
+            )
+            return
+
+        await self.cog._goto_next(interaction, self.session, Step.PARTY)
+
     def embed(self) -> discord.Embed:
         mn, mx = _allowed_party_range(
             self.session.category or "", self.session.spot_key)
