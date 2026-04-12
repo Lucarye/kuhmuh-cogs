@@ -506,7 +506,22 @@ def build_back_button(
         else:
             resolved_target, kwargs = spec, {}
 
-        await view.cog._go_back(interaction, view.session, resolved_target, **kwargs)
+        try:
+            await view.cog._go_back(interaction, view.session, resolved_target, **kwargs)
+        except Exception as exc:
+            view.cog._log_error(
+                "WIZARD_BACK",
+                "back navigation failed",
+                user_id=int(interaction.user.id),
+                current_step=str(view.session.current_step or ""),
+                target=str(resolved_target),
+                error=type(exc).__name__,
+            )
+            await view.cog._ephemeral_notice(
+                interaction,
+                "❌ Zurück-Navigation fehlgeschlagen. Bitte versuche es erneut.",
+                ephemeral=True,
+            )
 
     btn.callback = _cb
     return btn
@@ -1699,6 +1714,14 @@ class StartView(WizardBaseView):
             next_btn.callback = self._next
             self.add_item(next_btn)
 
+        cancel_btn = discord.ui.Button(
+            label="Zurück",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        cancel_btn.callback = self._cancel
+        self.add_item(cancel_btn)
+
     async def _next(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
@@ -1713,6 +1736,18 @@ class StartView(WizardBaseView):
             return
 
         await self.cog._goto_next(interaction, self.session, Step.START)
+
+    async def _cancel(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        self.cog._expire_session(self.session.user_id)
+        await interaction.response.edit_message(
+            content="Wizard beendet.",
+            embed=None,
+            view=None,
+        )
 
     def embed(self) -> discord.Embed:
         lines = []
