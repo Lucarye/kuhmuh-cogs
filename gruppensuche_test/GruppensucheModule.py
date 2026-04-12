@@ -1573,12 +1573,14 @@ class WizardBaseView(discord.ui.View):
 class StartSelect(discord.ui.Select):
     def __init__(self, host_view: "StartView"):
         options = []
+        selected_category = str(host_view.session.category or "").strip().lower()
 
         if FEATURE_MUHHILFER:
             options.append(discord.SelectOption(
                 label="Muhhelfer (LoML Bosse)",
                 value="muhhelfer",
                 emoji=MUHKUH_EMOJI,
+                default=(selected_category == "muhhelfer"),
             ))
 
         # Spots nur wenn Master an + mindestens ein Spot an
@@ -1587,12 +1589,14 @@ class StartSelect(discord.ui.Select):
                 label="Gruppenspots (Mirumok / Gyfin / Olun / Edania)",
                 value="spots",
                 emoji=CHEER_EMOJI,
+                default=(selected_category == "spots"),
             ))
         if FEATURE_PILAFE:
             options.append(discord.SelectOption(
                 label="Pila Fe Schriftrollen",
                 value="pilafe",
                 emoji=PILAFE_EMOJI,
+                default=(selected_category == "pilafe"),
             ))
 
         if FEATURE_ALTAR:
@@ -1600,6 +1604,7 @@ class StartSelect(discord.ui.Select):
                 label="Altar des Blutes (Tower Defense)",
                 value="altar",
                 emoji="🩸",
+                default=(selected_category == "altar"),
             ))
 
         if FEATURE_ATORAXXION:
@@ -1607,6 +1612,7 @@ class StartSelect(discord.ui.Select):
                 label="Atoraxxion (Dungeon)",
                 value="atoraxxion",
                 emoji="🏛️",
+                default=(selected_category == "atoraxxion"),
             ))
 
         super().__init__(
@@ -1624,19 +1630,26 @@ class StartSelect(discord.ui.Select):
             return
 
         picked = str(self.values[0])
+        prev_category = str(self.host_view.session.category or "")
         self.host_view.session.category = picked
 
-        # optional: Felder resetten, wenn Kategorie gewechselt wird
-        self.host_view.session.difficulty = None
-        self.host_view.session.boss_runs = {}
-        self.host_view.session.spot_key = None
-        self.host_view.session.scroll_amount = None
-        self.host_view.session.day_date_iso = None
-        self.host_view.session.max_players = None
-        self.host_view.session.olun_tier = None
-        self.host_view.session.atoraxxion_runs.clear()
-        self.host_view.session.altar_cleared_step = None
-        self.host_view.session.altar_target_step = None
+        # Nur bei echter Kategorie-Änderung den Downstream-State zurücksetzen.
+        if picked != prev_category:
+            self.host_view.session.difficulty = None
+            self.host_view.session.boss_runs = {}
+            self.host_view.session.spot_key = None
+            self.host_view.session.scroll_amount = None
+            self.host_view.session.day_date_iso = None
+            self.host_view.session.max_players = None
+            self.host_view.session.olun_tier = None
+            self.host_view.session.atoraxxion_runs.clear()
+            self.host_view.session.altar_cleared_step = None
+            self.host_view.session.altar_target_step = None
+            self.host_view.session.duration_text = None
+            self.host_view.session.start_text = None
+            self.host_view.session.req_text = None
+            self.host_view.session.notes = None
+            self.host_view.session.own_ap = None
 
         # und weiter im Flow (zentraler Router)
         await self.host_view.cog._goto_next(interaction, self.host_view.session, Step.START)
@@ -1646,6 +1659,30 @@ class StartView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
         self.add_item(StartSelect(self))
+
+        if session.category:
+            next_btn = discord.ui.Button(
+                label="Weiter",
+                style=discord.ButtonStyle.success,
+                row=1,
+            )
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+
+    async def _next(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        if not self.session.category:
+            await self.cog._ephemeral_notice(
+                interaction,
+                "Bitte wähle zuerst eine Kategorie.",
+                ephemeral=True,
+            )
+            return
+
+        await self.cog._goto_next(interaction, self.session, Step.START)
 
     def embed(self) -> discord.Embed:
         lines = []
@@ -1716,6 +1753,15 @@ class DaySelectView(WizardBaseView):
         back_label = label_map.get(self.back_target, "Zurück")
         self.add_item(build_back_button(back_label, self.back_target, self))
 
+        if self.session.day_date_iso:
+            next_btn = discord.ui.Button(
+                label="Weiter",
+                style=discord.ButtonStyle.success,
+                row=2,
+            )
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+
     def embed(self) -> discord.Embed:
         return discord.Embed(
             title=f"{MUHKUH_EMOJI} Tag",
@@ -1785,22 +1831,53 @@ class DaySelectView(WizardBaseView):
             # ✅ ausgewählter Tag grün, sonst blau
             btn.style = discord.ButtonStyle.success if iso == selected else discord.ButtonStyle.primary
 
+    async def _next(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        if not self.session.day_date_iso:
+            await self.cog._ephemeral_notice(
+                interaction,
+                "Bitte wähle zuerst einen Tag.",
+                ephemeral=True,
+            )
+            return
+
+        await self.cog._goto_next(interaction, self.session, Step.DAY)
+
 
 class DifficultyView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
 
-        normal_btn = discord.ui.Button(
+        self.normal_btn = discord.ui.Button(
             label="Normal", style=discord.ButtonStyle.primary, row=0)
-        schwer_btn = discord.ui.Button(
+        self.schwer_btn = discord.ui.Button(
             label="Schwer", style=discord.ButtonStyle.danger, row=0)
-        normal_btn.callback = self._pick_normal
-        schwer_btn.callback = self._pick_schwer
-        self.add_item(normal_btn)
-        self.add_item(schwer_btn)
+        self.normal_btn.callback = self._pick_normal
+        self.schwer_btn.callback = self._pick_schwer
+        self.add_item(self.normal_btn)
+        self.add_item(self.schwer_btn)
 
         self.add_item(build_back_button(
             "Kategorie", BackTarget.START, self, row=1))
+
+        if session.difficulty:
+            next_btn = discord.ui.Button(
+                label="Weiter",
+                style=discord.ButtonStyle.success,
+                row=1,
+            )
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+
+        self._refresh_styles()
+
+    def _refresh_styles(self):
+        picked = str(self.session.difficulty or "").lower()
+        self.normal_btn.style = discord.ButtonStyle.success if picked == "normal" else discord.ButtonStyle.primary
+        self.schwer_btn.style = discord.ButtonStyle.success if picked == "schwer" else discord.ButtonStyle.danger
 
     async def _pick_normal(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -1814,6 +1891,21 @@ class DifficultyView(WizardBaseView):
             await interaction.response.defer()
             return
         self.session.difficulty = "schwer"
+        await self.cog._goto_next(interaction, self.session, Step.DIFFICULTY)
+
+    async def _next(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        if not self.session.difficulty:
+            await self.cog._ephemeral_notice(
+                interaction,
+                "Bitte wähle zuerst eine Schwierigkeit.",
+                ephemeral=True,
+            )
+            return
+
         await self.cog._goto_next(interaction, self.session, Step.DIFFICULTY)
 
     def embed(self) -> discord.Embed:
@@ -2039,6 +2131,7 @@ class DoubleRunView(WizardBaseView):
 class SpotSelectView(WizardBaseView):
     def __init__(self, cog: "GruppensucheTest", session: WizardSession):
         super().__init__(cog, session)
+        self._spot_buttons: Dict[str, discord.ui.Button] = {}
 
         # Wenn nur genau ein Spot aktiv ist, auto-auswählen und direkt weiter
         active_spots = []
@@ -2065,28 +2158,63 @@ class SpotSelectView(WizardBaseView):
             miru_btn = discord.ui.Button(
                 label="Mirumok", style=discord.ButtonStyle.primary, row=0)
             miru_btn.callback = self._pick_miru
+            self._spot_buttons["mirumok"] = miru_btn
             self.add_item(miru_btn)
 
         if FEATURE_SPOTS_GYFIN:
             gyfin_btn = discord.ui.Button(
                 label="Gyfin", style=discord.ButtonStyle.primary, row=0)
             gyfin_btn.callback = self._pick_gyfin
+            self._spot_buttons["gyfin"] = gyfin_btn
             self.add_item(gyfin_btn)
 
         if FEATURE_SPOTS_OLUN:
             olun_btn = discord.ui.Button(
                 label="Olun", style=discord.ButtonStyle.primary, row=0)
             olun_btn.callback = self._pick_olun
+            self._spot_buttons["olun"] = olun_btn
             self.add_item(olun_btn)
 
         if FEATURE_SPOTS_EDANIA:
             edania_btn = discord.ui.Button(
                 label="Edania", style=discord.ButtonStyle.primary, row=0)
             edania_btn.callback = self._pick_edania
+            self._spot_buttons["edania"] = edania_btn
             self.add_item(edania_btn)
 
         self.add_item(build_back_button(
             "Kategorie", BackTarget.START, self, row=1))
+
+        if session.spot_key:
+            next_btn = discord.ui.Button(
+                label="Weiter",
+                style=discord.ButtonStyle.success,
+                row=1,
+            )
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+
+        self._refresh_styles()
+
+    def _refresh_styles(self):
+        picked = str(self.session.spot_key or "").lower()
+        for key, btn in self._spot_buttons.items():
+            btn.style = discord.ButtonStyle.success if key == picked else discord.ButtonStyle.primary
+
+    def _set_spot_key(self, key: str):
+        prev = str(self.session.spot_key or "")
+        self.session.spot_key = key
+        if prev != key:
+            self.session.day_date_iso = None
+            self.session.max_players = None
+            self.session.duration_text = None
+            self.session.start_text = None
+            self.session.req_text = None
+            self.session.notes = None
+            if key != "olun":
+                self.session.olun_tier = None
+        elif key != "olun":
+            self.session.olun_tier = None
 
     async def _pick_miru(self, interaction: discord.Interaction):
         if interaction.user.id != self.session.user_id:
@@ -2095,7 +2223,7 @@ class SpotSelectView(WizardBaseView):
         if not FEATURE_SPOTS_MIRUMOK:
             await self.cog._ephemeral_notice(interaction, "Mirumok ist aktuell deaktiviert.", ephemeral=True)
             return
-        self.session.spot_key = "mirumok"
+        self._set_spot_key("mirumok")
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
     async def _pick_gyfin(self, interaction: discord.Interaction):
@@ -2105,7 +2233,7 @@ class SpotSelectView(WizardBaseView):
         if not FEATURE_SPOTS_GYFIN:
             await self.cog._ephemeral_notice(interaction, "Gyfin ist aktuell deaktiviert.", ephemeral=True)
             return
-        self.session.spot_key = "gyfin"
+        self._set_spot_key("gyfin")
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
     def embed(self) -> discord.Embed:
@@ -2144,8 +2272,16 @@ class SpotSelectView(WizardBaseView):
         if interaction.user.id != self.session.user_id:
             await interaction.response.defer()
             return
+        prev = str(self.session.spot_key or "")
         self.session.spot_key = "olun"
-        self.session.olun_tier = None  # wichtig: Stufe danach wählen
+        if prev != "olun":
+            self.session.olun_tier = None
+            self.session.day_date_iso = None
+            self.session.max_players = None
+            self.session.duration_text = None
+            self.session.start_text = None
+            self.session.req_text = None
+            self.session.notes = None
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
     async def _pick_edania(self, interaction: discord.Interaction):
@@ -2155,7 +2291,22 @@ class SpotSelectView(WizardBaseView):
         if not FEATURE_SPOTS_EDANIA:
             await self.cog._ephemeral_notice(interaction, "Edania ist aktuell deaktiviert.", ephemeral=True)
             return
-        self.session.spot_key = "edania"
+        self._set_spot_key("edania")
+        await self.cog._goto_next(interaction, self.session, Step.SPOT)
+
+    async def _next(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        if not self.session.spot_key:
+            await self.cog._ephemeral_notice(
+                interaction,
+                "Bitte wähle zuerst einen Spot.",
+                ephemeral=True,
+            )
+            return
+
         await self.cog._goto_next(interaction, self.session, Step.SPOT)
 
 
@@ -2182,6 +2333,15 @@ class OlunTierView(WizardBaseView):
         self.add_item(self.btn_d2)
 
         self.add_item(build_back_button("Spot", BackTarget.SPOT, self, row=1))
+
+        if session.olun_tier:
+            next_btn = discord.ui.Button(
+                label="Weiter",
+                style=discord.ButtonStyle.success,
+                row=1,
+            )
+            next_btn.callback = self._next
+            self.add_item(next_btn)
 
         self._refresh_styles()
 
@@ -2211,6 +2371,21 @@ class OlunTierView(WizardBaseView):
             # ✅ kein edit_message als "Feedback" hier
             await self.cog._goto_next(interaction, self.session, Step.OLUN_TIER)
         return _cb
+
+    async def _next(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        if not self.session.olun_tier:
+            await self.cog._ephemeral_notice(
+                interaction,
+                "Bitte wähle zuerst eine Olun-Stufe.",
+                ephemeral=True,
+            )
+            return
+
+        await self.cog._goto_next(interaction, self.session, Step.OLUN_TIER)
 
     def embed(self) -> discord.Embed:
         tier = (self.session.olun_tier or "").lower()
