@@ -2816,12 +2816,13 @@ class PartySizeView(WizardBaseView):
             mn = 1
 
         self.add_item(PartySizeSelect(self, mn, mx, current=current))
-        self.add_item(build_back_button(
-            "Bearbeiten" if session.mode == "edit" else "Tag",
-            BackTarget.EDIT_MENU if session.mode == "edit" else BackTarget.DAY,
-            self,
+        back_btn = discord.ui.Button(
+            label="Zurück (Bearbeiten)" if session.mode == "edit" else "Zurück (Tag)",
+            style=discord.ButtonStyle.secondary,
             row=1,
-        ))
+        )
+        back_btn.callback = self._back
+        self.add_item(back_btn)
 
         if session.mode == "create" and session.max_players is not None:
             next_btn = discord.ui.Button(
@@ -2846,6 +2847,40 @@ class PartySizeView(WizardBaseView):
             return
 
         await self.cog._goto_next(interaction, self.session, Step.PARTY)
+
+    async def _back(self, interaction: discord.Interaction):
+        if interaction.user.id != self.session.user_id:
+            await interaction.response.defer()
+            return
+
+        target_view: discord.ui.View
+        target_embed: discord.Embed
+
+        if self.session.mode == "edit":
+            data = None
+            if self.session.edit_message_id:
+                data = await self.cog._get_search(int(self.session.edit_message_id))
+            if data is None:
+                await self.cog._ephemeral_notice(
+                    interaction,
+                    "Diese Suche existiert nicht mehr.",
+                    ephemeral=True,
+                )
+                return
+            target_view = EditMenuView(
+                self.cog,
+                self.session,
+                self.cog._build_session_view_data(self.session, data),
+            )
+            target_embed = target_view.embed()
+        else:
+            target_view = DaySelectView(self.cog, self.session)
+            target_embed = target_view.embed()
+
+        try:
+            await interaction.response.edit_message(embed=target_embed, view=target_view)
+        except discord.InteractionResponded:
+            await interaction.edit_original_response(embed=target_embed, view=target_view)
 
     def embed(self) -> discord.Embed:
         mn, mx = _allowed_party_range(
