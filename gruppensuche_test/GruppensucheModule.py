@@ -5027,6 +5027,17 @@ class GruppensucheTest(commands.Cog):
             duration_minutes = _altar_estimated_duration_minutes(data)
             duration_calc_txt = _fmt_duration_minutes(
                 duration_minutes) if duration_minutes is not None else "—"
+            try:
+                target_stage_int = int(target) if target is not None else None
+            except Exception:
+                target_stage_int = None
+            if (
+                duration_minutes is None
+                and start_stage is not None
+                and target_stage_int is not None
+                and target_stage_int < start_stage
+            ):
+                duration_calc_txt = "Noch nicht berechenbar"
 
             current_group_size = len(list(data.get("participants") or []))
             duration_hint = (
