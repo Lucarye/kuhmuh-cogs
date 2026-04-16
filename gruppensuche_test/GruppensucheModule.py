@@ -1954,12 +1954,16 @@ class DaySelectView(WizardBaseView):
                     return
 
                 self.session.day_date_iso = iso_val
-                self._refresh_day_styles()
 
                 if self.session.mode == "edit":
-                    await interaction.response.edit_message(embed=self.embed(), view=self)
+                    try:
+                        await interaction.response.defer(ephemeral=True)
+                    except discord.InteractionResponded:
+                        pass
                     await self.cog._apply_edit_day(interaction, self.session)
                     return
+
+                self._refresh_day_styles()
 
                 # ✅ create-mode: nicht edit_message + goto_next
                 await self.cog._goto_next(interaction, self.session, Step.DAY)
