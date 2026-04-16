@@ -1990,6 +1990,10 @@ class DaySelectView(WizardBaseView):
             )
             return
 
+        if self.session.mode == "edit":
+            await self.cog._apply_edit_day(interaction, self.session)
+            return
+
         await self.cog._goto_next(interaction, self.session, Step.DAY)
 
 
