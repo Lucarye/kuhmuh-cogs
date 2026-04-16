@@ -795,6 +795,29 @@ def _altar_recommended_ap_columns(*, start_step: Optional[object] = None, target
     return left, right
 
 
+def _build_altar_values_embed(*, start_step: Optional[object] = None, target_step: Optional[object] = None, title: str = "🩸 Gruppensuche – Altar des Blutes", description: Optional[str] = None) -> discord.Embed:
+    recommended_left, recommended_right = _altar_recommended_ap_columns(
+        start_step=start_step,
+        target_step=target_step,
+    )
+
+    embed = discord.Embed(
+        title=title,
+        description=description,
+    )
+    embed.add_field(
+        name="Stage 1-10",
+        value=recommended_left,
+        inline=True,
+    )
+    embed.add_field(
+        name="Stage 11-21",
+        value=recommended_right,
+        inline=True,
+    )
+    return embed
+
+
 def _altar_selected_ap_lines(*, start_step: Optional[object] = None, target_step: Optional[object] = None) -> list[str]:
     lines: list[str] = []
 
@@ -2728,6 +2751,9 @@ class AltarStepSelect(discord.ui.Select):
             self.host_view.session.altar_target_step = picked
 
         new_view = AltarStepView(self.host_view.cog, self.host_view.session)
+        if self.which == "cleared" and self.host_view.session.altar_target_step is None:
+            await interaction.response.edit_message(view=new_view)
+            return
         await interaction.response.edit_message(embed=new_view.embed(), view=new_view)
 
 
@@ -2769,13 +2795,6 @@ class AltarStepView(WizardBaseView):
             await self.cog._ephemeral_notice(interaction, "Bitte wähle die geplante Ziel-Stufe.")
             return
 
-        if self.session.altar_target_step <= self.session.altar_cleared_step:
-            await self.cog._ephemeral_notice(
-                interaction,
-                "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe.",
-            )
-            return
-
         if self.session.mode == "edit":
             await self.cog._apply_edit_altar_steps(interaction, self.session)
             return
@@ -2788,31 +2807,16 @@ class AltarStepView(WizardBaseView):
 
         cleared_txt = _fmt_altar_stage(cleared)
         target_txt = _fmt_altar_stage(target)
-        recommended_left, recommended_right = _altar_recommended_ap_columns(
+        return _build_altar_values_embed(
             start_step=cleared,
             target_step=target,
-        )
-
-        embed = discord.Embed(
             title="🩸 Gruppensuche – Altar des Blutes",
             description=(
                 "Wähle die Altar-Stufen für deine Suche.\n\n"
                 f"**Deine höchste Altar-Stufe:** {cleared_txt}\n"
-                f"**Geplante Ziel-Stufe:** {target_txt}\n\n"
-                "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe."
+                f"**Geplante Ziel-Stufe:** {target_txt}"
             ),
         )
-        embed.add_field(
-            name="Empfohlene AP 1-10",
-            value=recommended_left,
-            inline=True,
-        )
-        embed.add_field(
-            name="Empfohlene AP 11-21",
-            value=recommended_right,
-            inline=True,
-        )
-        return embed
 
 
 class PartySizeSelect(discord.ui.Select):
@@ -3272,6 +3276,13 @@ class PublicPostView(discord.ui.View):
             row=0,
             custom_id=f"gst:leave:{message_id}",
         )
+        altar_values_btn = discord.ui.Button(
+            label="Altar-Werte",
+            emoji="📘",
+            style=discord.ButtonStyle.secondary,
+            row=0,
+            custom_id=f"gst:altarvalues:{message_id}",
+        )
         ping_part_btn = discord.ui.Button(
             label="Ping Teilnehmer",
             emoji="📣",
@@ -3324,6 +3335,7 @@ class PublicPostView(discord.ui.View):
 
         join_btn.callback = self._on_join
         leave_btn.callback = self._on_leave
+        altar_values_btn.callback = self._on_altar_values
         ping_type_btn.callback = self._on_ping_type
         ping_wait_btn.callback = self._on_ping_wait
         edit_btn.callback = self._on_edit
@@ -3332,6 +3344,7 @@ class PublicPostView(discord.ui.View):
 
         self.add_item(join_btn)
         self.add_item(leave_btn)
+        self.add_item(altar_values_btn)
         self.add_item(ping_type_btn)
         self.add_item(ping_wait_btn)
         self.add_item(edit_btn)
@@ -3413,6 +3426,29 @@ class PublicPostView(discord.ui.View):
 
         mid = int(self.message_id)
         await self.cog._leave(interaction, mid)
+
+    async def _on_altar_values(self, interaction: discord.Interaction):
+        data = await self.cog._get_search(int(self.message_id))
+        if data is None:
+            await self.cog._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+            return
+
+        if str(data.get("category", "")).lower() != "altar":
+            await self.cog._ephemeral_notice(interaction, "Die Altar-Wertetabelle ist nur für Altar des Blutes verfügbar.")
+            return
+
+        start_stage = _altar_current_start_stage(data)
+        target_stage = data.get("altar_target_step")
+        embed = _build_altar_values_embed(
+            start_step=start_stage,
+            target_step=target_stage,
+            title="🩸 Gruppensuche – Altar-Werte",
+            description=(
+                f"**Geplante Start-Stufe:** {_fmt_altar_stage(start_stage)}\n"
+                f"**Ziel-Stufe:** {_fmt_altar_stage(target_stage)}"
+            ),
+        )
+        await self.cog._ephemeral_notice(interaction, embed=embed, ephemeral=True)
 
     async def _on_ping_participants(self, interaction: discord.Interaction):
         data = await self._ensure_owner_or_mod(interaction)
@@ -6638,11 +6674,26 @@ class GruppensucheTest(commands.Cog):
 
         session.current_step = Step.EDIT_MENU
         view = EditMenuView(self, session, self._build_session_view_data(session, data))
+        msg = getattr(interaction, "message", None)
+        if msg is None:
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+            except Exception as exc:
+                self._log_warning(
+                    "WIZARD_UI",
+                    "edit menu reopen fell back to fresh ephemeral send failed",
+                    user_id=int(interaction.user.id),
+                    step=session.current_step,
+                    error=type(exc).__name__,
+                )
+                base = session.wizard_interaction or interaction
+                await self._edit_or_send_ephemeral(base, view.embed(), view)
+            return
 
-        # ✅ wichtig: wenn möglich immer die Interaction nehmen,
-        # die zur Wizard-Ephemeral-Message gehört
-        base = session.wizard_interaction or interaction
-        await self._edit_or_send_ephemeral(base, view.embed(), view)
+        await self._edit_or_send_ephemeral(interaction, view.embed(), view)
 
     async def _apply_edit_day(self, interaction: discord.Interaction, session: WizardSession):
         if not session.edit_message_id:
@@ -7112,13 +7163,6 @@ class GruppensucheTest(commands.Cog):
 
             if session.altar_target_step is None:
                 await self._ephemeral_notice(interaction, "Bitte wähle die Ziel-Stufe.")
-                return
-
-            if session.altar_target_step <= session.altar_cleared_step:
-                await self._ephemeral_notice(
-                    interaction,
-                    "Die Ziel-Stufe muss höher sein als deine höchste Altar-Stufe.",
-                )
                 return
 
             data["altar_cleared_step"] = int(session.altar_cleared_step)
