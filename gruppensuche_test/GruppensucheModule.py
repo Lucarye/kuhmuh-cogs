@@ -3437,16 +3437,8 @@ class PublicPostView(discord.ui.View):
             await self.cog._ephemeral_notice(interaction, "Die Altar-Wertetabelle ist nur für Altar des Blutes verfügbar.")
             return
 
-        start_stage = _altar_current_start_stage(data)
-        target_stage = data.get("altar_target_step")
         embed = _build_altar_values_embed(
-            start_step=start_stage,
-            target_step=target_stage,
             title="🩸 Gruppensuche – Altar-Werte",
-            description=(
-                f"**Geplante Start-Stufe:** {_fmt_altar_stage(start_stage)}\n"
-                f"**Ziel-Stufe:** {_fmt_altar_stage(target_stage)}"
-            ),
         )
         await self.cog._ephemeral_notice(interaction, embed=embed, ephemeral=True)
 
