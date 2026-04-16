@@ -506,6 +506,10 @@ def build_back_button(
         else:
             resolved_target, kwargs = spec, {}
 
+        if view.session.mode == "edit":
+            resolved_target = BackTarget.EDIT_MENU
+            kwargs = {}
+
         try:
             await view.cog._go_back(interaction, view.session, resolved_target, **kwargs)
         except Exception as exc:
@@ -3256,10 +3260,11 @@ class ConfirmView(discord.ui.View):
 
 
 class PublicPostView(discord.ui.View):
-    def __init__(self, cog: "GruppensucheTest", message_id: int):
+    def __init__(self, cog: "GruppensucheTest", message_id: int, *, category: Optional[str] = None):
         super().__init__(timeout=None)
         self.cog = cog
         self.message_id = message_id
+        self.category = str(category or "").lower()
 
         join_btn = discord.ui.Button(
             label="Ich bin dabei",
@@ -3275,13 +3280,6 @@ class PublicPostView(discord.ui.View):
             style=discord.ButtonStyle.danger,
             row=0,
             custom_id=f"gst:leave:{message_id}",
-        )
-        altar_values_btn = discord.ui.Button(
-            label="Altar-Werte",
-            emoji="📘",
-            style=discord.ButtonStyle.secondary,
-            row=0,
-            custom_id=f"gst:altarvalues:{message_id}",
         )
         ping_part_btn = discord.ui.Button(
             label="Ping Teilnehmer",
@@ -3335,7 +3333,6 @@ class PublicPostView(discord.ui.View):
 
         join_btn.callback = self._on_join
         leave_btn.callback = self._on_leave
-        altar_values_btn.callback = self._on_altar_values
         ping_type_btn.callback = self._on_ping_type
         ping_wait_btn.callback = self._on_ping_wait
         edit_btn.callback = self._on_edit
@@ -3344,7 +3341,16 @@ class PublicPostView(discord.ui.View):
 
         self.add_item(join_btn)
         self.add_item(leave_btn)
-        self.add_item(altar_values_btn)
+        if self.category == "altar":
+            altar_values_btn = discord.ui.Button(
+                label="Altar-Werte",
+                emoji="📘",
+                style=discord.ButtonStyle.secondary,
+                row=0,
+                custom_id=f"gst:altarvalues:{message_id}",
+            )
+            altar_values_btn.callback = self._on_altar_values
+            self.add_item(altar_values_btn)
         self.add_item(ping_type_btn)
         self.add_item(ping_wait_btn)
         self.add_item(edit_btn)
@@ -3668,7 +3674,7 @@ class GruppensucheTest(commands.Cog):
             if bool(post.get("is_closed", False)):
                 self.bot.add_view(ClosedPostView(self, mid))
             else:
-                self.bot.add_view(PublicPostView(self, mid))
+                self.bot.add_view(PublicPostView(self, mid, category=post.get("category")))
 
     def _expire_session(self, user_id: int):
         if user_id in self._sessions:
@@ -5146,7 +5152,7 @@ class GruppensucheTest(commands.Cog):
 
         embed = await self._build_public_embed(guild, data)
         view = ClosedPostView(self, mid) if bool(
-            data.get("is_closed", False)) else PublicPostView(self, mid)
+            data.get("is_closed", False)) else PublicPostView(self, mid, category=data.get("category"))
 
         if isinstance(view, PublicPostView):
             await self._apply_dynamic_button_labels(view, data)
@@ -5268,7 +5274,7 @@ class GruppensucheTest(commands.Cog):
                 await msg.edit(embed=embed, view=view)
                 return
 
-            view = PublicPostView(self, mid)
+            view = PublicPostView(self, mid, category=data.get("category"))
             await self._apply_dynamic_button_labels(view, data)
             await msg.edit(embed=embed, view=view)
 
@@ -5503,7 +5509,7 @@ class GruppensucheTest(commands.Cog):
             )
 
             # 2) View vorbereiten und am Post setzen
-            view = PublicPostView(self, msg.id)
+            view = PublicPostView(self, msg.id, category=data.get("category"))
             await self._apply_dynamic_button_labels(view, data)
             await msg.edit(view=view)
 
