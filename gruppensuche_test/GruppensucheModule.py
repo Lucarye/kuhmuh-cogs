@@ -5053,7 +5053,7 @@ class GruppensucheTest(commands.Cog):
                 f"• Ziel-Stufe: {target_txt}\n"
                 f"• Geschätzte Dauer: {duration_calc_txt}\n\n"
                 + duration_hint +
-                f"**Empfohlene AP:**\n"
+                f"**Empfohlene Stufenwerte:**\n"
                 f"{recommended_lines}\n\n"
             )
 
