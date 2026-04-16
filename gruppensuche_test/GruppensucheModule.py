@@ -5072,10 +5072,15 @@ class GruppensucheTest(commands.Cog):
                 f"{recommended_lines}\n\n"
             )
 
+            altar_times_block = (
+                f"**Tag:** {day_str}\n"
+                f"**Start:** {start_text}\n\n"
+            )
+
             e.description = (
                 header
                 + altar_block
-                + times_block
+                + altar_times_block
                 + notes_block
                 + status_block
                 + participants_block
