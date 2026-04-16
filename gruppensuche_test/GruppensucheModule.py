@@ -693,7 +693,7 @@ def _fmt_altar_stage(stage_val: object) -> str:
         n = int(stage_val)
         if n < 1:
             return "—"
-        return f"S{n}"
+        return f"Stage {n}"
     except Exception:
         return "—"
 
