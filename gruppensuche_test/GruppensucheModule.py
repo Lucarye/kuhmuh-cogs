@@ -5029,9 +5029,7 @@ class GruppensucheTest(commands.Cog):
                 duration_minutes) if duration_minutes is not None else "—"
 
             current_group_size = len(list(data.get("participants") or []))
-            duration_hint = ""
-            if current_group_size < max_players:
-                duration_hint = f"⚠️ Berechnung basiert auf aktueller Gruppenzusammensetzung ({current_group_size}/{max_players}).\n\n"
+            duration_hint = f"⚠️ Berechnung basiert auf aktueller Gruppenzusammensetzung ({current_group_size}/{max_players}).\n\n"
 
             selected_ap_lines = _altar_selected_ap_lines(
                 start_step=start_stage,
@@ -5048,7 +5046,7 @@ class GruppensucheTest(commands.Cog):
 
             altar_block = (
                 f"**Fortschritt:**\n"
-                f"• Geplante Start-Stufe: {start_stage_txt}\n"
+                f"• Niedrigste aktuelle Gruppen-Stufe: {start_stage_txt}\n"
                 f"• Ziel-Stufe: {target_txt}\n"
                 f"• Geschätzte Dauer: {duration_calc_txt}\n\n"
                 + duration_hint +
