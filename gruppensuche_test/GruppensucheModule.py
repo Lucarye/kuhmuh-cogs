@@ -1899,7 +1899,7 @@ class DaySelectView(WizardBaseView):
         back_label = label_map.get(self.back_target, "Zurück")
         self.add_item(build_back_button(back_label, self.back_target, self))
 
-        if self.session.day_date_iso:
+        if self.session.mode != "edit" and self.session.day_date_iso:
             next_btn = discord.ui.Button(
                 label="Weiter",
                 style=discord.ButtonStyle.success,
