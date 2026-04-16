@@ -27,6 +27,7 @@ DASHBOARD_CONFIG_IDENTIFIER = 935771234124
 # Update-Intervall
 DASHBOARD_REFRESH_MINUTES = 1
 MISSING_POST_CLEANUP_MINUTES = 15
+DASHBOARD_EVENT_COOLDOWN_SECONDS = 900
 
 # Emojis
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
@@ -297,6 +298,7 @@ class Gruppenübersicht(commands.Cog):
             "live": 0,
             "test": 0,
         }
+        self._event_cooldowns: Dict[str, dt.datetime] = {}
 
     def _log_info(self, category: str, message: str, **fields):
         parts = [f"{k}={v}" for k, v in fields.items()]
@@ -321,6 +323,17 @@ class Gruppenübersicht(commands.Cog):
             logger_fn(f"{base} {details}")
         else:
             logger_fn(base)
+
+    def _dashboard_event_key(self, *, guild_id: int, module: str, event: str, bereich: str, channel_id: int) -> str:
+        return f"{guild_id}:{module.lower()}:{event.lower()}:{bereich.lower()}:{channel_id}"
+
+    def _should_emit_dashboard_event(self, event_key: str, *, cooldown_seconds: int = DASHBOARD_EVENT_COOLDOWN_SECONDS) -> bool:
+        now = _now_local()
+        until = self._event_cooldowns.get(event_key)
+        if until and until > now:
+            return False
+        self._event_cooldowns[event_key] = now + dt.timedelta(seconds=int(cooldown_seconds))
+        return True
 
     async def _log_event(
         self,
@@ -356,6 +369,16 @@ class Gruppenübersicht(commands.Cog):
             log_channel_id=LOG_CHANNEL_ID,
             target_channel_id=(channel.id if channel else 0),
         )
+
+        event_key = self._dashboard_event_key(
+            guild_id=guild.id,
+            module=module,
+            event=event,
+            bereich=bereich,
+            channel_id=(channel.id if channel else 0),
+        )
+        if not self._should_emit_dashboard_event(event_key):
+            return
 
         ch = guild.get_channel(LOG_CHANNEL_ID)
         if not isinstance(ch, discord.TextChannel):
@@ -703,6 +726,20 @@ class Gruppenübersicht(commands.Cog):
                         )
                     except Exception:
                         pass
+                    try:
+                        await self._ensure_dashboard_message(guild, ch, which=which)
+                        self._fetch_fail_count[which] = 0
+                        self._edit_fail_count[which] = 0
+                        self._last_sig[which] = None
+                    except Exception as recovery_exc:
+                        self._log_warning(
+                            "RECOVERY",
+                            "dashboard fetch recovery failed",
+                            which=which,
+                            guild_id=guild.id,
+                            channel_id=ch.id,
+                            error=type(recovery_exc).__name__,
+                        )
                 return
 
             try:
@@ -761,6 +798,21 @@ class Gruppenübersicht(commands.Cog):
                         )
                     except Exception:
                         pass
+                    try:
+                        await self._ensure_dashboard_message(guild, ch, which=which)
+                        self._fetch_fail_count[which] = 0
+                        self._edit_fail_count[which] = 0
+                        self._last_sig[which] = None
+                    except Exception as recovery_exc:
+                        self._log_warning(
+                            "RECOVERY",
+                            "dashboard edit recovery failed",
+                            which=which,
+                            guild_id=guild.id,
+                            channel_id=ch.id,
+                            message_id=msg_id,
+                            error=type(recovery_exc).__name__,
+                        )
                 return
 
     # =========================
