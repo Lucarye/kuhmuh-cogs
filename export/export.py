@@ -5,6 +5,7 @@ Folgt den KUHMUH-Regelwerken fuer Slash-Commands und Guild-Scope.
 
 import csv
 import io
+import logging
 from datetime import datetime
 
 import discord  # pyright: ignore[reportMissingImports]
@@ -20,6 +21,8 @@ OFFIZIER_ROLE_ID = 1198652039312453723
 
 MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
 
+log = logging.getLogger("red.kuhmuh.export")
+
 
 class Export(commands.Cog):
     """Cog fuer CSV-Export der Memberliste."""
@@ -34,8 +37,9 @@ class Export(commands.Cog):
             await self.bot.wait_until_red_ready()
             await self.bot.wait_until_ready()
             await self.bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+            log.info("[export] Slash-Command fuer Guild %s synchronisiert.", GUILD_ID)
         except Exception:
-            pass
+            log.exception("[export] Slash-Sync fuer Guild %s fehlgeschlagen.", GUILD_ID)
 
     def cog_unload(self) -> None:
         if self._startup_task and not self._startup_task.done():
