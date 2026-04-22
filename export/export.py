@@ -1,12 +1,13 @@
 """
-Export Cog - Exportiert die Member-Liste als CSV.
+Export Cog - Exportiert die Member-Liste als Excel-Datei.
 Folgt den KUHMUH-Regelwerken fuer Slash-Commands und Guild-Scope.
 """
 
-import csv
 import io
 import logging
+import zipfile
 from datetime import datetime
+from xml.sax.saxutils import escape
 
 import discord  # pyright: ignore[reportMissingImports]
 from discord import app_commands  # pyright: ignore[reportMissingImports]
@@ -24,8 +25,123 @@ MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
 log = logging.getLogger("red.kuhmuh.export")
 
 
+def _excel_col_name(index: int) -> str:
+    """Wandelt 1-basierte Spaltennummern in Excel-Spaltennamen um."""
+    out = []
+    current = int(index)
+    while current > 0:
+        current, remainder = divmod(current - 1, 26)
+        out.append(chr(65 + remainder))
+    return "".join(reversed(out))
+
+
+def _xml_cell(cell_ref: str, value: object) -> str:
+    """Erzeugt eine einzelne XLSX-Zelle mit Inline-String oder Zahl."""
+    if isinstance(value, bool):
+        value = "Ja" if value else "Nein"
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f'<c r="{cell_ref}"><v>{value}</v></c>'
+
+    safe = escape(str(value))
+    return f'<c r="{cell_ref}" t="inlineStr"><is><t>{safe}</t></is></c>'
+
+
+def _xml_sheet(rows: list[list[object]]) -> str:
+    """Erzeugt den XML-Inhalt fuer ein Worksheet."""
+    row_xml: list[str] = []
+    for row_idx, row in enumerate(rows, start=1):
+        cells = [
+            _xml_cell(f"{_excel_col_name(col_idx)}{row_idx}", value)
+            for col_idx, value in enumerate(row, start=1)
+        ]
+        row_xml.append(f'<row r="{row_idx}">{"".join(cells)}</row>')
+
+    sheet_data = "".join(row_xml)
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f"<sheetData>{sheet_data}</sheetData>"
+        "</worksheet>"
+    )
+
+
+def _build_xlsx_workbook(sheets: list[tuple[str, list[list[object]]]]) -> bytes:
+    """Erzeugt eine minimale XLSX-Datei mit mehreren Worksheets."""
+    workbook_sheets = []
+    workbook_rels = []
+    content_types = [
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+    ]
+
+    for idx, (name, _rows) in enumerate(sheets, start=1):
+        safe_name = escape(name)
+        workbook_sheets.append(
+            f'<sheet name="{safe_name}" sheetId="{idx}" r:id="rId{idx}"/>'
+        )
+        workbook_rels.append(
+            '<Relationship '
+            f'Id="rId{idx}" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+            f'Target="worksheets/sheet{idx}.xml"/>'
+        )
+        content_types.append(
+            '<Override '
+            f'PartName="/xl/worksheets/sheet{idx}.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        )
+
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook '
+        'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f"<sheets>{''.join(workbook_sheets)}</sheets>"
+        "</workbook>"
+    )
+
+    workbook_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f"{''.join(workbook_rels)}"
+        "</Relationships>"
+    )
+
+    root_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship '
+        'Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>'
+        "</Relationships>"
+    )
+
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" '
+        'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        f"{''.join(content_types)}"
+        "</Types>"
+    )
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types_xml)
+        zf.writestr("_rels/.rels", root_rels_xml)
+        zf.writestr("xl/workbook.xml", workbook_xml)
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
+        for idx, (_name, rows) in enumerate(sheets, start=1):
+            zf.writestr(f"xl/worksheets/sheet{idx}.xml", _xml_sheet(rows))
+
+    return buffer.getvalue()
+
+
 class Export(commands.Cog):
-    """Cog fuer CSV-Export der Memberliste."""
+    """Cog fuer Export der Memberliste und Rollenrechte."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -69,25 +185,99 @@ class Export(commands.Cog):
         _ = member
         return "Invite"
 
+    def _build_member_rows(self, members: list[discord.Member]) -> list[list[object]]:
+        rows: list[list[object]] = [
+            [
+                "Nickname",
+                "Discord-Name",
+                "Zugewiesene Rollen",
+                "Beitrittsdatum Server",
+                "Beitrittsmethode",
+            ]
+        ]
+
+        for member in sorted(members, key=lambda m: m.joined_at or datetime.now()):
+            discord_name = (
+                f"{member.name}#{member.discriminator}"
+                if member.discriminator
+                else member.name
+            )
+            join_date = (
+                member.joined_at.strftime("%d.%m.%Y %H:%M:%S")
+                if member.joined_at
+                else "Unbekannt"
+            )
+
+            rows.append(
+                [
+                    member.display_name,
+                    discord_name,
+                    self._get_member_roles_str(member),
+                    join_date,
+                    self._get_join_method(member),
+                ]
+            )
+
+        return rows
+
+    def _build_role_rows(self, guild: discord.Guild) -> list[list[object]]:
+        permission_flags = sorted(discord.Permissions.VALID_FLAGS.keys())
+        rows: list[list[object]] = [
+            [
+                "Rollenname",
+                "Rollen-ID",
+                "Farbe",
+                "Position",
+                "Erwaehnbar",
+                "Getrennt angezeigt",
+                "Managed",
+                "Mitglieder mit Rolle",
+                "Aktive Rechte",
+                *permission_flags,
+            ]
+        ]
+
+        roles = [role for role in guild.roles if role.name != "@everyone"]
+        roles.sort(key=lambda role: role.position, reverse=True)
+
+        for role in roles:
+            permissions_map = dict(role.permissions)
+            active_permissions = [
+                name for name in permission_flags if permissions_map.get(name, False)
+            ]
+
+            rows.append(
+                [
+                    role.name,
+                    role.id,
+                    str(role.color),
+                    role.position,
+                    role.mentionable,
+                    role.hoist,
+                    role.managed,
+                    len(role.members),
+                    "; ".join(active_permissions) if active_permissions else "Keine",
+                    *[permissions_map.get(name, False) for name in permission_flags],
+                ]
+            )
+
+        return rows
+
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="export", description="Exportiert die Memberliste als CSV")
+    @app_commands.command(name="export", description="Exportiert Mitglieder und Rollenrechte als Excel-Datei")
     @app_commands.choices(
         format=[
-            app_commands.Choice(name="CSV-Datei", value="csv"),
+            app_commands.Choice(name="Excel-Datei", value="xlsx"),
         ]
     )
     async def export_member(
         self,
         interaction: discord.Interaction,
-        format: str = "csv",
+        format: str = "xlsx",
     ) -> None:
         """
-        Exportiert die Memberliste mit:
-        - Nickname
-        - Richtiger Discord-Name
-        - Zugewiesene Rollen
-        - Beitrittsdatum Server
-        - Beitrittsmethode
+        Exportiert die Memberliste sowie eine separate Tabelle aller Rollen
+        inklusive ihrer Rechte.
         """
         if not interaction.guild or interaction.guild.id != GUILD_ID:
             await interaction.response.send_message(
@@ -103,9 +293,9 @@ class Export(commands.Cog):
             )
             return
 
-        if format != "csv":
+        if format != "xlsx":
             await interaction.response.send_message(
-                "❌ Aktuell wird nur das Format CSV unterstuetzt.",
+                "❌ Aktuell wird nur das Format Excel (.xlsx) unterstuetzt.",
                 ephemeral=True,
             )
             return
@@ -122,69 +312,39 @@ class Export(commands.Cog):
 
         try:
             guild = interaction.guild
-            members = guild.members
+            members = list(guild.members)
             if not members:
                 await interaction.followup.send("❌ Keine Member gefunden.", ephemeral=True)
                 return
 
-            csv_buffer = io.StringIO()
-            writer = csv.writer(csv_buffer, delimiter=";", quoting=csv.QUOTE_MINIMAL)
-
-            writer.writerow(
+            member_rows = self._build_member_rows(members)
+            role_rows = self._build_role_rows(guild)
+            workbook_bytes = _build_xlsx_workbook(
                 [
-                    "Nickname",
-                    "Discord-Name",
-                    "Zugewiesene Rollen",
-                    "Beitrittsdatum Server",
-                    "Beitrittsmethode",
+                    ("Mitglieder", member_rows),
+                    ("Rollenrechte", role_rows),
                 ]
             )
 
-            for member in sorted(members, key=lambda m: m.joined_at or datetime.now()):
-                nickname = member.display_name
-                discord_name = (
-                    f"{member.name}#{member.discriminator}"
-                    if member.discriminator
-                    else member.name
-                )
-                roles = self._get_member_roles_str(member)
-                join_date = (
-                    member.joined_at.strftime("%d.%m.%Y %H:%M:%S")
-                    if member.joined_at
-                    else "Unbekannt"
-                )
-                join_method = self._get_join_method(member)
-
-                writer.writerow(
-                    [
-                        nickname,
-                        discord_name,
-                        roles,
-                        join_date,
-                        join_method,
-                    ]
-                )
-
-            csv_content = csv_buffer.getvalue()
-            csv_file = discord.File(
-                io.BytesIO(csv_content.encode("utf-8-sig")),
-                filename=f"memberliste_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            export_file = discord.File(
+                io.BytesIO(workbook_bytes),
+                filename=f"server_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             )
 
             embed = discord.Embed(
-                title=f"{MUHKUH_EMOJI} Member-Export erfolgreich",
-                description=f"**{len(members)}** Member wurden exportiert.",
+                title=f"{MUHKUH_EMOJI} Export erfolgreich",
+                description=(
+                    f"**{len(members)}** Member und **{len(guild.roles) - 1}** Rollen "
+                    "wurden exportiert."
+                ),
                 color=discord.Color.green(),
                 timestamp=datetime.now(),
             )
             embed.add_field(
-                name="Exportierte Felder",
+                name="Tabellenblaetter",
                 value=(
-                    "• Nickname\n"
-                    "• Discord-Name\n"
-                    "• Rollen\n"
-                    "• Beitrittsdatum\n"
-                    "• Beitrittsmethode"
+                    "• Mitglieder\n"
+                    "• Rollenrechte"
                 ),
                 inline=False,
             )
@@ -192,7 +352,7 @@ class Export(commands.Cog):
 
             await interaction.followup.send(
                 embed=embed,
-                file=csv_file,
+                file=export_file,
                 ephemeral=True,
             )
         except Exception as e:
