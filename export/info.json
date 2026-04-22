@@ -1,0 +1,14 @@
+{
+  "author": ["Lucarye"],
+  "name": "export",
+  "short": "Exportiert Memberliste als CSV",
+  "description": "Exportiert die Member-Liste des Servers als CSV-Datei mit Nickname, Discord-Name, Rollen, Beitrittsdatum und Beitrittsmethode.",
+  "install_msg": "✅ Export-Cog erfolgreich installiert! Nutze `/export member`.",
+  "requirements": [],
+  "tags": ["export", "member", "csv", "admin"],
+  "hidden": false,
+  "disabled": false,
+  "min_bot_version": "3.5.0",
+  "end_user_data_statement": "Exportiert temporär Daten aus dem Server zu Export-Zwecken.",
+  "type": "COG"
+}
