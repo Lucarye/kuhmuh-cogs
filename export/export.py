@@ -6,6 +6,7 @@ Folgt den KUHMUH-Regelwerken fuer Slash-Commands und Guild-Scope.
 import io
 import logging
 import zipfile
+from collections import Counter
 from datetime import datetime
 from xml.sax.saxutils import escape
 
@@ -202,6 +203,7 @@ class Export(commands.Cog):
                 if member.discriminator
                 else member.name
             )
+
             join_date = (
                 member.joined_at.strftime("%d.%m.%Y %H:%M:%S")
                 if member.joined_at
@@ -262,6 +264,151 @@ class Export(commands.Cog):
             )
 
         return rows
+
+    def _split_lines(self, header: str, lines: list[str], limit: int = 3800) -> list[str]:
+        """Splittet Zeilen in Discord-kompatible Textbloecke."""
+        chunks: list[str] = []
+        current = header
+
+        for line in lines:
+            addition = f"\n{line}" if current else line
+            if len(current) + len(addition) > limit:
+                chunks.append(current)
+                current = line
+            else:
+                current += addition
+
+        if current:
+            chunks.append(current)
+
+        return chunks
+
+    def _format_author_name(
+        self,
+        guild: discord.Guild,
+        author_id: int,
+        fallback_name: str,
+    ) -> str:
+        member = guild.get_member(author_id)
+        if member:
+            return f"{member.mention} (`{member.display_name}`)"
+        return f"{fallback_name} (`{author_id}`)"
+
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.command(
+        name="channelstatistik",
+        description="Zaehlt, wer in einem Channel wie viele Nachrichten geschrieben hat",
+    )
+    @app_commands.describe(
+        channel="Channel, der ausgewertet werden soll. Ohne Auswahl wird der aktuelle Channel genutzt.",
+        bots_mitzaehlen="Sollen Bot-Nachrichten mitgezaehlt werden?",
+        oeffentlich="Soll die Auswertung sichtbar in den Channel gepostet werden?",
+    )
+    async def channel_statistics(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel | None = None,
+        bots_mitzaehlen: bool = True,
+        oeffentlich: bool = False,
+    ) -> None:
+        """Liest einen Channel aus und listet Nachrichtenanzahl pro Autor auf."""
+        if not interaction.guild or interaction.guild.id != GUILD_ID:
+            await interaction.response.send_message(
+                "[Fehler] Dieser Command ist nur in der Kuhmuh-Guild verfuegbar.",
+                ephemeral=True,
+            )
+            return
+
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "[Fehler] Dieser Command kann nur innerhalb des Servers verwendet werden.",
+                ephemeral=True,
+            )
+            return
+
+        if not self._has_export_permission(interaction.user):
+            await interaction.response.send_message(
+                "[Fehler] Du hast keine Berechtigung fuer diesen Command. "
+                "Nur Admins und Offiziere koennen diese Auswertung erstellen.",
+                ephemeral=True,
+            )
+            return
+
+        target_channel = channel or interaction.channel
+        if not isinstance(target_channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "[Fehler] Bitte waehle einen normalen Text-Channel aus.",
+                ephemeral=True,
+            )
+            return
+
+        bot_member = interaction.guild.me
+        permissions = target_channel.permissions_for(bot_member) if bot_member else None
+        if not permissions or not permissions.view_channel or not permissions.read_message_history:
+            await interaction.response.send_message(
+                "[Fehler] Ich habe in diesem Channel keine Rechte, die Nachrichtenhistorie zu lesen.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=not oeffentlich, thinking=True)
+
+        try:
+            counts: Counter[int] = Counter()
+            author_names: dict[int, str] = {}
+            total_messages = 0
+
+            async for message in target_channel.history(limit=None, oldest_first=True):
+                if message.author.bot and not bots_mitzaehlen:
+                    continue
+
+                total_messages += 1
+                counts[message.author.id] += 1
+                author_names[message.author.id] = str(message.author)
+
+            if total_messages == 0:
+                await interaction.followup.send(
+                    f"In {target_channel.mention} wurden keine auswertbaren Nachrichten gefunden.",
+                    ephemeral=not oeffentlich,
+                )
+                return
+
+            ranked_authors = counts.most_common()
+            lines = []
+            for position, (author_id, count) in enumerate(ranked_authors, start=1):
+                author = self._format_author_name(
+                    interaction.guild,
+                    author_id,
+                    author_names.get(author_id, str(author_id)),
+                )
+                percent = (count / total_messages) * 100
+                lines.append(f"`{position:>2}.` {author}: **{count}** Nachrichten ({percent:.1f}%)")
+
+            header = (
+                f"**{MUHKUH_EMOJI} Channelstatistik fuer {target_channel.mention}**\n"
+                f"Gesamt: **{total_messages}** Nachrichten von **{len(ranked_authors)}** Autor:innen\n"
+                f"Bots mitgezaehlt: **{'Ja' if bots_mitzaehlen else 'Nein'}**\n"
+            )
+            chunks = self._split_lines(header, lines)
+
+            for idx, chunk in enumerate(chunks, start=1):
+                if len(chunks) > 1:
+                    chunk = f"{chunk}\n\n_Teil {idx}/{len(chunks)}_"
+                await interaction.followup.send(
+                    chunk,
+                    allowed_mentions=discord.AllowedMentions(users=False, roles=False),
+                    ephemeral=not oeffentlich,
+                )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "[Fehler] Ich darf die Nachrichten in diesem Channel nicht lesen.",
+                ephemeral=not oeffentlich,
+            )
+        except Exception as e:
+            await interaction.followup.send(
+                f"[Fehler] Fehler bei der Channelstatistik: {str(e)}",
+                ephemeral=not oeffentlich,
+            )
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="export", description="Exportiert Mitglieder und Rollenrechte als Excel-Datei")
