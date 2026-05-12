@@ -24,6 +24,64 @@ MUHKUH_EMOJI = "<:muhkuh:1207038544510586890>"
 
 log = logging.getLogger("red.kuhmuh.export")
 
+PERMISSION_LABELS_DE = {
+    "add_reactions": "Reaktionen hinzufuegen",
+    "administrator": "Administrator",
+    "attach_files": "Dateien anhaengen",
+    "ban_members": "Mitglieder bannen",
+    "change_nickname": "Eigenen Nickname aendern",
+    "connect": "Mit Sprachkanal verbinden",
+    "create_events": "Events erstellen",
+    "create_expressions": "Ausdruecke erstellen",
+    "create_instant_invite": "Einladungen erstellen",
+    "create_private_threads": "Private Threads erstellen",
+    "create_public_threads": "Oeffentliche Threads erstellen",
+    "deafen_members": "Mitglieder taubschalten",
+    "embed_links": "Links einbetten",
+    "external_emojis": "Externe Emojis verwenden",
+    "external_stickers": "Externe Sticker verwenden",
+    "kick_members": "Mitglieder kicken",
+    "manage_channels": "Kanaele verwalten",
+    "manage_emojis": "Emojis verwalten",
+    "manage_emojis_and_stickers": "Emojis und Sticker verwalten",
+    "manage_events": "Events verwalten",
+    "manage_expressions": "Ausdruecke verwalten",
+    "manage_guild": "Server verwalten",
+    "manage_messages": "Nachrichten verwalten",
+    "manage_nicknames": "Nicknames verwalten",
+    "manage_permissions": "Berechtigungen verwalten",
+    "manage_roles": "Rollen verwalten",
+    "manage_threads": "Threads verwalten",
+    "manage_webhooks": "Webhooks verwalten",
+    "mention_everyone": "Everyone erwaehnen",
+    "moderate_members": "Mitglieder timeouten",
+    "move_members": "Mitglieder verschieben",
+    "mute_members": "Mitglieder stummschalten",
+    "priority_speaker": "Prioritaetssprecher",
+    "read_message_history": "Nachrichtenverlauf lesen",
+    "read_messages": "Nachrichten lesen",
+    "request_to_speak": "Redeanfrage stellen",
+    "send_messages": "Nachrichten senden",
+    "send_messages_in_threads": "In Threads schreiben",
+    "send_polls": "Umfragen senden",
+    "send_tts_messages": "TTS-Nachrichten senden",
+    "send_voice_messages": "Sprachnachrichten senden",
+    "speak": "Sprechen",
+    "stream": "Video/Stream",
+    "use_application_commands": "App-Befehle verwenden",
+    "use_embedded_activities": "Aktivitaeten verwenden",
+    "use_external_apps": "Externe Apps verwenden",
+    "use_external_emojis": "Externe Emojis verwenden",
+    "use_external_sounds": "Externe Sounds verwenden",
+    "use_external_stickers": "Externe Sticker verwenden",
+    "use_soundboard": "Soundboard verwenden",
+    "use_voice_activation": "Sprachaktivierung verwenden",
+    "view_audit_log": "Audit-Log ansehen",
+    "view_channel": "Kanal ansehen",
+    "view_creator_monetization_analytics": "Monetarisierungsanalyse ansehen",
+    "view_guild_insights": "Server-Insights ansehen",
+}
+
 
 def _excel_col_name(index: int) -> str:
     """Wandelt 1-basierte Spaltennummern in Excel-Spaltennamen um."""
@@ -297,7 +355,7 @@ class Export(commands.Cog):
                 "Getrennt angezeigt",
                 "Managed",
                 "Mitglieder mit Rolle",
-                *permission_flags,
+                *[PERMISSION_LABELS_DE.get(name, name) for name in permission_flags],
             ]
         ]
 
