@@ -176,7 +176,7 @@ def _build_xlsx_workbook(
         '<cellXfs count="2">'
         '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
         '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1">'
-        '<alignment textRotation="90" horizontal="center" vertical="bottom" wrapText="1"/>'
+        '<alignment textRotation="180" horizontal="center" vertical="top" wrapText="1"/>'
         '</xf>'
         '</cellXfs>'
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
