@@ -82,6 +82,63 @@ PERMISSION_LABELS_DE = {
     "view_guild_insights": "Server-Insights ansehen",
 }
 
+PERMISSION_ORDER = [
+    "view_channel",
+    "manage_channels",
+    "manage_roles",
+    "manage_permissions",
+    "manage_webhooks",
+    "create_instant_invite",
+    "send_messages",
+    "send_messages_in_threads",
+    "create_public_threads",
+    "create_private_threads",
+    "embed_links",
+    "attach_files",
+    "add_reactions",
+    "external_emojis",
+    "use_external_emojis",
+    "external_stickers",
+    "use_external_stickers",
+    "mention_everyone",
+    "manage_messages",
+    "manage_threads",
+    "read_message_history",
+    "send_tts_messages",
+    "send_voice_messages",
+    "send_polls",
+    "use_application_commands",
+    "use_embedded_activities",
+    "use_external_apps",
+    "connect",
+    "speak",
+    "stream",
+    "use_soundboard",
+    "use_external_sounds",
+    "use_voice_activation",
+    "priority_speaker",
+    "mute_members",
+    "deafen_members",
+    "move_members",
+    "request_to_speak",
+    "manage_events",
+    "create_events",
+    "administrator",
+    "view_audit_log",
+    "view_guild_insights",
+    "manage_guild",
+    "manage_expressions",
+    "create_expressions",
+    "manage_emojis",
+    "manage_emojis_and_stickers",
+    "change_nickname",
+    "manage_nicknames",
+    "kick_members",
+    "ban_members",
+    "moderate_members",
+    "view_creator_monetization_analytics",
+]
+
 
 def _excel_col_name(index: int) -> str:
     """Wandelt 1-basierte Spaltennummern in Excel-Spaltennamen um."""
@@ -303,7 +360,7 @@ class Export(commands.Cog):
         guild: discord.Guild,
     ) -> tuple[list[list[object]], set[int], set[int]]:
         roles = [role for role in guild.roles if role.name != "@everyone"]
-        roles.sort(key=lambda role: role.position, reverse=True)
+        roles.sort(reverse=True)
 
         rows: list[list[object]] = [
             [
@@ -344,7 +401,12 @@ class Export(commands.Cog):
         return rows, role_columns, role_columns
 
     def _build_role_rows(self, guild: discord.Guild) -> tuple[list[list[object]], set[int], set[int]]:
-        permission_flags = sorted(discord.Permissions.VALID_FLAGS.keys())
+        valid_permission_flags = set(discord.Permissions.VALID_FLAGS.keys())
+        ordered_known_flags = [
+            name for name in PERMISSION_ORDER if name in valid_permission_flags
+        ]
+        unknown_flags = sorted(valid_permission_flags - set(ordered_known_flags))
+        permission_flags = [*ordered_known_flags, *unknown_flags]
         rows: list[list[object]] = [
             [
                 "Rollenname",
@@ -360,7 +422,7 @@ class Export(commands.Cog):
         ]
 
         roles = [role for role in guild.roles if role.name != "@everyone"]
-        roles.sort(key=lambda role: role.position, reverse=True)
+        roles.sort(reverse=True)
 
         for role in roles:
             permissions_map = dict(role.permissions)
