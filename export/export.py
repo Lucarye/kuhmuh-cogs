@@ -176,7 +176,7 @@ def _build_xlsx_workbook(
         '<cellXfs count="2">'
         '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
         '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1">'
-        '<alignment textRotation="180" horizontal="center" vertical="top" wrapText="1"/>'
+        '<alignment textRotation="90" horizontal="center" vertical="center" wrapText="1"/>'
         '</xf>'
         '</cellXfs>'
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
@@ -285,7 +285,7 @@ class Export(commands.Cog):
         role_columns = set(range(role_column_start, role_column_start + len(roles)))
         return rows, role_columns, role_columns
 
-    def _build_role_rows(self, guild: discord.Guild) -> list[list[object]]:
+    def _build_role_rows(self, guild: discord.Guild) -> tuple[list[list[object]], set[int], set[int]]:
         permission_flags = sorted(discord.Permissions.VALID_FLAGS.keys())
         rows: list[list[object]] = [
             [
@@ -297,7 +297,6 @@ class Export(commands.Cog):
                 "Getrennt angezeigt",
                 "Managed",
                 "Mitglieder mit Rolle",
-                "Aktive Rechte",
                 *permission_flags,
             ]
         ]
@@ -307,9 +306,6 @@ class Export(commands.Cog):
 
         for role in roles:
             permissions_map = dict(role.permissions)
-            active_permissions = [
-                name for name in permission_flags if permissions_map.get(name, False)
-            ]
 
             rows.append(
                 [
@@ -321,12 +317,15 @@ class Export(commands.Cog):
                     role.hoist,
                     role.managed,
                     len(role.members),
-                    "; ".join(active_permissions) if active_permissions else "Keine",
-                    *[permissions_map.get(name, False) for name in permission_flags],
+                    *["X" if permissions_map.get(name, False) else "" for name in permission_flags],
                 ]
             )
 
-        return rows
+        permission_column_start = 9
+        permission_columns = set(
+            range(permission_column_start, permission_column_start + len(permission_flags))
+        )
+        return rows, permission_columns, permission_columns
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="export", description="Exportiert Mitglieder und Rollenrechte als Excel-Datei")
@@ -386,11 +385,11 @@ class Export(commands.Cog):
                 members,
                 guild,
             )
-            role_rows = self._build_role_rows(guild)
+            role_rows, role_vertical_cols, role_compact_cols = self._build_role_rows(guild)
             workbook_bytes = _build_xlsx_workbook(
                 [
                     ("Mitglieder", member_rows, member_vertical_cols, member_compact_cols),
-                    ("Rollenrechte", role_rows, set(), set()),
+                    ("Rollenrechte", role_rows, role_vertical_cols, role_compact_cols),
                 ]
             )
 
