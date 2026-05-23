@@ -309,9 +309,12 @@ class MuhInfoCog(commands.Cog):
             app_commands.Choice(name="Freitag", value="fr"),
             app_commands.Choice(name="Samstag", value="sa"),
             app_commands.Choice(name="Sonntag", value="so"),
-        ]
+        ],
+        message=[
+            app_commands.Choice(name="Nachricht bearbeiten", value="message"),
+        ],
     )
-    @app_commands.describe(message="Öffnet das Modal zur Bearbeitung des Nachrichtentextes.")
+    @app_commands.describe(message="Wählen um das Modal zur Textbearbeitung zu öffnen.")
     async def update(
         self,
         interaction: discord.Interaction,
@@ -319,7 +322,7 @@ class MuhInfoCog(commands.Cog):
         channel: Optional[discord.TextChannel] = None,
         weekday: Optional[app_commands.Choice[str]] = None,
         time: Optional[str] = None,
-        message: Optional[bool] = None,
+        message: Optional[app_commands.Choice[str]] = None,
     ) -> None:
         if not interaction.guild or interaction.guild.id != GUILD_ID:
             await interaction.response.send_message("Dieser Command ist nur für unsere Guild vorgesehen.", ephemeral=True)
@@ -349,7 +352,7 @@ class MuhInfoCog(commands.Cog):
                 return
             entry["time"] = parsed_time
 
-        if message is True or (channel is None and weekday is None and time is None):
+        if message is not None or (channel is None and weekday is None and time is None):
             await self.config.guild(interaction.guild).muhinfo_entries.set(entries)
             channel_obj = interaction.guild.get_channel(entry.get("channel_id"))
             if not isinstance(channel_obj, discord.TextChannel):
