@@ -373,7 +373,10 @@ class MuhInfoCog(commands.Cog):
         with contextlib.suppress(Exception):
             self.bot.tree.remove_command("muhinfo", guild=guild_obj)
         try:
-            self.bot.tree.add_command(self.muhinfo, guild=guild_obj)
+            command = getattr(type(self), "muinfo", None)
+            if command is None:
+                raise AttributeError("MuhInfoCog hat keinen muinfo-Befehl")
+            self.bot.tree.add_command(command, guild=guild_obj)
             with contextlib.suppress(Exception):
                 await self.bot.tree.sync(guild=guild_obj)
         except Exception:
