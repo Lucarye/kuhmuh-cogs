@@ -4,6 +4,7 @@ import datetime as dt
 import logging
 from typing import Any, Dict, List, Optional
 
+from zoneinfo import ZoneInfo
 import discord  # pyright: ignore[reportMissingImports]
 from discord import app_commands  # pyright: ignore[reportMissingImports]
 from discord.ext import tasks  # pyright: ignore[reportMissingImports]
@@ -28,6 +29,7 @@ WEEKDAY_LABELS = {
     "so": "Sonntag",
 }
 
+BERLIN_TZ = ZoneInfo("Europe/Berlin")
 logger = logging.getLogger("red.kuhmuh.muhinfo")
 
 
@@ -94,6 +96,10 @@ def _is_admin_or_officer(member: discord.Member) -> bool:
 
 def _next_entry_id(entries: List[Dict[str, Any]]) -> int:
     return max((int(entry.get("id", 0)) for entry in entries), default=0) + 1
+
+
+def _berlin_now() -> dt.datetime:
+    return dt.datetime.now(tz=BERLIN_TZ)
 
 
 def _is_entry_due(entry: Dict[str, Any], now: dt.datetime) -> bool:
@@ -217,7 +223,7 @@ class MuhInfoCog(commands.Cog):
         await interaction.followup.send(
             f"✅ Muhinfo-Eintrag erstellt: **{entry['name']}**\n"
             f"Channel: {channel.mention}\n"
-            f"Zeitplan: {_format_schedule(entry)}",
+            f"Zeitplan: {_format_schedule(entry)} (Berlin-Zeit) ",
             ephemeral=True,
         )
 
@@ -281,7 +287,7 @@ class MuhInfoCog(commands.Cog):
         await self.config.guild(interaction.guild).muhinfo_entries.set(entries)
         await interaction.followup.send(
             f"✅ Muhinfo-Eintrag aktualisiert: **{entry['name']}**\n"
-            f"Neuer Zeitplan: {_format_schedule(entry)}\n"
+            f"Neuer Zeitplan: {_format_schedule(entry)} (Berlin-Zeit)\n"
             f"Channel: <#{entry['channel_id']}>",
             ephemeral=True,
         )
@@ -335,7 +341,7 @@ class MuhInfoCog(commands.Cog):
 
     @tasks.loop(seconds=60.0)
     async def _scheduled_post_loop(self) -> None:
-        now = dt.datetime.now()
+        now = _berlin_now()
         current_minute = now.strftime("%Y-%m-%d %H:%M")
 
         for guild in self.bot.guilds:
