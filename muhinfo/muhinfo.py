@@ -102,6 +102,88 @@ def _berlin_now() -> dt.datetime:
     return dt.datetime.now(tz=BERLIN_TZ)
 
 
+class MuhInfoMessageModal(discord.ui.Modal):
+    def __init__(
+        self,
+        cog: "MuhInfoCog",
+        title: str,
+        entry_name: str,
+        channel: discord.TextChannel,
+        days: List[str],
+        time: str,
+        current_message: str = "",
+        mode: str = "add",
+    ) -> None:
+        super().__init__(title=title)
+        self.cog = cog
+        self.entry_name = entry_name
+        self.channel = channel
+        self.days = days
+        self.time = time
+        self.mode = mode
+        self.message_input = discord.ui.TextInput(
+            label="Nachricht",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            default=current_message,
+            placeholder="Text hier einfügen. Zeilenumbrüche bleiben erhalten.",
+            max_length=2000,
+        )
+        self.add_item(self.message_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild or interaction.guild.id != GUILD_ID:
+            await interaction.response.send_message("Dieser Command ist nur für unsere Guild vorgesehen.", ephemeral=True)
+            return
+
+        message = self.message_input.value.strip()
+        if not message:
+            await interaction.response.send_message("⚠️ Bitte gib eine Nachricht ein.", ephemeral=True)
+            return
+
+        if self.mode == "add":
+            entries = await self.cog.config.guild(interaction.guild).muhinfo_entries()
+            name_clean = _normalize_name(self.entry_name)
+            if any(_normalize_name(entry.get("name", "")) == name_clean for entry in entries):
+                await interaction.response.send_message("⚠️ Ein Eintrag mit diesem Namen existiert bereits.", ephemeral=True)
+                return
+
+            entry = {
+                "id": _next_entry_id(entries),
+                "name": self.entry_name.strip(),
+                "message": message,
+                "channel_id": self.channel.id,
+                "days": self.days,
+                "time": self.time,
+                "last_posted_at": None,
+            }
+            entries.append(entry)
+            await self.cog.config.guild(interaction.guild).muhinfo_entries.set(entries)
+            await interaction.response.send_message(
+                f"✅ Muhinfo-Eintrag erstellt: **{entry['name']}**\n"
+                f"Channel: {self.channel.mention}\n"
+                f"Zeitplan: {_format_schedule(entry)} (Berlin-Zeit)",
+                ephemeral=True,
+            )
+            return
+
+        if self.mode == "edit":
+            entries = await self.cog.config.guild(interaction.guild).muhinfo_entries()
+            name_clean = _normalize_name(self.entry_name)
+            entry = next((entry for entry in entries if _normalize_name(entry.get("name", "")) == name_clean), None)
+            if not entry:
+                await interaction.response.send_message("⚠️ Kein Muhinfo-Eintrag mit diesem Namen gefunden.", ephemeral=True)
+                return
+
+            entry["message"] = message
+            await self.cog.config.guild(interaction.guild).muhinfo_entries.set(entries)
+            await interaction.response.send_message(
+                f"✅ Muhinfo-Nachricht für **{entry['name']}** wurde aktualisiert.",
+                ephemeral=True,
+            )
+            return
+
+
 def _is_entry_due(entry: Dict[str, Any], now: dt.datetime) -> bool:
     scheduled_time = entry.get("time")
     if not scheduled_time:
@@ -177,57 +259,44 @@ class MuhInfoCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         name: str,
-        message: str,
         channel: discord.TextChannel,
         weekday: app_commands.Choice[str],
         time: str,
     ) -> None:
-        await interaction.response.defer(ephemeral=True)
         if not interaction.guild or interaction.guild.id != GUILD_ID:
-            await interaction.followup.send("Dieser Command ist nur für unsere Guild vorgesehen.", ephemeral=True)
+            await interaction.response.send_message("Dieser Command ist nur für unsere Guild vorgesehen.", ephemeral=True)
             return
         if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Dieser Command kann nur von Mitgliedern im Server ausgeführt werden.", ephemeral=True)
             return
         if not _is_admin_or_officer(interaction.user):
-            await interaction.followup.send("🚫 Nur Admins und Offiziere dürfen diesen Befehl verwenden.", ephemeral=True)
+            await interaction.response.send_message("🚫 Nur Admins und Offiziere dürfen diesen Befehl verwenden.", ephemeral=True)
             return
 
         name_clean = _normalize_name(name)
         if not name_clean:
-            await interaction.followup.send("⚠️ Bitte gib einen gültigen Eintragsnamen an.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Bitte gib einen gültigen Eintragsnamen an.", ephemeral=True)
             return
 
         parsed_time = _parse_time(time)
         if parsed_time is None:
-            await interaction.followup.send("⚠️ Bitte gib eine gültige Uhrzeit im Format `HH:MM` an.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Bitte gib eine gültige Uhrzeit im Format `HH:MM` an.", ephemeral=True)
             return
 
-        entries = await self.config.guild(interaction.guild).muhinfo_entries()
-        if any(_normalize_name(entry.get("name", "")) == name_clean for entry in entries):
-            await interaction.followup.send("⚠️ Ein Eintrag mit diesem Namen existiert bereits.", ephemeral=True)
-            return
-
-        days = [weekday.value]
-        entry = {
-            "id": _next_entry_id(entries),
-            "name": name.strip(),
-            "message": message.strip(),
-            "channel_id": channel.id,
-            "days": days,
-            "time": parsed_time,
-            "last_posted_at": None,
-        }
-        entries.append(entry)
-        await self.config.guild(interaction.guild).muhinfo_entries.set(entries)
-
-        await interaction.followup.send(
-            f"✅ Muhinfo-Eintrag erstellt: **{entry['name']}**\n"
-            f"Channel: {channel.mention}\n"
-            f"Zeitplan: {_format_schedule(entry)} (Berlin-Zeit) ",
-            ephemeral=True,
+        await interaction.response.send_modal(
+            MuhInfoMessageModal(
+                cog=self,
+                title="Muhinfo-Nachricht eingeben",
+                entry_name=name,
+                channel=channel,
+                days=[weekday.value],
+                time=parsed_time,
+                current_message="",
+                mode="add",
+            )
         )
 
-    @muhinfo_group.command(name="update", description="Ändert einen bestehenden Muhinfo-Eintrag.")
+    @muhinfo_group.command(name="update", description="Ändert Zeit, Tag oder Channel eines bestehenden Eintrags.")
     @app_commands.autocomplete(name=_ac_muhinfo_name)
     @app_commands.choices(
         weekday=[
@@ -245,7 +314,6 @@ class MuhInfoCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         name: str,
-        message: Optional[str] = None,
         channel: Optional[discord.TextChannel] = None,
         weekday: Optional[app_commands.Choice[str]] = None,
         time: Optional[str] = None,
@@ -267,8 +335,6 @@ class MuhInfoCog(commands.Cog):
             await interaction.followup.send("⚠️ Kein Muhinfo-Eintrag mit diesem Namen gefunden.", ephemeral=True)
             return
 
-        if message is not None:
-            entry["message"] = message.strip()
         if channel is not None:
             entry["channel_id"] = channel.id
         if weekday is not None:
@@ -280,7 +346,7 @@ class MuhInfoCog(commands.Cog):
                 return
             entry["time"] = parsed_time
 
-        if message is None and channel is None and weekday is None and time is None:
+        if channel is None and weekday is None and time is None:
             await interaction.followup.send("⚠️ Bitte gib mindestens ein Feld an, das aktualisiert werden soll.", ephemeral=True)
             return
 
@@ -290,6 +356,44 @@ class MuhInfoCog(commands.Cog):
             f"Neuer Zeitplan: {_format_schedule(entry)} (Berlin-Zeit)\n"
             f"Channel: <#{entry['channel_id']}>",
             ephemeral=True,
+        )
+
+    @muhinfo_group.command(name="edit", description="Ändert den Text einer bestehenden Muhinfo-Nachricht.")
+    @app_commands.autocomplete(name=_ac_muhinfo_name)
+    async def edit(self, interaction: discord.Interaction, name: str) -> None:
+        if not interaction.guild or interaction.guild.id != GUILD_ID:
+            await interaction.response.send_message("Dieser Command ist nur für unsere Guild vorgesehen.", ephemeral=True)
+            return
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Dieser Command kann nur von Mitgliedern im Server ausgeführt werden.", ephemeral=True)
+            return
+        if not _is_admin_or_officer(interaction.user):
+            await interaction.response.send_message("🚫 Nur Admins und Offiziere dürfen diesen Befehl verwenden.", ephemeral=True)
+            return
+
+        entries = await self.config.guild(interaction.guild).muhinfo_entries()
+        name_clean = _normalize_name(name)
+        entry = next((entry for entry in entries if _normalize_name(entry.get("name", "")) == name_clean), None)
+        if not entry:
+            await interaction.response.send_message("⚠️ Kein Muhinfo-Eintrag mit diesem Namen gefunden.", ephemeral=True)
+            return
+
+        channel = interaction.guild.get_channel(entry.get("channel_id"))
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message("⚠️ Ziel-Channel für diesen Eintrag konnte nicht gefunden werden.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(
+            MuhInfoMessageModal(
+                cog=self,
+                title="Muhinfo-Nachricht bearbeiten",
+                entry_name=name,
+                channel=channel,
+                days=entry.get("days", []),
+                time=entry.get("time", "00:00"),
+                current_message=entry.get("message", ""),
+                mode="edit",
+            )
         )
 
     @muhinfo_group.command(name="remove", description="Löscht einen bestehenden Muhinfo-Eintrag.")
