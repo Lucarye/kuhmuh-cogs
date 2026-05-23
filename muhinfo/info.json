@@ -1,0 +1,14 @@
+{
+  "name": "muhinfo",
+  "short": "Plant und postet wiederkehrende Informationsnachrichten.",
+  "description": "Automatisierte Muhinfo-Nachrichten mit Tage-/Uhrzeitplanung und zielgerichtetem Channel-Posting.",
+  "install_msg": "🐮 Muhinfo wurde erfolgreich installiert. Verwende /muhinfo für die Konfiguration.",
+  "author": ["Kuhmuh"],
+  "tags": ["muhinfo", "notifications", "schedule", "admin"],
+  "requirements": [],
+  "min_bot_version": "3.5.0",
+  "hidden": false,
+  "disabled": false,
+  "type": "COG",
+  "end_user_data_statement": "Speichert pro Guild geplante Nachrichten, Ziel-Channel, Tage und Uhrzeiten für automatisches Posten."
+}
