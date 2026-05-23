@@ -126,6 +126,22 @@ class MuhInfoCog(commands.Cog):
         self.config.register_guild(**DEFAULT_GUILD)
         self._scheduled_post_loop.start()
 
+    async def _ac_muhinfo_name(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        entries = []
+        if interaction.guild and interaction.guild.id == GUILD_ID:
+            entries = await self.config.guild(interaction.guild).muhinfo_entries()
+        current_lower = (current or "").strip().lower()
+        choices: List[app_commands.Choice[str]] = []
+        for entry in entries:
+            name = str(entry.get("name", "")).strip()
+            if not name:
+                continue
+            if not current_lower or current_lower in name.lower():
+                choices.append(app_commands.Choice(name=name, value=name))
+                if len(choices) >= 25:
+                    break
+        return choices
+
     @muhinfo_group.command(name="info", description="Zeigt alle aktuellen Muhinfo-Einträge mit Tagen und Uhrzeiten.")
     async def info(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
@@ -206,6 +222,7 @@ class MuhInfoCog(commands.Cog):
         )
 
     @muhinfo_group.command(name="update", description="Ändert einen bestehenden Muhinfo-Eintrag.")
+    @app_commands.autocomplete(name=_ac_muhinfo_name)
     @app_commands.choices(
         weekday=[
             app_commands.Choice(name="Täglich", value="daily"),
@@ -270,6 +287,7 @@ class MuhInfoCog(commands.Cog):
         )
 
     @muhinfo_group.command(name="remove", description="Löscht einen bestehenden Muhinfo-Eintrag.")
+    @app_commands.autocomplete(name=_ac_muhinfo_name)
     async def remove(self, interaction: discord.Interaction, name: str) -> None:
         await interaction.response.defer(ephemeral=True)
         if not interaction.guild or interaction.guild.id != GUILD_ID:
