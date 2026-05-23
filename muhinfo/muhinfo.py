@@ -38,6 +38,26 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower()
 
 
+async def _ac_muhinfo_name(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+    if not interaction.guild or interaction.guild.id != GUILD_ID:
+        return []
+    cog = interaction.client.get_cog("MuhInfoCog")
+    if cog is None:
+        return []
+    entries = await cog.config.guild(interaction.guild).muhinfo_entries()
+    current_lower = (current or "").strip().lower()
+    choices: List[app_commands.Choice[str]] = []
+    for entry in entries:
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            continue
+        if not current_lower or current_lower in name.lower():
+            choices.append(app_commands.Choice(name=name, value=name))
+            if len(choices) >= 25:
+                break
+    return choices
+
+
 def _parse_time(value: str) -> Optional[str]:
     value = str(value or "").strip()
     if not value:
@@ -209,22 +229,6 @@ class MuhInfoCog(commands.Cog):
         self.config.register_guild(**DEFAULT_GUILD)
         self._scheduled_post_loop.start()
 
-    async def _ac_muhinfo_name(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
-        entries = []
-        if interaction.guild and interaction.guild.id == GUILD_ID:
-            entries = await self.config.guild(interaction.guild).muhinfo_entries()
-        current_lower = (current or "").strip().lower()
-        choices: List[app_commands.Choice[str]] = []
-        for entry in entries:
-            name = str(entry.get("name", "")).strip()
-            if not name:
-                continue
-            if not current_lower or current_lower in name.lower():
-                choices.append(app_commands.Choice(name=name, value=name))
-                if len(choices) >= 25:
-                    break
-        return choices
-
     @app_commands.command(name="muhinfo", description="Verwaltet automatisierte Muhinfo-Nachrichten.")
     @app_commands.autocomplete(name=_ac_muhinfo_name)
     @app_commands.choices(
@@ -373,9 +377,17 @@ class MuhInfoCog(commands.Cog):
         with contextlib.suppress(Exception):
             self.bot.tree.remove_command("muhinfo", guild=guild_obj)
         try:
-            command = getattr(type(self), "muinfo", None)
+            command = getattr(self, "muinfo", None) or getattr(type(self), "muinfo", None)
             if command is None:
                 raise AttributeError("MuhInfoCog hat keinen muinfo-Befehl")
+            if hasattr(command, "copy"):
+                command = command.copy()
+            callback = getattr(command, "callback", None)
+            if callback and hasattr(callback, "__get__"):
+                try:
+                    command.callback = callback.__get__(self, type(self))
+                except Exception:
+                    pass
             self.bot.tree.add_command(command, guild=guild_obj)
             with contextlib.suppress(Exception):
                 await self.bot.tree.sync(guild=guild_obj)
