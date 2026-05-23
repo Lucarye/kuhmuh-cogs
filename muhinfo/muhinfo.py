@@ -394,22 +394,42 @@ class MuhInfoCog(commands.Cog):
             await interaction.response.send_message("⚠️ Kein Muhinfo-Eintrag mit diesem Namen gefunden.", ephemeral=True)
             return
 
-        channel = interaction.guild.get_channel(entry.get("channel_id"))
-        if not isinstance(channel, discord.TextChannel):
-            await interaction.response.send_message("⚠️ Ziel-Channel für diesen Eintrag konnte nicht gefunden werden.", ephemeral=True)
+        if channel is None and weekday is None and time is None:
+            channel_obj = interaction.guild.get_channel(entry.get("channel_id"))
+            if not isinstance(channel_obj, discord.TextChannel):
+                await interaction.response.send_message("⚠️ Ziel-Channel für diesen Eintrag konnte nicht gefunden werden.", ephemeral=True)
+                return
+            await interaction.response.send_modal(
+                MuhInfoMessageModal(
+                    cog=self,
+                    title="Muhinfo-Nachricht bearbeiten",
+                    entry_name=name,
+                    channel=channel_obj,
+                    days=entry.get("days", []),
+                    time=entry.get("time", "00:00"),
+                    current_message=entry.get("message", ""),
+                    mode="edit",
+                )
+            )
             return
 
-        await interaction.response.send_modal(
-            MuhInfoMessageModal(
-                cog=self,
-                title="Muhinfo-Nachricht bearbeiten",
-                entry_name=name,
-                channel=channel,
-                days=entry.get("days", []),
-                time=entry.get("time", "00:00"),
-                current_message=entry.get("message", ""),
-                mode="edit",
-            )
+        if channel is not None:
+            entry["channel_id"] = channel.id
+        if weekday is not None:
+            entry["days"] = [weekday.value]
+        if time is not None:
+            parsed_time = _parse_time(time)
+            if parsed_time is None:
+                await interaction.response.send_message("⚠️ Bitte gib eine gültige Uhrzeit im Format `HH:MM` an.", ephemeral=True)
+                return
+            entry["time"] = parsed_time
+
+        await self.config.guild(interaction.guild).muhinfo_entries.set(entries)
+        await interaction.response.send_message(
+            f"✅ Muhinfo-Eintrag aktualisiert: **{entry['name']}**\n"
+            f"Neuer Zeitplan: {_format_schedule(entry)} (Berlin-Zeit)\n"
+            f"Channel: <#{entry['channel_id']}>",
+            ephemeral=True,
         )
 
     @muhinfo_group.command(name="remove", description="Löscht einen bestehenden Muhinfo-Eintrag.")
