@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import logging
 from typing import Any, Dict, List, Optional
@@ -435,8 +436,13 @@ class MuhInfoCog(commands.Cog):
         await interaction.followup.send(f"🗑️ Muhinfo-Eintrag gelöscht: **{name.strip()}**", ephemeral=True)
 
     async def cog_load(self) -> None:
+        guild_obj = discord.Object(id=GUILD_ID)
+        with contextlib.suppress(Exception):
+            self.bot.tree.remove_command("muhinfo", guild=guild_obj)
         try:
-            self.bot.tree.add_command(self.muhinfo_group, guild=discord.Object(id=GUILD_ID))
+            self.bot.tree.add_command(self.muhinfo_group, guild=guild_obj)
+            with contextlib.suppress(Exception):
+                await self.bot.tree.sync(guild=guild_obj)
         except Exception:
             logger.exception("Fehler beim Registrieren des /muhinfo-Befehls.")
 
