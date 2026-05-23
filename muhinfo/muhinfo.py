@@ -113,13 +113,20 @@ def _is_entry_due(entry: Dict[str, Any], now: dt.datetime) -> bool:
     return today in days
 
 
-class MuhInfoGroup(app_commands.Group):
-    def __init__(self, cog: "MuhInfoCog"):
-        super().__init__(name="muhinfo", description="Verwaltet automatisierte Muhinfo-Nachrichten.")
-        self.cog = cog
+class MuhInfoCog(commands.Cog):
+    muhinfo_group = app_commands.Group(
+        name="muhinfo",
+        description="Verwaltet automatisierte Muhinfo-Nachrichten.",
+        guild_ids=[GUILD_ID],
+    )
 
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="info", description="Zeigt alle aktuellen Muhinfo-Einträge mit Tagen und Uhrzeiten.")
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.config = Config.get_conf(self, identifier=0x0A1B2C3D, force_registration=True)
+        self.config.register_guild(**DEFAULT_GUILD)
+        self._scheduled_post_loop.start()
+
+    @muhinfo_group.command(name="info", description="Zeigt alle aktuellen Muhinfo-Einträge mit Tagen und Uhrzeiten.")
     async def info(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         if not interaction.guild or interaction.guild.id != GUILD_ID:
@@ -127,12 +134,11 @@ class MuhInfoGroup(app_commands.Group):
             return
         if not isinstance(interaction.user, discord.Member):
             return
-        entries = await self.cog.config.guild(interaction.guild).muhinfo_entries()
+        entries = await self.config.guild(interaction.guild).muhinfo_entries()
         embed = _build_entry_embed(entries, interaction.guild)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="add", description="Fügt eine neue zeitgesteuerte Muhinfo-Nachricht hinzu.")
+    @muhinfo_group.command(name="add", description="Fügt eine neue zeitgesteuerte Muhinfo-Nachricht hinzu.")
     @app_commands.choices(
         weekday=[
             app_commands.Choice(name="Täglich", value="daily"),
@@ -174,7 +180,7 @@ class MuhInfoGroup(app_commands.Group):
             await interaction.followup.send("⚠️ Bitte gib eine gültige Uhrzeit im Format `HH:MM` an.", ephemeral=True)
             return
 
-        entries = await self.cog.config.guild(interaction.guild).muhinfo_entries()
+        entries = await self.config.guild(interaction.guild).muhinfo_entries()
         if any(_normalize_name(entry.get("name", "")) == name_clean for entry in entries):
             await interaction.followup.send("⚠️ Ein Eintrag mit diesem Namen existiert bereits.", ephemeral=True)
             return
@@ -190,7 +196,7 @@ class MuhInfoGroup(app_commands.Group):
             "last_posted_at": None,
         }
         entries.append(entry)
-        await self.cog.config.guild(interaction.guild).muhinfo_entries.set(entries)
+        await self.config.guild(interaction.guild).muhinfo_entries.set(entries)
 
         await interaction.followup.send(
             f"✅ Muhinfo-Eintrag erstellt: **{entry['name']}**\n"
@@ -199,8 +205,7 @@ class MuhInfoGroup(app_commands.Group):
             ephemeral=True,
         )
 
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="update", description="Ändert einen bestehenden Muhinfo-Eintrag.")
+    @muhinfo_group.command(name="update", description="Ändert einen bestehenden Muhinfo-Eintrag.")
     @app_commands.choices(
         weekday=[
             app_commands.Choice(name="Täglich", value="daily"),
@@ -232,7 +237,7 @@ class MuhInfoGroup(app_commands.Group):
             await interaction.followup.send("🚫 Nur Admins und Offiziere dürfen diesen Befehl verwenden.", ephemeral=True)
             return
 
-        entries = await self.cog.config.guild(interaction.guild).muhinfo_entries()
+        entries = await self.config.guild(interaction.guild).muhinfo_entries()
         name_clean = _normalize_name(name)
         entry = next((entry for entry in entries if _normalize_name(entry.get("name", "")) == name_clean), None)
         if not entry:
@@ -256,7 +261,7 @@ class MuhInfoGroup(app_commands.Group):
             await interaction.followup.send("⚠️ Bitte gib mindestens ein Feld an, das aktualisiert werden soll.", ephemeral=True)
             return
 
-        await self.cog.config.guild(interaction.guild).muhinfo_entries.set(entries)
+        await self.config.guild(interaction.guild).muhinfo_entries.set(entries)
         await interaction.followup.send(
             f"✅ Muhinfo-Eintrag aktualisiert: **{entry['name']}**\n"
             f"Neuer Zeitplan: {_format_schedule(entry)}\n"
@@ -264,8 +269,7 @@ class MuhInfoGroup(app_commands.Group):
             ephemeral=True,
         )
 
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="remove", description="Löscht einen bestehenden Muhinfo-Eintrag.")
+    @muhinfo_group.command(name="remove", description="Löscht einen bestehenden Muhinfo-Eintrag.")
     async def remove(self, interaction: discord.Interaction, name: str) -> None:
         await interaction.response.defer(ephemeral=True)
         if not interaction.guild or interaction.guild.id != GUILD_ID:
@@ -277,34 +281,25 @@ class MuhInfoGroup(app_commands.Group):
             await interaction.followup.send("🚫 Nur Admins und Offiziere dürfen diesen Befehl verwenden.", ephemeral=True)
             return
 
-        entries = await self.cog.config.guild(interaction.guild).muhinfo_entries()
+        entries = await self.config.guild(interaction.guild).muhinfo_entries()
         name_clean = _normalize_name(name)
         remaining = [entry for entry in entries if _normalize_name(entry.get("name", "")) != name_clean]
         if len(remaining) == len(entries):
             await interaction.followup.send("⚠️ Kein Muhinfo-Eintrag mit diesem Namen gefunden.", ephemeral=True)
             return
 
-        await self.cog.config.guild(interaction.guild).muhinfo_entries.set(remaining)
+        await self.config.guild(interaction.guild).muhinfo_entries.set(remaining)
         await interaction.followup.send(f"🗑️ Muhinfo-Eintrag gelöscht: **{name.strip()}**", ephemeral=True)
-
-
-class MuhInfoCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self.config = Config.get_conf(self, identifier=0x0A1B2C3D, force_registration=True)
-        self.config.register_guild(**DEFAULT_GUILD)
-        self.group = MuhInfoGroup(self)
-        self._scheduled_post_loop.start()
 
     async def cog_load(self) -> None:
         try:
-            self.bot.tree.add_command(self.group, guild=discord.Object(id=GUILD_ID))
+            self.bot.tree.add_command(self.muhinfo_group, guild=discord.Object(id=GUILD_ID))
         except Exception:
             logger.exception("Fehler beim Registrieren des /muhinfo-Befehls.")
 
     async def cog_unload(self) -> None:
         try:
-            self.bot.tree.remove_command("muhinfo", type=discord.AppCommandType.chat_input)
+            self.bot.tree.remove_command("muhinfo", guild=discord.Object(id=GUILD_ID))
         except Exception:
             pass
         self._scheduled_post_loop.cancel()
