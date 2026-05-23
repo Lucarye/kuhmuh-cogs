@@ -255,10 +255,10 @@ class MuhInfoCog(commands.Cog):
     async def muinfo(
         self,
         interaction: discord.Interaction,
-        operation: app_commands.Choice[str],
+        operation: str,
         name: Optional[str] = None,
         channel: Optional[discord.TextChannel] = None,
-        weekday: Optional[app_commands.Choice[str]] = None,
+        weekday: Optional[str] = None,
         time: Optional[str] = None,
     ) -> None:
         if not interaction.guild or interaction.guild.id != GUILD_ID:
@@ -301,7 +301,7 @@ class MuhInfoCog(commands.Cog):
                     title="Muhinfo-Nachricht eingeben",
                     entry_name=name,
                     channel=channel,
-                    days=[weekday.value],
+                    days=[weekday],
                     time=parsed_time,
                     current_message="",
                     mode="add",
