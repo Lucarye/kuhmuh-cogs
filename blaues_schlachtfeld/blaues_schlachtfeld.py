@@ -354,6 +354,8 @@ class BlauesSchlachtfeldStandardtageView(discord.ui.View):
             if not child.custom_id or not child.custom_id.startswith(prefix):
                 continue
             day_code = child.custom_id.removeprefix(prefix)
+            if day_code not in WEEKDAY_LABELS:
+                continue
             if day_code == self.rest_day:
                 child.disabled = True
                 child.style = discord.ButtonStyle.secondary
@@ -432,6 +434,8 @@ class BlauesSchlachtfeldRuhetagView(discord.ui.View):
             if not child.custom_id or not child.custom_id.startswith(prefix):
                 continue
             day_code = child.custom_id.removeprefix(prefix)
+            if day_code not in WEEKDAY_LABELS:
+                continue
             if day_code == self.rest_day:
                 child.style = discord.ButtonStyle.success
                 child.label = f"{WEEKDAY_LABELS[day_code]} (Aktiv)"
@@ -512,6 +516,8 @@ class BlauesSchlachtfeldBossstageView(discord.ui.View):
             if not child.custom_id or not child.custom_id.startswith(prefix):
                 continue
             day_code = child.custom_id.removeprefix(prefix)
+            if day_code not in WEEKDAY_LABELS:
+                continue
             if day_code == self.rest_day:
                 child.disabled = True
                 child.style = discord.ButtonStyle.secondary
