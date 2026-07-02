@@ -37,6 +37,7 @@ DEFAULT_GUILD = {
     "captains": [],
     "sailors": [],
     "own_ships": [],
+    "rest_day": None,
     "last_post_at": None,
     "next_post_at": None,
 }
@@ -98,6 +99,11 @@ def _format_day_list(days: Sequence[str]) -> str:
     if not days:
         return "(keine)"
     return ", ".join(WEEKDAY_LABELS.get(day, day) for day in days)
+
+
+def _sort_weekday_codes(days: Sequence[str]) -> List[str]:
+    order = ["mo", "di", "mi", "do", "fr", "sa", "so"]
+    return [day for day in order if day in days]
 
 
 def _parse_clock(value: str) -> Optional[str]:
@@ -263,6 +269,36 @@ class BlauesSchlachtfeldConfigView(discord.ui.View):
     async def _require_admin(self, interaction: discord.Interaction) -> bool:
         return await self.cog._require_admin(interaction)
 
+    async def _show_standardtage(self, interaction: discord.Interaction) -> None:
+        if not await self._require_admin(interaction):
+            return
+        if not interaction.guild:
+            return
+        data = await self.cog.config.guild(interaction.guild).all()
+        embed = await self.cog._build_standardtage_embed(interaction.guild)
+        view = BlauesSchlachtfeldStandardtageView(self.cog, selected=data.get("standard_days") or [], rest_day=data.get("rest_day"))
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _show_bosstage(self, interaction: discord.Interaction) -> None:
+        if not await self._require_admin(interaction):
+            return
+        if not interaction.guild:
+            return
+        data = await self.cog.config.guild(interaction.guild).all()
+        embed = await self.cog._build_bossstage_embed(interaction.guild)
+        view = BlauesSchlachtfeldBossstageView(self.cog, selected=data.get("boss_days") or [], rest_day=data.get("rest_day"))
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _show_ruhetag(self, interaction: discord.Interaction) -> None:
+        if not await self._require_admin(interaction):
+            return
+        if not interaction.guild:
+            return
+        data = await self.cog.config.guild(interaction.guild).all()
+        embed = await self.cog._build_ruhetag_embed(interaction.guild)
+        view = BlauesSchlachtfeldRuhetagView(self.cog, rest_day=data.get("rest_day"))
+        await interaction.response.edit_message(embed=embed, view=view)
+
     async def _placeholder(self, interaction: discord.Interaction, label: str) -> None:
         if not await self._require_admin(interaction):
             return
@@ -273,11 +309,11 @@ class BlauesSchlachtfeldConfigView(discord.ui.View):
 
     @discord.ui.button(label="Standardtage", style=discord.ButtonStyle.primary, custom_id="bf_cfg_standardtage", row=0)
     async def standardtage_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self._placeholder(interaction, "Standardtage")
+        await self._show_standardtage(interaction)
 
     @discord.ui.button(label="Boss-Tage", style=discord.ButtonStyle.primary, custom_id="bf_cfg_bosstage", row=0)
     async def boss_tage_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self._placeholder(interaction, "Boss-Tage")
+        await self._show_bosstage(interaction)
 
     @discord.ui.button(label="Startzeit", style=discord.ButtonStyle.primary, custom_id="bf_cfg_startzeit", row=0)
     async def startzeit_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -286,6 +322,10 @@ class BlauesSchlachtfeldConfigView(discord.ui.View):
     @discord.ui.button(label="Repost-Intervall", style=discord.ButtonStyle.primary, custom_id="bf_cfg_repost_interval", row=0)
     async def repost_interval_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._placeholder(interaction, "Repost-Intervall")
+
+    @discord.ui.button(label="Ruhetag", style=discord.ButtonStyle.primary, custom_id="bf_cfg_ruhetag", row=1)
+    async def ruhetag_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._show_ruhetag(interaction)
 
     @discord.ui.button(label="Teilnehmer/Status", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_roles", row=1)
     async def roles_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -296,6 +336,243 @@ class BlauesSchlachtfeldConfigView(discord.ui.View):
         if not await self._require_admin(interaction):
             return
         await self._placeholder(interaction, "Session stoppen")
+
+
+class BlauesSchlachtfeldStandardtageView(discord.ui.View):
+    def __init__(self, cog: "BlauesSchlachtfeldCog", selected: Sequence[str], rest_day: Optional[str]) -> None:
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.selected = set(selected)
+        self.rest_day = rest_day
+        self._refresh_buttons()
+
+    def _refresh_buttons(self) -> None:
+        prefix = "bf_cfg_std_"
+        for child in self.children:
+            if not isinstance(child, discord.ui.Button):
+                continue
+            if not child.custom_id or not child.custom_id.startswith(prefix):
+                continue
+            day_code = child.custom_id.removeprefix(prefix)
+            if day_code == self.rest_day:
+                child.disabled = True
+                child.style = discord.ButtonStyle.secondary
+                child.label = f"{WEEKDAY_LABELS[day_code]} (Ruhetag)"
+            else:
+                child.disabled = False
+                child.label = WEEKDAY_LABELS[day_code]
+                child.style = discord.ButtonStyle.success if day_code in self.selected else discord.ButtonStyle.secondary
+
+    async def _toggle_day(self, interaction: discord.Interaction, day_code: str) -> None:
+        if not await self.cog._require_admin(interaction):
+            return
+        guild_config = self.cog.config.guild(interaction.guild)
+        current = await guild_config.standard_days() or []
+        if day_code in current:
+            current = [d for d in current if d != day_code]
+        else:
+            current.append(day_code)
+        await guild_config.standard_days.set(_sort_weekday_codes(current))
+        data = await self.cog.config.guild(interaction.guild).all()
+        self.selected = set(current)
+        self.rest_day = data.get("rest_day")
+        self._refresh_buttons()
+        embed = await self.cog._build_standardtage_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Mo", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_mo", row=0)
+    async def monday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "mo")
+
+    @discord.ui.button(label="Di", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_di", row=0)
+    async def tuesday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "di")
+
+    @discord.ui.button(label="Mi", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_mi", row=0)
+    async def wednesday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "mi")
+
+    @discord.ui.button(label="Do", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_do", row=1)
+    async def thursday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "do")
+
+    @discord.ui.button(label="Fr", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_fr", row=1)
+    async def friday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "fr")
+
+    @discord.ui.button(label="Sa", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_sa", row=1)
+    async def saturday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "sa")
+
+    @discord.ui.button(label="So", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_so", row=2)
+    async def sunday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "so")
+
+    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.danger, custom_id="bf_cfg_std_back", row=3)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self.cog._require_admin(interaction):
+            return
+        embed = await self.cog._build_config_embed(interaction.guild)
+        view = BlauesSchlachtfeldConfigView(self.cog)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class BlauesSchlachtfeldRuhetagView(discord.ui.View):
+    def __init__(self, cog: "BlauesSchlachtfeldCog", rest_day: Optional[str]) -> None:
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.rest_day = rest_day
+        self._refresh_buttons()
+
+    def _refresh_buttons(self) -> None:
+        prefix = "bf_cfg_rest_"
+        for child in self.children:
+            if not isinstance(child, discord.ui.Button):
+                continue
+            if not child.custom_id or not child.custom_id.startswith(prefix):
+                continue
+            day_code = child.custom_id.removeprefix(prefix)
+            if day_code == self.rest_day:
+                child.style = discord.ButtonStyle.success
+                child.label = f"{WEEKDAY_LABELS[day_code]} (Aktiv)"
+            else:
+                child.style = discord.ButtonStyle.secondary
+                child.label = WEEKDAY_LABELS[day_code]
+            child.disabled = False
+
+    async def _toggle_day(self, interaction: discord.Interaction, day_code: str) -> None:
+        if not await self.cog._require_admin(interaction):
+            return
+        guild_config = self.cog.config.guild(interaction.guild)
+        current_rest_day = await guild_config.rest_day()
+        if current_rest_day == day_code:
+            await guild_config.rest_day.set(None)
+            self.rest_day = None
+        else:
+            await guild_config.rest_day.set(day_code)
+            self.rest_day = day_code
+            standard_days = [d for d in await guild_config.standard_days() or [] if d != day_code]
+            boss_days = [d for d in await guild_config.boss_days() or [] if d != day_code]
+            await guild_config.standard_days.set(_sort_weekday_codes(standard_days))
+            await guild_config.boss_days.set(boss_days)
+        embed = await self.cog._build_ruhetag_embed(interaction.guild)
+        self._refresh_buttons()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Mo", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_mo", row=0)
+    async def monday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "mo")
+
+    @discord.ui.button(label="Di", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_di", row=0)
+    async def tuesday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "di")
+
+    @discord.ui.button(label="Mi", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_mi", row=0)
+    async def wednesday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "mi")
+
+    @discord.ui.button(label="Do", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_do", row=1)
+    async def thursday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "do")
+
+    @discord.ui.button(label="Fr", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_fr", row=1)
+    async def friday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "fr")
+
+    @discord.ui.button(label="Sa", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_sa", row=1)
+    async def saturday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "sa")
+
+    @discord.ui.button(label="So", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_so", row=2)
+    async def sunday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._toggle_day(interaction, "so")
+
+    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.danger, custom_id="bf_cfg_rest_back", row=3)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self.cog._require_admin(interaction):
+            return
+        embed = await self.cog._build_config_embed(interaction.guild)
+        view = BlauesSchlachtfeldConfigView(self.cog)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class BlauesSchlachtfeldBossstageView(discord.ui.View):
+    def __init__(self, cog: "BlauesSchlachtfeldCog", selected: Sequence[str], rest_day: Optional[str]) -> None:
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.selected = set(selected)
+        self.rest_day = rest_day
+        self._refresh_buttons()
+
+    def _refresh_buttons(self) -> None:
+        prefix = "bf_cfg_boss_"
+        for child in self.children:
+            if not isinstance(child, discord.ui.Button):
+                continue
+            if not child.custom_id or not child.custom_id.startswith(prefix):
+                continue
+            day_code = child.custom_id.removeprefix(prefix)
+            if day_code == self.rest_day:
+                child.disabled = True
+                child.style = discord.ButtonStyle.secondary
+                child.label = f"{WEEKDAY_LABELS[day_code]} (Ruhetag)"
+            else:
+                child.disabled = False
+                child.label = WEEKDAY_LABELS[day_code]
+                child.style = discord.ButtonStyle.success if day_code in self.selected else discord.ButtonStyle.secondary
+
+    async def _select_day(self, interaction: discord.Interaction, day_code: str) -> None:
+        if not await self.cog._require_admin(interaction):
+            return
+        guild_config = self.cog.config.guild(interaction.guild)
+        current = await guild_config.boss_days() or []
+        if day_code in current:
+            current = []
+        else:
+            current = [day_code]
+        await guild_config.boss_days.set(current)
+        data = await self.cog.config.guild(interaction.guild).all()
+        self.selected = set(current)
+        self.rest_day = data.get("rest_day")
+        self._refresh_buttons()
+        embed = await self.cog._build_bossstage_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Mo", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_mo", row=0)
+    async def monday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._select_day(interaction, "mo")
+
+    @discord.ui.button(label="Di", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_di", row=0)
+    async def tuesday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._select_day(interaction, "di")
+
+    @discord.ui.button(label="Mi", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_mi", row=0)
+    async def wednesday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._select_day(interaction, "mi")
+
+    @discord.ui.button(label="Do", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_do", row=1)
+    async def thursday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._select_day(interaction, "do")
+
+    @discord.ui.button(label="Fr", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_fr", row=1)
+    async def friday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._select_day(interaction, "fr")
+
+    @discord.ui.button(label="Sa", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_sa", row=1)
+    async def saturday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._select_day(interaction, "sa")
+
+    @discord.ui.button(label="So", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_so", row=2)
+    async def sunday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._select_day(interaction, "so")
+
+    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.danger, custom_id="bf_cfg_boss_back", row=3)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self.cog._require_admin(interaction):
+            return
+        embed = await self.cog._build_config_embed(interaction.guild)
+        view = BlauesSchlachtfeldConfigView(self.cog)
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 class BlauesSchlachtfeldCog(commands.Cog):
@@ -318,6 +595,10 @@ class BlauesSchlachtfeldCog(commands.Cog):
         self._view = BlauesSchlachtfeldView(self)
         with contextlib.suppress(Exception):
             self.bot.add_view(self._view)
+            self.bot.add_view(BlauesSchlachtfeldConfigView(self))
+            self.bot.add_view(BlauesSchlachtfeldStandardtageView(self, selected=[], rest_day=None))
+            self.bot.add_view(BlauesSchlachtfeldBossstageView(self, selected=[], rest_day=None))
+            self.bot.add_view(BlauesSchlachtfeldRuhetagView(self, rest_day=None))
         self._scheduler_loop.start()
         self._startup_task = self.bot.loop.create_task(self._startup_guild_sync())
 
@@ -435,12 +716,65 @@ class BlauesSchlachtfeldCog(commands.Cog):
         )
         embed.add_field(name="Standardtage", value=_format_day_list(data.get("standard_days") or []), inline=False)
         embed.add_field(name="Boss-Tage", value=_format_day_list(data.get("boss_days") or []), inline=False)
+        embed.add_field(name="Ruhetag", value=WEEKDAY_LABELS.get(data.get("rest_day"), "(keine)"), inline=False)
         embed.add_field(name="Startzeit", value=data.get("start_time") or "12:00", inline=False)
         embed.add_field(name="Repost-Intervall", value=f"{data.get('repost_interval_minutes') or 120} Minuten", inline=False)
         embed.add_field(name="Teilnehmer-Rollen", value=self._format_role_list(guild, data.get("participant_allowed_roles") or []), inline=False)
         embed.add_field(name="Status-Rollen", value=self._format_role_list(guild, data.get("status_allowed_roles") or []), inline=False)
         embed.add_field(name="Session aktiv", value=_format_bool(data.get("session_active") or False), inline=False)
         embed.set_footer(text="Blaues Schlachtfeld Admin-Konfiguration")
+        return embed
+
+    async def _build_standardtage_embed(self, guild: discord.Guild) -> discord.Embed:
+        data = await self.config.guild(guild).all()
+        selected = data.get("standard_days") or []
+        rest_day = data.get("rest_day")
+        rest_day_text = WEEKDAY_LABELS.get(rest_day, "(kein Ruhetag gesetzt)")
+        embed = discord.Embed(
+            title="Standardtage konfigurieren",
+            description=(
+                "Wähle hier die Standardtage aus, an denen das Blaue Schlachtfeld automatisch beginnen darf.\n"
+                "Mehrfachauswahl ist möglich. Klick einen Tag zum Ein-/Ausschalten.\n\n"
+                f"Ruhetag: **{rest_day_text}** — dieser Tag kann hier nicht gewählt werden."
+            ),
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Ausgewählte Standardtage", value=_format_day_list(selected), inline=False)
+        embed.set_footer(text="Blaues Schlachtfeld Konfiguration")
+        return embed
+
+    async def _build_bossstage_embed(self, guild: discord.Guild) -> discord.Embed:
+        data = await self.config.guild(guild).all()
+        selected = data.get("boss_days") or []
+        rest_day = data.get("rest_day")
+        rest_day_text = WEEKDAY_LABELS.get(rest_day, "(kein Ruhetag gesetzt)")
+        embed = discord.Embed(
+            title="Boss-Tage konfigurieren",
+            description=(
+                "Wähle hier den Boss-Tag aus. Es kann nur ein Tag gleichzeitig gesetzt sein.\n"
+                "Klick den aktuellen Tag erneut, um die Auswahl zu löschen.\n\n"
+                f"Ruhetag: **{rest_day_text}** — dieser Tag kann hier nicht gewählt werden."
+            ),
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Ausgewählter Boss-Tag", value=_format_day_list(selected), inline=False)
+        embed.set_footer(text="Blaues Schlachtfeld Konfiguration")
+        return embed
+
+    async def _build_ruhetag_embed(self, guild: discord.Guild) -> discord.Embed:
+        data = await self.config.guild(guild).all()
+        rest_day = data.get("rest_day")
+        selected_text = WEEKDAY_LABELS.get(rest_day, "(kein Ruhetag gesetzt)")
+        embed = discord.Embed(
+            title="Ruhetag konfigurieren",
+            description=(
+                "Wähle hier einen Ruhetag aus. Dieser Tag wird bei Standard- und Boss-Tagen ausgegraut und kann dort nicht ausgewählt werden.\n"
+                "Klick denselben Tag erneut, um den Ruhetag zu entfernen."
+            ),
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Aktueller Ruhetag", value=selected_text, inline=False)
+        embed.set_footer(text="Blaues Schlachtfeld Konfiguration")
         return embed
 
     async def _refresh_session_embed(self, guild: discord.Guild) -> None:
@@ -463,8 +797,10 @@ class BlauesSchlachtfeldCog(commands.Cog):
             await message.edit(embed=embed)
 
     def _is_boss_today(self, data: Dict[str, Any]) -> bool:
-        today = _berlin_date_string(_berlin_now())
         weekday = self._current_weekday_code()
+        rest_day = data.get("rest_day")
+        if weekday == rest_day:
+            return False
         return weekday in (data.get("boss_days") or [])
 
     def _current_weekday_code(self) -> str:
@@ -542,6 +878,7 @@ class BlauesSchlachtfeldCog(commands.Cog):
         await self.config.guild(guild).set({
             "standard_days": data.get("standard_days", []),
             "boss_days": data.get("boss_days", []),
+            "rest_day": data.get("rest_day"),
             "start_time": data.get("start_time", "12:00"),
             "repost_interval_minutes": data.get("repost_interval_minutes", 120),
             "participant_allowed_roles": data.get("participant_allowed_roles", []),
@@ -595,6 +932,9 @@ class BlauesSchlachtfeldCog(commands.Cog):
 
     def _day_is_allowed(self, data: Dict[str, Any]) -> bool:
         weekday = self._current_weekday_code()
+        rest_day = data.get("rest_day")
+        if weekday == rest_day:
+            return False
         return weekday in (data.get("standard_days") or []) or weekday in (data.get("boss_days") or [])
 
     async def _check_scheduler(self) -> None:
