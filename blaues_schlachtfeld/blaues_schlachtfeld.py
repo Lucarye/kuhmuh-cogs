@@ -184,7 +184,7 @@ class BlauesSchlachtfeldView(discord.ui.View):
         return False
 
     @discord.ui.button(label="Anmeldung erfolgt", style=discord.ButtonStyle.secondary, custom_id="bf_status_anmeldung")
-    async def anmeldung_button(self, interaction: discord.Interaction) -> None:
+    async def anmeldung_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         async def update(interaction: discord.Interaction) -> bool:
             if not await self._button_permission_check(interaction, "status_allowed_roles", "status_allowed_members"):
                 return False
@@ -200,7 +200,7 @@ class BlauesSchlachtfeldView(discord.ui.View):
         await self._update_state_and_embed(interaction, update)
 
     @discord.ui.button(label="Platoon erstellt", style=discord.ButtonStyle.secondary, custom_id="bf_status_platoon")
-    async def platoon_button(self, interaction: discord.Interaction) -> None:
+    async def platoon_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         async def update(interaction: discord.Interaction) -> bool:
             if not await self._button_permission_check(interaction, "status_allowed_roles", "status_allowed_members"):
                 return False
@@ -216,19 +216,19 @@ class BlauesSchlachtfeldView(discord.ui.View):
         await self._update_state_and_embed(interaction, update)
 
     @discord.ui.button(label="Kapitän der Galeere", style=discord.ButtonStyle.primary, custom_id="bf_part_captain")
-    async def captain_button(self, interaction: discord.Interaction) -> None:
+    async def captain_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._participant_toggle(interaction, "captains")
 
     @discord.ui.button(label="Matrose", style=discord.ButtonStyle.primary, custom_id="bf_part_sailor")
-    async def sailor_button(self, interaction: discord.Interaction) -> None:
+    async def sailor_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._participant_toggle(interaction, "sailors")
 
     @discord.ui.button(label="Eigenes Schiff vorhanden", style=discord.ButtonStyle.primary, custom_id="bf_part_own_ship")
-    async def own_ship_button(self, interaction: discord.Interaction) -> None:
+    async def own_ship_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._participant_toggle(interaction, "own_ships")
 
     @discord.ui.button(label="Abmelden", style=discord.ButtonStyle.danger, custom_id="bf_part_remove")
-    async def remove_button(self, interaction: discord.Interaction) -> None:
+    async def remove_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self._button_permission_check(interaction, "participant_allowed_roles", "participant_allowed_members"):
             return
         guild_config = self.cog.config.guild(interaction.guild)
