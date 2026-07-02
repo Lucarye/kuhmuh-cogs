@@ -733,14 +733,14 @@ class BlauesSchlachtfeldCog(commands.Cog):
         )
         blocks: list[str] = []
 
-        blocks.append(f"Standardtage: {_format_day_list(data.get('standard_days') or [])}")
-        blocks.append(f"Boss-Tag: {_format_day_list(data.get('boss_days') or [])}")
-        blocks.append(f"Ruhetag: {WEEKDAY_LABELS.get(data.get('rest_day'), '(keine)')}")
-        blocks.append(f"Startzeit: {data.get('start_time') or '12:00'}")
-        blocks.append(f"Repost-Intervall: {data.get('repost_interval_minutes') or 120} Minuten")
-        blocks.append(f"Teilnehmer-Rollen: {self._format_role_list(guild, data.get('participant_allowed_roles') or [])}")
-        blocks.append(f"Status-Rollen: {self._format_role_list(guild, data.get('status_allowed_roles') or [])}")
-        blocks.append(f"Session aktiv: {_format_bool(data.get('session_active') or False)}")
+        blocks.append(f"**Standardtage:** {_format_day_list(data.get('standard_days') or [])}")
+        blocks.append(f"**Boss-Tag:** {_format_day_list(data.get('boss_days') or [])}")
+        blocks.append(f"**Ruhetag:** {WEEKDAY_LABELS.get(data.get('rest_day'), '(keine)')}")
+        blocks.append(f"**Startzeit:** {data.get('start_time') or '12:00'}")
+        blocks.append(f"**Repost-Intervall:** {data.get('repost_interval_minutes') or 120} Minuten")
+        blocks.append(f"**Teilnehmer-Rollen:** {self._format_role_list(guild, data.get('participant_allowed_roles') or [])}")
+        blocks.append(f"**Status-Rollen:** {self._format_role_list(guild, data.get('status_allowed_roles') or [])}")
+        blocks.append(f"**Session aktiv:** {_format_bool(data.get('session_active') or False)}")
 
         embed.add_field(name="Konfiguration", value="\n\n".join(blocks), inline=False)
         embed.set_footer(text="Blaues Schlachtfeld Admin-Konfiguration")
