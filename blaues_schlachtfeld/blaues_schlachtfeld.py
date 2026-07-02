@@ -709,9 +709,12 @@ class BlauesSchlachtfeldCog(commands.Cog):
                     parts.append(f"<@{user_id}>")
             return "\n".join(parts)
 
-        embed.add_field(name="Kapitän der Galeere", value=mention_block("captains", "Kapitän der Galeere"), inline=False)
-        embed.add_field(name="Matrosen / Gildengaleere", value=mention_block("sailors", "Matrosen"), inline=False)
-        embed.add_field(name="Eigenes Schiff vorhanden / Jäger mit eigenen Schiffen", value=mention_block("own_ships", "Eigenes Schiff vorhanden"), inline=False)
+        participants_block = (
+            f"**Kapitän der Galeere**\n{mention_block('captains', 'Kapitän der Galeere')}\n\n"
+            f"**Matrosen / Gildengaleere**\n{mention_block('sailors', 'Matrosen')}\n\n"
+            f"**Eigenes Schiff vorhanden / Jäger mit eigenen Schiffen**\n{mention_block('own_ships', 'Eigenes Schiff vorhanden')}"
+        )
+        embed.add_field(name="Teilnehmer", value=participants_block, inline=False)
         embed.set_footer(text="Blaues Schlachtfeld Reminder")
         embed.timestamp = discord.utils.utcnow()
         return embed
@@ -731,14 +734,18 @@ class BlauesSchlachtfeldCog(commands.Cog):
             ),
             color=discord.Color.blue(),
         )
-        embed.add_field(name="Standardtage", value=_format_day_list(data.get("standard_days") or []), inline=False)
-        embed.add_field(name="Boss-Tag", value=_format_day_list(data.get("boss_days") or []), inline=False)
-        embed.add_field(name="Ruhetag", value=WEEKDAY_LABELS.get(data.get("rest_day"), "(keine)"), inline=False)
-        embed.add_field(name="Startzeit", value=data.get("start_time") or "12:00", inline=False)
-        embed.add_field(name="Repost-Intervall", value=f"{data.get('repost_interval_minutes') or 120} Minuten", inline=False)
-        embed.add_field(name="Teilnehmer-Rollen", value=self._format_role_list(guild, data.get("participant_allowed_roles") or []), inline=False)
-        embed.add_field(name="Status-Rollen", value=self._format_role_list(guild, data.get("status_allowed_roles") or []), inline=False)
-        embed.add_field(name="Session aktiv", value=_format_bool(data.get("session_active") or False), inline=False)
+        blocks: list[str] = []
+
+        blocks.append(f"**Standardtage ({len(data.get('standard_days') or [])})**\n{_format_day_list(data.get('standard_days') or [])}")
+        blocks.append(f"**Boss-Tag**\n{_format_day_list(data.get('boss_days') or [])}")
+        blocks.append(f"**Ruhetag**\n{WEEKDAY_LABELS.get(data.get('rest_day'), '(keine)')}")
+        blocks.append(f"**Startzeit**\n{data.get('start_time') or '12:00'}")
+        blocks.append(f"**Repost-Intervall**\n{data.get('repost_interval_minutes') or 120} Minuten")
+        blocks.append(f"**Teilnehmer-Rollen**\n{self._format_role_list(guild, data.get('participant_allowed_roles') or [])}")
+        blocks.append(f"**Status-Rollen**\n{self._format_role_list(guild, data.get('status_allowed_roles') or [])}")
+        blocks.append(f"**Session aktiv**\n{_format_bool(data.get('session_active') or False)}")
+
+        embed.add_field(name="Konfiguration", value="\n\n".join(blocks), inline=False)
         embed.set_footer(text="Blaues Schlachtfeld Admin-Konfiguration")
         return embed
 
@@ -756,7 +763,10 @@ class BlauesSchlachtfeldCog(commands.Cog):
             ),
             color=discord.Color.blue(),
         )
-        embed.add_field(name="Ausgewählte Standardtage", value=_format_day_list(selected), inline=False)
+        blocks: list[str] = []
+        blocks.append(f"**Ausgewählte Standardtage ({len(selected)})**\n{_format_day_list(selected)}")
+        blocks.append(f"**Ruhetag**\n{rest_day_text}")
+        embed.add_field(name="Einstellungen", value="\n\n".join(blocks), inline=False)
         embed.set_footer(text="Blaues Schlachtfeld Konfiguration")
         return embed
 
@@ -774,7 +784,10 @@ class BlauesSchlachtfeldCog(commands.Cog):
             ),
             color=discord.Color.blue(),
         )
-        embed.add_field(name="Ausgewählter Boss-Tag", value=_format_day_list(selected), inline=False)
+        blocks: list[str] = []
+        blocks.append(f"**Ausgewählter Boss-Tag ({len(selected)})**\n{_format_day_list(selected)}")
+        blocks.append(f"**Ruhetag**\n{rest_day_text}")
+        embed.add_field(name="Einstellungen", value="\n\n".join(blocks), inline=False)
         embed.set_footer(text="Blaues Schlachtfeld Konfiguration")
         return embed
 
@@ -790,7 +803,10 @@ class BlauesSchlachtfeldCog(commands.Cog):
             ),
             color=discord.Color.blue(),
         )
-        embed.add_field(name="Aktueller Ruhetag", value=selected_text, inline=False)
+        blocks: list[str] = []
+        blocks.append(f"**Aktueller Ruhetag**\n{selected_text}")
+        blocks.append("**Hinweis**\nEin Ruhetag blockiert Standardtage; ein Boss-Tag kann trotzdem gesetzt werden.")
+        embed.add_field(name="Einstellungen", value="\n\n".join(blocks), inline=False)
         embed.set_footer(text="Blaues Schlachtfeld Konfiguration")
         return embed
 
