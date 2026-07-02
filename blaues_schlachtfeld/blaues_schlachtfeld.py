@@ -431,7 +431,12 @@ class BlauesSchlachtfeldCog(commands.Cog):
             data["next_post_at"] = _to_utc_iso(next_post)
 
             embed = self._create_embed(guild, data)
-            message = await channel.send(embed=embed, view=self._view)
+            message = await channel.send(
+                content="Blaues Schlachtfeld Reminder",
+                embed=embed,
+                view=self._view,
+            )
+            logger.debug("Blaues Schlachtfeld Reminder gepostet: message=%s channel=%s", message.id, channel.id)
             data["message_ids"].append(message.id)
             data["latest_message_id"] = message.id
 
@@ -449,6 +454,20 @@ class BlauesSchlachtfeldCog(commands.Cog):
                         message = await channel.fetch_message(message_id)
                         await message.delete()
         await self._reset_session(guild)
+
+    async def _restore_session_message(self, guild: discord.Guild, channel: discord.TextChannel) -> None:
+        data = await self.config.guild(guild).all()
+        if not data.get("session_active"):
+            return
+        embed = self._create_embed(guild, data)
+        message = await channel.send(
+            content="Blaues Schlachtfeld Reminder",
+            embed=embed,
+            view=self._view,
+        )
+        logger.warning("Blaues Schlachtfeld Reminder wurde wiederhergestellt: message=%s channel=%s", message.id, channel.id)
+        data["message_ids"].append(message.id)
+        data["latest_message_id"] = message.id
 
     async def _reset_session(self, guild: discord.Guild) -> None:
         data = await self.config.guild(guild).all()
@@ -530,6 +549,19 @@ class BlauesSchlachtfeldCog(commands.Cog):
                 channel = guild.get_channel(data.get("session_channel_id") or 0)
                 if isinstance(channel, discord.TextChannel):
                     await self._post_reminder(guild, channel, auto_started=False)
+                    return
+            latest_id = data.get("latest_message_id")
+            channel = guild.get_channel(data.get("session_channel_id") or 0)
+            message_missing = False
+            if isinstance(channel, discord.TextChannel) and latest_id:
+                try:
+                    await channel.fetch_message(latest_id)
+                except Exception:
+                    message_missing = True
+            if not latest_id or not isinstance(channel, discord.TextChannel) or message_missing:
+                default = self._find_default_channel(guild)
+                if default:
+                    await self._restore_session_message(guild, default)
                     return
         if not data.get("session_active") and weekday in (data.get("standard_days") or []):
             start_time = _parse_clock(data.get("start_time") or "12:00")
