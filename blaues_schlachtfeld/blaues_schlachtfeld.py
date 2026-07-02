@@ -21,7 +21,6 @@ DEFAULT_GUILD = {
     "boss_days": [],
     "start_time": "12:00",
     "repost_interval_minutes": 120,
-    "cleanup_time": "22:00",
     "participant_allowed_roles": [],
     "participant_allowed_members": [],
     "status_allowed_roles": [],
@@ -424,6 +423,15 @@ class BlauesSchlachtfeldCog(commands.Cog):
                 data["session_auto_started"] = auto_started
                 data["session_started_by"] = started_by if not auto_started else None
                 data["message_ids"] = data.get("message_ids") or []
+
+            latest_id = data.get("latest_message_id")
+            if latest_id:
+                old_channel = guild.get_channel(data.get("session_channel_id") or 0)
+                if isinstance(old_channel, discord.TextChannel):
+                    with contextlib.suppress(Exception):
+                        old_msg = await old_channel.fetch_message(latest_id)
+                        await old_msg.delete()
+
             data["latest_message_id"] = None
             data["last_post_at"] = _to_utc_iso(dt.datetime.now(tz=dt.timezone.utc))
             interval = data.get("repost_interval_minutes") or 120
@@ -476,7 +484,6 @@ class BlauesSchlachtfeldCog(commands.Cog):
             "boss_days": data.get("boss_days", []),
             "start_time": data.get("start_time", "12:00"),
             "repost_interval_minutes": data.get("repost_interval_minutes", 120),
-            "cleanup_time": data.get("cleanup_time", "22:00"),
             "participant_allowed_roles": data.get("participant_allowed_roles", []),
             "participant_allowed_members": data.get("participant_allowed_members", []),
             "status_allowed_roles": data.get("status_allowed_roles", []),
@@ -538,12 +545,6 @@ class BlauesSchlachtfeldCog(commands.Cog):
         now = _berlin_now()
         weekday = self._current_weekday_code()
         if data.get("session_active") and data.get("session_date") == _berlin_date_string(now):
-            cleanup_time = _parse_clock(data.get("cleanup_time") or "22:00")
-            if cleanup_time:
-                cleanup_ts = self._today_time(now, cleanup_time)
-                if now >= cleanup_ts:
-                    await self._session_cleanup(guild)
-                    return
             next_post_at = _from_iso(data.get("next_post_at"))
             if next_post_at and now.astimezone(dt.timezone.utc) >= next_post_at.astimezone(dt.timezone.utc):
                 channel = guild.get_channel(data.get("session_channel_id") or 0)
@@ -690,22 +691,6 @@ class BlauesSchlachtfeldCog(commands.Cog):
             return
         await guild_config.repost_interval_minutes.set(normalized)
         await interaction.response.send_message(f"✅ Neu-Post-Intervall gesetzt auf {normalized} Minuten", ephemeral=True)
-
-    @config_group.command(name="cleanup_zeit", description="Cleanup-Zeit anzeigen oder setzen.")
-    async def config_cleanup_time(self, interaction: discord.Interaction, time: Optional[str] = None) -> None:
-        if not await self._require_admin(interaction):
-            return
-        guild_config = self.config.guild(interaction.guild)
-        if not time:
-            current = await guild_config.cleanup_time()
-            await interaction.response.send_message(f"**Cleanup-Zeit:** {current}", ephemeral=True)
-            return
-        normalized = _parse_clock(time)
-        if not normalized:
-            await interaction.response.send_message("⚠️ Ungültiges Zeitformat. Bitte HH:MM verwenden.", ephemeral=True)
-            return
-        await guild_config.cleanup_time.set(normalized)
-        await interaction.response.send_message(f"✅ Cleanup-Zeit gesetzt auf {normalized} (Europe/Berlin)", ephemeral=True)
 
     @config_group.command(name="participant_role", description="Teilnehmer-Rollen hinzufügen/entfernen/anzeigen.")
     @app_commands.choices(action=[
