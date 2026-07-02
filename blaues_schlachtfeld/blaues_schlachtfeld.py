@@ -398,7 +398,7 @@ class BlauesSchlachtfeldStandardtageView(discord.ui.View):
     async def thursday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "do")
 
-    @discord.ui.button(label="Fr", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_fr", row=1)
+    @discord.ui.button(label="Fr", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_fr", row=0)
     async def friday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "fr")
 
@@ -479,7 +479,7 @@ class BlauesSchlachtfeldRuhetagView(discord.ui.View):
     async def thursday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "do")
 
-    @discord.ui.button(label="Fr", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_fr", row=1)
+    @discord.ui.button(label="Fr", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_fr", row=0)
     async def friday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "fr")
 
@@ -560,7 +560,7 @@ class BlauesSchlachtfeldBossstageView(discord.ui.View):
     async def thursday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._select_day(interaction, "do")
 
-    @discord.ui.button(label="Fr", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_fr", row=1)
+    @discord.ui.button(label="Fr", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_fr", row=0)
     async def friday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._select_day(interaction, "fr")
 
