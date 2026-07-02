@@ -340,7 +340,13 @@ class BlauesSchlachtfeldConfigView(discord.ui.View):
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self._require_admin(interaction):
             return
-        await self._placeholder(interaction, "Session stoppen")
+        if not interaction.guild:
+            return
+        # Cleanup posted session messages and reset session state
+        await self.cog._session_cleanup(interaction.guild)
+        embed = await self.cog._build_config_embed(interaction.guild)
+        view = BlauesSchlachtfeldConfigView(self.cog)
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 class BlauesSchlachtfeldStandardtageView(discord.ui.View):
