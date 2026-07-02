@@ -1,0 +1,14 @@
+{
+  "name": "blaues_schlachtfeld",
+  "short": "Reminder und Anmeldung für das Blaue Schlachtfeld.",
+  "description": "Automatisierter Reminder, Button-Anmeldung und Statusübersicht für das Event Blaues Schlachtfeld.",
+  "install_msg": "🔵 Das Blaues Schlachtfeld-Cog wurde erfolgreich installiert!",
+  "author": ["Kuhmuh"],
+  "tags": ["blaues schlachtfeld", "reminder", "event", "buttons", "status"],
+  "requirements": [],
+  "min_bot_version": "3.5.0",
+  "hidden": false,
+  "disabled": false,
+  "type": "COG",
+  "end_user_data_statement": "Speichert pro Guild Konfigurationen des Blauen Schlachtfeld-Events, Status und Teilnehmerlisten."
+}
