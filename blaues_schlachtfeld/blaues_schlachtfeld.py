@@ -255,6 +255,49 @@ class BlauesSchlachtfeldView(discord.ui.View):
         await self.cog._refresh_session_embed(interaction.guild)
 
 
+class BlauesSchlachtfeldConfigView(discord.ui.View):
+    def __init__(self, cog: "BlauesSchlachtfeldCog") -> None:
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    async def _require_admin(self, interaction: discord.Interaction) -> bool:
+        return await self.cog._require_admin(interaction)
+
+    async def _placeholder(self, interaction: discord.Interaction, label: str) -> None:
+        if not await self._require_admin(interaction):
+            return
+        await interaction.response.send_message(
+            f"🧩 Die Einstellung **{label}** wird später über das Embed gesteuert.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Standardtage", style=discord.ButtonStyle.primary, custom_id="bf_cfg_standardtage", row=0)
+    async def standardtage_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._placeholder(interaction, "Standardtage")
+
+    @discord.ui.button(label="Boss-Tage", style=discord.ButtonStyle.primary, custom_id="bf_cfg_bosstage", row=0)
+    async def boss_tage_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._placeholder(interaction, "Boss-Tage")
+
+    @discord.ui.button(label="Startzeit", style=discord.ButtonStyle.primary, custom_id="bf_cfg_startzeit", row=0)
+    async def startzeit_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._placeholder(interaction, "Startzeit")
+
+    @discord.ui.button(label="Repost-Intervall", style=discord.ButtonStyle.primary, custom_id="bf_cfg_repost_interval", row=0)
+    async def repost_interval_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._placeholder(interaction, "Repost-Intervall")
+
+    @discord.ui.button(label="Teilnehmer/Status", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_roles", row=1)
+    async def roles_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._placeholder(interaction, "Teilnehmer/Status")
+
+    @discord.ui.button(label="Session stoppen", style=discord.ButtonStyle.danger, custom_id="bf_cfg_stop", row=1)
+    async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self._require_admin(interaction):
+            return
+        await self._placeholder(interaction, "Session stoppen")
+
+
 class BlauesSchlachtfeldCog(commands.Cog):
     blaues_group = app_commands.Group(
         name="blaues",
@@ -266,12 +309,6 @@ class BlauesSchlachtfeldCog(commands.Cog):
         name="bf",
         description="Blaues Schlachtfeld Admin-Konfiguration.",
         guild_ids=[GUILD_ID],
-    )
-
-    config_group = app_commands.Group(
-        name="config",
-        description="Konfiguration des Blauen Schlachtfeldes.",
-        parent=bf_group,
     )
 
     def __init__(self, bot: Red) -> None:
@@ -379,6 +416,31 @@ class BlauesSchlachtfeldCog(commands.Cog):
         embed.add_field(name="Eigenes Schiff vorhanden / Jäger mit eigenen Schiffen", value=mention_block("own_ships", "Eigenes Schiff vorhanden"), inline=False)
         embed.set_footer(text="Blaues Schlachtfeld Reminder")
         embed.timestamp = discord.utils.utcnow()
+        return embed
+
+    def _format_role_list(self, guild: discord.Guild, role_ids: List[int]) -> str:
+        roles = [guild.get_role(role_id) for role_id in role_ids if role_id]
+        mentions = [role.mention for role in roles if role]
+        return ", ".join(mentions) if mentions else "(keine)"
+
+    async def _build_config_embed(self, guild: discord.Guild) -> discord.Embed:
+        data = await self.config.guild(guild).all()
+        embed = discord.Embed(
+            title="Blaues Schlachtfeld Konfiguration",
+            description=(
+                "Wähle eine Einstellung per Button aus. "
+                "Die Anpassung erfolgt später direkt über dieses Interface."
+            ),
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Standardtage", value=_format_day_list(data.get("standard_days") or []), inline=False)
+        embed.add_field(name="Boss-Tage", value=_format_day_list(data.get("boss_days") or []), inline=False)
+        embed.add_field(name="Startzeit", value=data.get("start_time") or "12:00", inline=False)
+        embed.add_field(name="Repost-Intervall", value=f"{data.get('repost_interval_minutes') or 120} Minuten", inline=False)
+        embed.add_field(name="Teilnehmer-Rollen", value=self._format_role_list(guild, data.get("participant_allowed_roles") or []), inline=False)
+        embed.add_field(name="Status-Rollen", value=self._format_role_list(guild, data.get("status_allowed_roles") or []), inline=False)
+        embed.add_field(name="Session aktiv", value=_format_bool(data.get("session_active") or False), inline=False)
+        embed.set_footer(text="Blaues Schlachtfeld Admin-Konfiguration")
         return embed
 
     async def _refresh_session_embed(self, guild: discord.Guild) -> None:
@@ -632,249 +694,13 @@ class BlauesSchlachtfeldCog(commands.Cog):
         if not await self._start_session(interaction, manual=True):
             return
 
-    @config_group.command(name="standardtage", description="Standardtage anzeigen oder setzen.")
-    async def config_standardtage(self, interaction: discord.Interaction, days: Optional[str] = None) -> None:
+    @bf_group.command(name="config", description="Öffnet die Blaues Schlachtfeld Konfigurationsübersicht.")
+    async def bf_config(self, interaction: discord.Interaction) -> None:
         if not await self._require_admin(interaction):
             return
-        guild_config = self.config.guild(interaction.guild)
-        if not days:
-            current = await guild_config.standard_days()
-            await interaction.response.send_message(f"**Standardtage:** {_format_day_list(current)}", ephemeral=True)
+        guild = interaction.guild
+        if not guild:
             return
-        normalized = _normalize_day_list(days)
-        await guild_config.standard_days.set(normalized)
-        await interaction.response.send_message(f"✅ Standardtage gesetzt auf: {_format_day_list(normalized)}", ephemeral=True)
-
-    @config_group.command(name="bosstage", description="Boss-Tage anzeigen oder setzen.")
-    async def config_bosstage(self, interaction: discord.Interaction, days: Optional[str] = None) -> None:
-        if not await self._require_admin(interaction):
-            return
-        guild_config = self.config.guild(interaction.guild)
-        if not days:
-            current = await guild_config.boss_days()
-            await interaction.response.send_message(f"**Boss-Tage:** {_format_day_list(current)}", ephemeral=True)
-            return
-        normalized = _normalize_day_list(days)
-        await guild_config.boss_days.set(normalized)
-        await interaction.response.send_message(f"✅ Boss-Tage gesetzt auf: {_format_day_list(normalized)}", ephemeral=True)
-
-    @config_group.command(name="startzeit", description="Startzeit im Europe/Berlin-Format anzeigen oder setzen.")
-    async def config_startzeit(self, interaction: discord.Interaction, time: Optional[str] = None) -> None:
-        if not await self._require_admin(interaction):
-            return
-        guild_config = self.config.guild(interaction.guild)
-        if not time:
-            current = await guild_config.start_time()
-            await interaction.response.send_message(f"**Startzeit:** {current}", ephemeral=True)
-            return
-        normalized = _parse_clock(time)
-        if not normalized:
-            await interaction.response.send_message("⚠️ Ungültiges Zeitformat. Bitte HH:MM verwenden.", ephemeral=True)
-            return
-        await guild_config.start_time.set(normalized)
-        await interaction.response.send_message(f"✅ Startzeit gesetzt auf {normalized} (Europe/Berlin)", ephemeral=True)
-
-    @config_group.command(name="repost_intervall", description="Neu-Post-Intervall anzeigen oder setzen.")
-    async def config_repost_interval(self, interaction: discord.Interaction, minutes: Optional[int] = None) -> None:
-        if not await self._require_admin(interaction):
-            return
-        guild_config = self.config.guild(interaction.guild)
-        if minutes is None:
-            current = await guild_config.repost_interval_minutes()
-            await interaction.response.send_message(f"**Neu-Post-Intervall:** {current} Minuten", ephemeral=True)
-            return
-        normalized = _parse_positive_int(minutes)
-        if normalized is None:
-            await interaction.response.send_message("⚠️ Bitte eine positive ganze Zahl eingeben.", ephemeral=True)
-            return
-        await guild_config.repost_interval_minutes.set(normalized)
-        await interaction.response.send_message(f"✅ Neu-Post-Intervall gesetzt auf {normalized} Minuten", ephemeral=True)
-
-    @config_group.command(name="participant_role", description="Teilnehmer-Rollen hinzufügen/entfernen/anzeigen.")
-    @app_commands.choices(action=[
-        app_commands.Choice(name="anzeigen", value="show"),
-        app_commands.Choice(name="hinzufügen", value="add"),
-        app_commands.Choice(name="entfernen", value="remove"),
-    ])
-    async def config_participant_role(
-        self,
-        interaction: discord.Interaction,
-        action: app_commands.Choice[str],
-        role: Optional[discord.Role] = None,
-    ) -> None:
-        if not await self._require_admin(interaction):
-            return
-        guild_config = self.config.guild(interaction.guild)
-        current = await guild_config.participant_allowed_roles()
-        if action.value == "show":
-            mentions = [f"<@&{role_id}>" for role_id in current]
-            await interaction.response.send_message(f"**Teilnehmer-Rollen:** {', '.join(mentions) if mentions else '(keine)'}", ephemeral=True)
-            return
-        if not role:
-            await interaction.response.send_message("⚠️ Bitte eine Rolle angeben.", ephemeral=True)
-            return
-        if action.value == "add":
-            if role.id in current:
-                await interaction.response.send_message("⚠️ Rolle ist bereits erlaubt.", ephemeral=True)
-                return
-            current.append(role.id)
-            await guild_config.participant_allowed_roles.set(current)
-            await interaction.response.send_message(f"✅ Rolle {role.mention} als Teilnehmer erlaubt.", ephemeral=True)
-            return
-        if action.value == "remove":
-            if role.id not in current:
-                await interaction.response.send_message("⚠️ Rolle war nicht hinterlegt.", ephemeral=True)
-                return
-            current.remove(role.id)
-            await guild_config.participant_allowed_roles.set(current)
-            await interaction.response.send_message(f"✅ Rolle {role.mention} entfernt.", ephemeral=True)
-            return
-
-    @config_group.command(name="participant_member", description="Teilnehmer-Member hinzufügen/entfernen/anzeigen.")
-    @app_commands.choices(action=[
-        app_commands.Choice(name="anzeigen", value="show"),
-        app_commands.Choice(name="hinzufügen", value="add"),
-        app_commands.Choice(name="entfernen", value="remove"),
-    ])
-    async def config_participant_member(
-        self,
-        interaction: discord.Interaction,
-        action: app_commands.Choice[str],
-        member: Optional[discord.Member] = None,
-    ) -> None:
-        if not await self._require_admin(interaction):
-            return
-        guild_config = self.config.guild(interaction.guild)
-        current = await guild_config.participant_allowed_members()
-        if action.value == "show":
-            mentions = [f"<@{member_id}>" for member_id in current]
-            await interaction.response.send_message(f"**Teilnehmer-Member:** {', '.join(mentions) if mentions else '(keine)'}", ephemeral=True)
-            return
-        if not member:
-            await interaction.response.send_message("⚠️ Bitte ein Member angeben.", ephemeral=True)
-            return
-        if action.value == "add":
-            if member.id in current:
-                await interaction.response.send_message("⚠️ Member ist bereits erlaubt.", ephemeral=True)
-                return
-            current.append(member.id)
-            await guild_config.participant_allowed_members.set(current)
-            await interaction.response.send_message(f"✅ Member {member.mention} als Teilnehmer erlaubt.", ephemeral=True)
-            return
-        if action.value == "remove":
-            if member.id not in current:
-                await interaction.response.send_message("⚠️ Member war nicht hinterlegt.", ephemeral=True)
-                return
-            current.remove(member.id)
-            await guild_config.participant_allowed_members.set(current)
-            await interaction.response.send_message(f"✅ Member {member.mention} entfernt.", ephemeral=True)
-            return
-
-    @config_group.command(name="status_role", description="Status-/Orga-Rollen hinzufügen/entfernen/anzeigen.")
-    @app_commands.choices(action=[
-        app_commands.Choice(name="anzeigen", value="show"),
-        app_commands.Choice(name="hinzufügen", value="add"),
-        app_commands.Choice(name="entfernen", value="remove"),
-    ])
-    async def config_status_role(
-        self,
-        interaction: discord.Interaction,
-        action: app_commands.Choice[str],
-        role: Optional[discord.Role] = None,
-    ) -> None:
-        if not await self._require_admin(interaction):
-            return
-        guild_config = self.config.guild(interaction.guild)
-        current = await guild_config.status_allowed_roles()
-        if action.value == "show":
-            mentions = [f"<@&{role_id}>" for role_id in current]
-            await interaction.response.send_message(f"**Status-Rollen:** {', '.join(mentions) if mentions else '(keine)'}", ephemeral=True)
-            return
-        if not role:
-            await interaction.response.send_message("⚠️ Bitte eine Rolle angeben.", ephemeral=True)
-            return
-        if action.value == "add":
-            if role.id in current:
-                await interaction.response.send_message("⚠️ Rolle ist bereits erlaubt.", ephemeral=True)
-                return
-            current.append(role.id)
-            await guild_config.status_allowed_roles.set(current)
-            await interaction.response.send_message(f"✅ Rolle {role.mention} als Status/Orga erlaubt.", ephemeral=True)
-            return
-        if action.value == "remove":
-            if role.id not in current:
-                await interaction.response.send_message("⚠️ Rolle war nicht hinterlegt.", ephemeral=True)
-                return
-            current.remove(role.id)
-            await guild_config.status_allowed_roles.set(current)
-            await interaction.response.send_message(f"✅ Rolle {role.mention} entfernt.", ephemeral=True)
-            return
-
-    @config_group.command(name="status_member", description="Status-/Orga-Member hinzufügen/entfernen/anzeigen.")
-    @app_commands.choices(action=[
-        app_commands.Choice(name="anzeigen", value="show"),
-        app_commands.Choice(name="hinzufügen", value="add"),
-        app_commands.Choice(name="entfernen", value="remove"),
-    ])
-    async def config_status_member(
-        self,
-        interaction: discord.Interaction,
-        action: app_commands.Choice[str],
-        member: Optional[discord.Member] = None,
-    ) -> None:
-        if not await self._require_admin(interaction):
-            return
-        guild_config = self.config.guild(interaction.guild)
-        current = await guild_config.status_allowed_members()
-        if action.value == "show":
-            mentions = [f"<@{member_id}>" for member_id in current]
-            await interaction.response.send_message(f"**Status-Member:** {', '.join(mentions) if mentions else '(keine)'}", ephemeral=True)
-            return
-        if not member:
-            await interaction.response.send_message("⚠️ Bitte ein Member angeben.", ephemeral=True)
-            return
-        if action.value == "add":
-            if member.id in current:
-                await interaction.response.send_message("⚠️ Member ist bereits erlaubt.", ephemeral=True)
-                return
-            current.append(member.id)
-            await guild_config.status_allowed_members.set(current)
-            await interaction.response.send_message(f"✅ Member {member.mention} als Status/Orga erlaubt.", ephemeral=True)
-            return
-        if action.value == "remove":
-            if member.id not in current:
-                await interaction.response.send_message("⚠️ Member war nicht hinterlegt.", ephemeral=True)
-                return
-            current.remove(member.id)
-            await guild_config.status_allowed_members.set(current)
-            await interaction.response.send_message(f"✅ Member {member.mention} entfernt.", ephemeral=True)
-            return
-
-    @config_group.command(name="session", description="Aktive Session anzeigen.")
-    async def config_session(self, interaction: discord.Interaction) -> None:
-        if not await self._require_admin(interaction):
-            return
-        data = await self.config.guild(interaction.guild).all()
-        if not data.get("session_active"):
-            await interaction.response.send_message("ℹ️ Es gibt aktuell keine aktive Session.", ephemeral=True)
-            return
-        session_date = data.get("session_date")
-        started_by = data.get("session_started_by")
-        auto_started = data.get("session_auto_started")
-        await interaction.response.send_message(
-            "**Aktive Session**\n"
-            f"Datum: {session_date}\n"
-            f"Auto gestartet: {_format_bool(auto_started)}\n"
-            f"Gestartet von: {f'<@{started_by}>' if started_by else 'System'}\n"
-            f"Nachrichten: {len(data.get('message_ids') or [])}\n"
-            f"Anmeldung erfolgt: {_format_bool(data.get('anmeldung_erfolgt', False))}\n"
-            f"Platoon erstellt: {_format_bool(data.get('platoon_erstellt', False))}",
-            ephemeral=True,
-        )
-
-    @config_group.command(name="stop", description="Aktive Session stoppen und Cleanup ausführen.")
-    async def config_stop(self, interaction: discord.Interaction) -> None:
-        if not await self._require_admin(interaction):
-            return
-        await self._session_cleanup(interaction.guild)
-        await interaction.response.send_message("✅ Die aktive Session wurde gestoppt und aufgeräumt.", ephemeral=True)
+        embed = await self._build_config_embed(guild)
+        view = BlauesSchlachtfeldConfigView(self)
+        await interaction.response.send_message(embed=embed, view=view)
