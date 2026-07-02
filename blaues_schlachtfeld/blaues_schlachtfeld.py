@@ -316,7 +316,7 @@ class BlauesSchlachtfeldConfigView(discord.ui.View):
     async def standardtage_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._show_standardtage(interaction)
 
-    @discord.ui.button(label="Boss-Tage", style=discord.ButtonStyle.primary, custom_id="bf_cfg_bosstage", row=0)
+    @discord.ui.button(label="Boss-Tag", style=discord.ButtonStyle.primary, custom_id="bf_cfg_bosstage", row=0)
     async def boss_tage_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._show_bosstage(interaction)
 
@@ -732,7 +732,7 @@ class BlauesSchlachtfeldCog(commands.Cog):
             color=discord.Color.blue(),
         )
         embed.add_field(name="Standardtage", value=_format_day_list(data.get("standard_days") or []), inline=False)
-        embed.add_field(name="Boss-Tage", value=_format_day_list(data.get("boss_days") or []), inline=False)
+        embed.add_field(name="Boss-Tag", value=_format_day_list(data.get("boss_days") or []), inline=False)
         embed.add_field(name="Ruhetag", value=WEEKDAY_LABELS.get(data.get("rest_day"), "(keine)"), inline=False)
         embed.add_field(name="Startzeit", value=data.get("start_time") or "12:00", inline=False)
         embed.add_field(name="Repost-Intervall", value=f"{data.get('repost_interval_minutes') or 120} Minuten", inline=False)
@@ -752,7 +752,7 @@ class BlauesSchlachtfeldCog(commands.Cog):
             description=(
                 "Wähle hier die Standardtage aus, an denen das Blaue Schlachtfeld automatisch beginnen darf.\n"
                 "Mehrfachauswahl ist möglich. Klick einen Tag zum Ein-/Ausschalten.\n\n"
-                f"Ruhetag: **{rest_day_text}** — dieser Tag kann hier nicht gewählt werden."
+                f"Ruhetag: **{rest_day_text}** — ein Boss-Tag kann trotzdem gesetzt werden."
             ),
             color=discord.Color.blue(),
         )
@@ -766,7 +766,7 @@ class BlauesSchlachtfeldCog(commands.Cog):
         rest_day = data.get("rest_day")
         rest_day_text = WEEKDAY_LABELS.get(rest_day, "(kein Ruhetag gesetzt)")
         embed = discord.Embed(
-            title="Boss-Tage konfigurieren",
+            title="Boss-Tag konfigurieren",
             description=(
                 "Wähle hier den Boss-Tag aus. Es kann nur ein Tag gleichzeitig gesetzt sein.\n"
                 "Klick den aktuellen Tag erneut, um die Auswahl zu löschen.\n\n"
@@ -785,7 +785,7 @@ class BlauesSchlachtfeldCog(commands.Cog):
         embed = discord.Embed(
             title="Ruhetag konfigurieren",
             description=(
-                "Wähle hier einen Ruhetag aus. Dieser Tag wird bei Standard- und Boss-Tagen ausgegraut und kann dort nicht ausgewählt werden.\n"
+                "Wähle hier einen Ruhetag aus. Dieser Tag wird bei Standardtagen ausgegraut und kann dort nicht ausgewählt werden; ein Boss-Tag kann trotzdem gesetzt werden.\n"
                 "Klick denselben Tag erneut, um den Ruhetag zu entfernen."
             ),
             color=discord.Color.blue(),
