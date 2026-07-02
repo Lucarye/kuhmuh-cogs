@@ -394,7 +394,7 @@ class BlauesSchlachtfeldStandardtageView(discord.ui.View):
     async def wednesday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "mi")
 
-    @discord.ui.button(label="Do", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_do", row=1)
+    @discord.ui.button(label="Do", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_do", row=0)
     async def thursday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "do")
 
@@ -406,11 +406,11 @@ class BlauesSchlachtfeldStandardtageView(discord.ui.View):
     async def saturday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "sa")
 
-    @discord.ui.button(label="So", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_so", row=2)
+    @discord.ui.button(label="So", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_std_so", row=1)
     async def sunday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "so")
 
-    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.danger, custom_id="bf_cfg_std_back", row=3)
+    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.danger, custom_id="bf_cfg_std_back", row=1)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self.cog._require_admin(interaction):
             return
@@ -475,7 +475,7 @@ class BlauesSchlachtfeldRuhetagView(discord.ui.View):
     async def wednesday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "mi")
 
-    @discord.ui.button(label="Do", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_do", row=1)
+    @discord.ui.button(label="Do", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_do", row=0)
     async def thursday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "do")
 
@@ -487,11 +487,11 @@ class BlauesSchlachtfeldRuhetagView(discord.ui.View):
     async def saturday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "sa")
 
-    @discord.ui.button(label="So", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_so", row=2)
+    @discord.ui.button(label="So", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_rest_so", row=1)
     async def sunday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._toggle_day(interaction, "so")
 
-    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.danger, custom_id="bf_cfg_rest_back", row=3)
+    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.danger, custom_id="bf_cfg_rest_back", row=1)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self.cog._require_admin(interaction):
             return
@@ -556,7 +556,7 @@ class BlauesSchlachtfeldBossstageView(discord.ui.View):
     async def wednesday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._select_day(interaction, "mi")
 
-    @discord.ui.button(label="Do", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_do", row=1)
+    @discord.ui.button(label="Do", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_do", row=0)
     async def thursday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._select_day(interaction, "do")
 
@@ -568,11 +568,11 @@ class BlauesSchlachtfeldBossstageView(discord.ui.View):
     async def saturday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._select_day(interaction, "sa")
 
-    @discord.ui.button(label="So", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_so", row=2)
+    @discord.ui.button(label="So", style=discord.ButtonStyle.secondary, custom_id="bf_cfg_boss_so", row=1)
     async def sunday_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._select_day(interaction, "so")
 
-    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.danger, custom_id="bf_cfg_boss_back", row=3)
+    @discord.ui.button(label="Zurück", style=discord.ButtonStyle.danger, custom_id="bf_cfg_boss_back", row=1)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self.cog._require_admin(interaction):
             return
