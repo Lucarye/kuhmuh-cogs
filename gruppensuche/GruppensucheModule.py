@@ -65,7 +65,7 @@ CHEER_EMOJI = "<:blackspiritcheer:1199730129476268183>"
 OLUN_EMOJI = "<:olun:1471826612394655857>"
 EDANIA_EMOJI = "<:edania:1483216698625753088>"
 
-EASTER_EGG_AP = 396
+EASTER_EGG_AP = 432
 EASTER_EGG_MARK = " ✨"  # oder f" {MUHKUH_EMOJI}" wenn du es cow-themed willst
 
 EASTER_EGG_TEXT_POOL = [
@@ -616,7 +616,7 @@ _AP_NUM_RE = re.compile(r"(\d+)")
 
 
 def _ap_triggers_easter_egg(ap_val: Optional[str]) -> bool:
-    """Trigger: AP > 396 (weil 396 max ist)."""
+    """Trigger: AP > 432 (weil 432 max ist)."""
     n = _parse_int_strict(ap_val)
     if n is None:
         return False
@@ -5491,7 +5491,7 @@ class Gruppensuche(commands.Cog):
             "altar_cleared_step": session.altar_cleared_step,
             "altar_target_step": session.altar_target_step,
         }
-        # ✅ Easteregg beim Ersteller (nur wenn AP > 396)
+        # ✅ Easteregg beim Ersteller (nur wenn AP > 432)
         _ensure_easter_egg_text(data, owner_id, session.own_ap)
 
         if session.category == "muhhelfer":
