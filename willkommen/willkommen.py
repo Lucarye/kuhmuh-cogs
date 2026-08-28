@@ -1,6 +1,7 @@
 import asyncio
-import logging
 import random
+import sys
+import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -8,8 +9,6 @@ import discord  # pyright: ignore[reportMissingImports]
 from redbot.core import Config, commands  # pyright: ignore[reportMissingImports]
 from redbot.core.bot import Red  # pyright: ignore[reportMissingImports]
 
-
-LOGGER = logging.getLogger("red.kuhmuh.willkommen")
 
 GUILD_ID = 1198649628787212458
 MEMBER_ROLE_ID = 1198654521354764449
@@ -69,6 +68,10 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _log_error(message: str):
+    print(f"[willkommen] {message}", file=sys.stderr)
+
+
 class Willkommen(commands.Cog):
     """Begruesst Mitglieder beim erstmaligen Rollenbeitritt."""
 
@@ -117,7 +120,7 @@ class Willkommen(commands.Cog):
         messages = WELCOME_BACK_MESSAGES if is_welcome_back else WELCOME_MESSAGES
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
         if channel is None or not hasattr(channel, "send"):
-            LOGGER.error("Welcome channel %s not found in guild %s", WELCOME_CHANNEL_ID, member.guild.id)
+            _log_error(f"Welcome channel {WELCOME_CHANNEL_ID} not found in guild {member.guild.id}")
             return
 
         embed = discord.Embed(
@@ -131,7 +134,8 @@ class Willkommen(commands.Cog):
                 allowed_mentions=discord.AllowedMentions(users=[member]),
             )
         except (discord.Forbidden, discord.HTTPException):
-            LOGGER.exception("Could not send %s message for user %s", welcome_type, member.id)
+            _log_error(f"Could not send {welcome_type} message for user {member.id}")
+            traceback.print_exc()
             return
 
         previous_status = self._previous_status(role_ids)
