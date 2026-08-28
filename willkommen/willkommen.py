@@ -105,7 +105,11 @@ class Willkommen(commands.Cog):
             return
 
         welcome_type = "welcome_back" if is_welcome_back else "welcome"
-        title = "🐮 Willkommen zurueck!" if is_welcome_back else "🐮 Willkommen in der Herde!"
+        title = (
+            "<:muhkuh:1207038544510586890> Willkommen zurueck!"
+            if is_welcome_back
+            else "<:muhkuh:1207038544510586890> Willkommen in der Herde!"
+        )
         footer = "KuHMuh • Willkommen zurueck" if is_welcome_back else "KuHMuh • Willkommen in der Herde"
         lines = WELCOME_BACK_LINES if is_welcome_back else WELCOME_LINES
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
@@ -121,7 +125,7 @@ class Willkommen(commands.Cog):
             ),
             color=discord.Color.gold(),
         )
-        embed.set_thumbnail(url=WELCOME_IMAGE_URL)
+        embed.set_image(url=WELCOME_IMAGE_URL)
         embed.set_footer(text=footer)
         try:
             await channel.send(
