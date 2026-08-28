@@ -1,0 +1,14 @@
+{
+  "name": "willkommen",
+  "short": "Begruesst neue und zurueckkehrende Mitglieder.",
+  "description": "Postet beim Erhalt der Mitgliederrolle ein Willkommens-Embed mit persistenter Anti-Spam-Historie.",
+  "install_msg": "Das Willkommen-Cog wurde erfolgreich installiert!",
+  "author": ["Lucarye"],
+  "tags": ["muhkuh", "willkommen", "rollen", "embed"],
+  "requirements": [],
+  "min_bot_version": "3.5.0",
+  "hidden": false,
+  "disabled": false,
+  "type": "COG",
+  "end_user_data_statement": "Speichert pro Guild eine persistente Begruessungshistorie pro User."
+}
