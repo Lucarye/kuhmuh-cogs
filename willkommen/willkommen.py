@@ -118,8 +118,8 @@ class Willkommen(commands.Cog):
             return
 
         embed = discord.Embed(
-            title=title,
             description=(
+                f"# {title}\n\n"
                 f"{random.choice(lines)}\n\n"
                 f"Schoen, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
             ),
