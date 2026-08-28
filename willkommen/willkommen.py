@@ -186,7 +186,7 @@ class Willkommen(commands.Cog):
                 f"{random.choice(lines)}\n\n"
                 f"Schön, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
             ),
-            color=discord.Color.gold(),
+            color=discord.Color.green(),
         )
         embed.set_image(url=WELCOME_IMAGE_URL)
         embed.set_footer(text=footer)
