@@ -29,13 +29,25 @@ WELCOME_LINES = (
     "Macht Platz auf der Weide - unsere Herde wächst!",
     "Muhment mal ... da ist ja jemand Neues!",
     "Frisches Muhen auf der Weide!",
-    "Die KuHMuhs freuen sich über Verstärkung.",
+    "Die KuhMuhs freuen sich über Verstärkung.",
     "Ein neues Paar Hufe betritt die Weide.",
     "Die Stallglocke läutet für dich!",
     "Neue Hufe, neue Geschichten.",
     "Die Weide bekommt Gesellschaft.",
     "Ein herzliches Muh aus der Herde!",
-    "Die Milchbar ist offen und die Herde wächst.",
+    "Die Milchbar ist offen und die Herde wächst weiter.",
+    "Die Herde rückt ein Stück zusammen - du bist jetzt dabei!",
+    "Auf der Weide ist noch ein Platz frei geworden.",
+    "Die KuhMuhs begrüßen ein neues Gesicht!",
+    "Heute gibt es ein besonders fröhliches Muh für dich.",
+    "Die Herde hat Verstärkung auf vier Hufen bekommen.",
+    "Ein neuer Tag, ein neues Herdenmitglied.",
+    "Die Weide wird bunter - herzlich willkommen!",
+    "Die Herde zählt jetzt ein Mitglied mehr.",
+    "Das nächste Abenteuer auf der Weide kann beginnen.",
+    "Die KuhMuh-Gemeinschaft freut sich auf dich.",
+    "Ein frischer Wind weht durch den Stall.",
+    "Willkommen an dem Ort, an dem jedes Muh dazugehört.",
 )
 
 WELCOME_BACK_LINES = (
@@ -47,6 +59,36 @@ WELCOME_BACK_LINES = (
     "Die alte Weidespur hat dich zur Herde geführt.",
     "Bekannte Hufe auf der Weide.",
     "Die Herde freut sich über deine Rückkehr.",
+    "Die Weide fühlt sich gleich wieder vertraut an.",
+    "Ein bekanntes Muh schallt über die Weide.",
+    "Die Herde macht dir wieder Platz.",
+    "Schön, dass du den Weg zurück gefunden hast.",
+    "Die KuhMuhs erkennen dich sofort wieder.",
+    "Dein Platz in der Herde ist noch frei.",
+    "Die Weide begrüßt ein vertrautes Gesicht.",
+    "Zurück bei den KuhMuhs - das passt doch wie Huf auf Weide.",
+    "Die Herde ist wieder ein Stück vollständiger.",
+    "Ein vertrautes Mitglied kehrt auf die Weide zurück.",
+    "Die Stallglocke läutet zur Wiedersehens-Muh!",
+    "Schön, dass du wieder Teil unserer Herde bist.",
+)
+
+WELCOME_TITLES = (
+    "<:muhkuh:1207038544510586890> Willkommen in der Herde!",
+    "<:muhkuh:1207038544510586890> Ein herzliches Muh!",
+    "<:muhkuh:1207038544510586890> Schön, dass du da bist!",
+    "<:muhkuh:1207038544510586890> Die Herde begrüßt dich!",
+    "<:muhkuh:1207038544510586890> Willkommen auf der Weide!",
+    "<:muhkuh:1207038544510586890> Neues Mitglied in der Herde!",
+)
+
+WELCOME_BACK_TITLES = (
+    "<:muhkuh:1207038544510586890> Willkommen zurück!",
+    "<:muhkuh:1207038544510586890> Schön, dich wiederzusehen!",
+    "<:muhkuh:1207038544510586890> Die Herde hat dich vermisst!",
+    "<:muhkuh:1207038544510586890> Zurück auf der Weide!",
+    "<:muhkuh:1207038544510586890> Ein vertrautes Muh kehrt zurück!",
+    "<:muhkuh:1207038544510586890> Wieder da bei den KuHMuhs!",
 )
 
 DEFAULT_GUILD = {"welcome_users": {}}
@@ -105,12 +147,9 @@ class Willkommen(commands.Cog):
             return
 
         welcome_type = "welcome_back" if is_welcome_back else "welcome"
-        title = (
-            "<:muhkuh:1207038544510586890> Willkommen zurück!"
-            if is_welcome_back
-            else "<:muhkuh:1207038544510586890> Willkommen in der Herde!"
-        )
-        footer = "KuHMuh • Willkommen zurück" if is_welcome_back else "KuHMuh • Willkommen in der Herde"
+        titles = WELCOME_BACK_TITLES if is_welcome_back else WELCOME_TITLES
+        title = random.choice(titles)
+        footer = "KuHMuh • Eine Kuh macht Muh, viele Kühe machen Mühe"
         lines = WELCOME_BACK_LINES if is_welcome_back else WELCOME_LINES
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
         if channel is None or not hasattr(channel, "send"):
