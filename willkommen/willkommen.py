@@ -74,21 +74,21 @@ WELCOME_BACK_LINES = (
 )
 
 WELCOME_TITLES = (
-    "<:muhkuh:1207038544510586890> Willkommen in der Herde!",
-    "<:muhkuh:1207038544510586890> Ein herzliches Muh!",
-    "<:muhkuh:1207038544510586890> Schön, dass du da bist!",
-    "<:muhkuh:1207038544510586890> Die Herde begrüßt dich!",
-    "<:muhkuh:1207038544510586890> Willkommen auf der Weide!",
-    "<:muhkuh:1207038544510586890> Neues Mitglied in der Herde!",
+    "<:muhKuh:1207038544510586890> Willkommen in der Herde!",
+    "<:muhKuh:1207038544510586890> Ein herzliches Muh!",
+    "<:muhKuh:1207038544510586890> Schön, dass du da bist!",
+    "<:muhKuh:1207038544510586890> Die Herde begrüßt dich!",
+    "<:muhKuh:1207038544510586890> Willkommen auf der Weide!",
+    "<:muhKuh:1207038544510586890> Neues Mitglied in der Herde!",
 )
 
 WELCOME_BACK_TITLES = (
-    "<:muhkuh:1207038544510586890> Willkommen zurück!",
-    "<:muhkuh:1207038544510586890> Schön, dich wiederzusehen!",
-    "<:muhkuh:1207038544510586890> Die Herde hat dich vermisst!",
-    "<:muhkuh:1207038544510586890> Zurück auf der Weide!",
-    "<:muhkuh:1207038544510586890> Ein vertrautes Muh kehrt zurück!",
-    "<:muhkuh:1207038544510586890> Wieder da bei den KuHMuhs!",
+    "<:muhKuh:1207038544510586890> Willkommen zurück!",
+    "<:muhKuh:1207038544510586890> Schön, dich wiederzusehen!",
+    "<:muhKuh:1207038544510586890> Die Herde hat dich vermisst!",
+    "<:muhKuh:1207038544510586890> Zurück auf der Weide!",
+    "<:muhKuh:1207038544510586890> Ein vertrautes Muh kehrt zurück!",
+    "<:muhKuh:1207038544510586890> Wieder da bei den KuhMuhs!",
 )
 
 DEFAULT_GUILD = {"welcome_users": {}}
@@ -149,7 +149,7 @@ class Willkommen(commands.Cog):
         welcome_type = "welcome_back" if is_welcome_back else "welcome"
         titles = WELCOME_BACK_TITLES if is_welcome_back else WELCOME_TITLES
         title = random.choice(titles)
-        footer = "KuHMuh • Eine Kuh macht Muh, viele Kühe machen Mühe"
+        footer = "KuhMuh • Eine Kuh macht Muh, viele Kühe machen Mühe"
         lines = WELCOME_BACK_LINES if is_welcome_back else WELCOME_LINES
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
         if channel is None or not hasattr(channel, "send"):
