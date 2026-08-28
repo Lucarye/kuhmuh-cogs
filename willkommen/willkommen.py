@@ -37,7 +37,6 @@ WELCOME_LINES = (
     "Ein herzliches Muh aus der Herde!",
     "Die Milchbar ist offen und die Herde wächst weiter.",
     "Die Herde rückt ein Stück zusammen - du bist jetzt dabei!",
-    "Auf der Weide ist noch ein Platz frei geworden.",
     "Die KuhMuhs begrüßen ein neues Gesicht!",
     "Heute gibt es ein besonders fröhliches Muh für dich.",
     "Die Herde hat Verstärkung auf vier Hufen bekommen.",
