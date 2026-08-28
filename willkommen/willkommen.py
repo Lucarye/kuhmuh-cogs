@@ -26,27 +26,27 @@ WELCOME_ANTI_SPAM_ENABLED = False
 WELCOME_LINES = (
     "Die Herde hat Zuwachs bekommen!",
     "Ein neues Kalb ist auf der Weide angekommen.",
-    "Macht Platz auf der Weide - unsere Herde waechst!",
+    "Macht Platz auf der Weide - unsere Herde wächst!",
     "Muhment mal ... da ist ja jemand Neues!",
     "Frisches Muhen auf der Weide!",
-    "Die KuHMuhs freuen sich ueber Verstaerkung.",
+    "Die KuHMuhs freuen sich über Verstärkung.",
     "Ein neues Paar Hufe betritt die Weide.",
     "Die Stallglocke laeutet fuer dich!",
     "Neue Hufe, neue Geschichten.",
     "Die Weide bekommt Gesellschaft.",
     "Ein herzliches Muh aus der Herde!",
-    "Die Milchbar ist offen und die Herde waechst.",
+    "Die Milchbar ist offen und die Herde wächst.",
 )
 
 WELCOME_BACK_LINES = (
     "Da kennt jemand den Weg zur Weide noch!",
     "Eine bekannte Kuh ist wieder da.",
-    "Die Herde bekommt ein bekanntes Gesicht zurueck.",
-    "Zurueck auf der Weide!",
+    "Die Herde bekommt ein bekanntes Gesicht zurück.",
+    "Zurück auf der Weide!",
     "Die Stallglocke klingt vertraut.",
-    "Die alte Weidespur hat dich zur Herde gefuehrt.",
+    "Die alte Weidespur hat dich zur Herde geführt.",
     "Bekannte Hufe auf der Weide.",
-    "Die Herde freut sich ueber deine Rueckkehr.",
+    "Die Herde freut sich über deine Rückkehr.",
 )
 
 DEFAULT_GUILD = {"welcome_users": {}}
@@ -61,7 +61,7 @@ def _log_error(message: str):
 
 
 class Willkommen(commands.Cog):
-    """Begruesst Mitglieder beim erstmaligen Rollenbeitritt."""
+    """Begrüßt Mitglieder beim erstmaligen Rollenbeitritt."""
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -106,11 +106,11 @@ class Willkommen(commands.Cog):
 
         welcome_type = "welcome_back" if is_welcome_back else "welcome"
         title = (
-            "<:muhkuh:1207038544510586890> Willkommen zurueck!"
+            "<:muhkuh:1207038544510586890> Willkommen zurück!"
             if is_welcome_back
             else "<:muhkuh:1207038544510586890> Willkommen in der Herde!"
         )
-        footer = "KuHMuh • Willkommen zurueck" if is_welcome_back else "KuHMuh • Willkommen in der Herde"
+        footer = "KuHMuh • Willkommen zurück" if is_welcome_back else "KuHMuh • Willkommen in der Herde"
         lines = WELCOME_BACK_LINES if is_welcome_back else WELCOME_LINES
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
         if channel is None or not hasattr(channel, "send"):
@@ -121,7 +121,7 @@ class Willkommen(commands.Cog):
             description=(
                 f"# {title}\n\n"
                 f"{random.choice(lines)}\n\n"
-                f"Schoen, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
+                f"Schön, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
             ),
             color=discord.Color.gold(),
         )
