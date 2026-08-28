@@ -21,7 +21,7 @@ WELCOME_IMAGE_URL = (
 )
 
 # Für die Testphase False; für den Produktivbetrieb auf True setzen.
-WELCOME_ANTI_SPAM_ENABLED = False
+WELCOME_ANTI_SPAM_ENABLED = True
 
 WELCOME_LINES = (
     "Die Herde hat Zuwachs bekommen!",
