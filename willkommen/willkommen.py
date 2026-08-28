@@ -173,7 +173,7 @@ class Willkommen(commands.Cog):
         welcome_type = "welcome_back" if is_welcome_back else "welcome"
         titles = WELCOME_BACK_TITLES if is_welcome_back else WELCOME_TITLES
         title = random.choice(titles)
-        footer = "KuhMuh • Eine Kuh macht Muh, viele Kühe machen Mühe"
+        footer = "KuhMuh • Eine Kuh macht Muh, viele Kühe machen Muuuuuhhh!"
         lines = WELCOME_BACK_LINES if is_welcome_back else WELCOME_LINES
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
         if channel is None or not hasattr(channel, "send"):
