@@ -23,42 +23,30 @@ WELCOME_IMAGE_URL = (
 # Fuer die Testphase False; fuer den Produktivbetrieb auf True setzen.
 WELCOME_ANTI_SPAM_ENABLED = False
 
-WELCOME_MESSAGES = (
-    "Die Herde hat Zuwachs bekommen! Willkommen bei den KuHMuhs, {member} - schoen, dass du bei uns bist.",
-    "Ein neues Kalb ist auf der Weide angekommen. Herzlich willkommen bei den KuHMuhs, {member}!",
-    "Macht Platz auf der Weide - unsere Herde waechst! Willkommen bei den KuHMuhs, {member}.",
-    "Muhment mal ... da ist ja jemand Neues! Herzlich willkommen in der Herde, {member}.",
-    "Die Weide wird voller: Willkommen in der KuHMuh-Herde, {member}!",
-    "Frisches Muhen auf der Weide! Schoen, dass du da bist, {member}.",
-    "Die Herde macht ein herzliches Muh fuer dich. Willkommen bei den KuHMuhs, {member}!",
-    "Unsere Weide hat ein neues Gesicht bekommen. Willkommen, {member}!",
-    "Vorhang auf fuer ein neues Herdenmitglied: Willkommen bei den KuHMuhs, {member}.",
-    "Die Stallglocke laeutet fuer dich! Herzlich willkommen, {member}.",
-    "Ein neues Paar Hufe betritt die Weide. Willkommen in der Herde, {member}!",
-    "Die KuHMuhs freuen sich ueber Verstaerkung. Willkommen, {member}!",
-    "Die Herde waechst um ein muh-tiges Mitglied: Willkommen, {member}!",
-    "Schnapp dir einen Platz auf der Weide - willkommen bei den KuHMuhs, {member}.",
-    "Ein herzliches Muh und willkommen in unserer Herde, {member}!",
-    "Die Weide ist bereit fuer dich. Schoen, dass du zu den KuHMuhs kommst, {member}!",
-    "Unsere Herde hat dich schon erwartet. Willkommen, {member}!",
-    "Neue Hufe, neue Geschichten: Herzlich willkommen bei den KuHMuhs, {member}!",
-    "Die Milchbar ist offen und die Herde komplettiert sich. Willkommen, {member}!",
-    "Muh an, Herdenmitglied! Willkommen bei den KuHMuhs, {member}.",
-    "Die Weide bekommt Gesellschaft. Herzlich willkommen, {member}!",
-    "Ein neues Kalb ist da - die Herde sagt willkommen, {member}!",
-    "Gemeinsam grasen macht mehr Spass. Willkommen in der Herde, {member}!",
-    "Die KuHMuh-Herde begruesst dich mit einem frohen Muh, {member}!",
+WELCOME_LINES = (
+    "Die Herde hat Zuwachs bekommen!",
+    "Ein neues Kalb ist auf der Weide angekommen.",
+    "Macht Platz auf der Weide - unsere Herde waechst!",
+    "Muhment mal ... da ist ja jemand Neues!",
+    "Frisches Muhen auf der Weide!",
+    "Die KuHMuhs freuen sich ueber Verstaerkung.",
+    "Ein neues Paar Hufe betritt die Weide.",
+    "Die Stallglocke laeutet fuer dich!",
+    "Neue Hufe, neue Geschichten.",
+    "Die Weide bekommt Gesellschaft.",
+    "Ein herzliches Muh aus der Herde!",
+    "Die Milchbar ist offen und die Herde waechst.",
 )
 
-WELCOME_BACK_MESSAGES = (
-    "Da kennt jemand den Weg zur Weide noch! Willkommen zurueck bei den KuHMuhs, {member}.",
-    "Eine bekannte Kuh ist wieder da - willkommen zurueck in der Herde, {member}!",
-    "Die Herde bekommt ein bekanntes Gesicht zurueck. Schoen, dass du wieder da bist, {member}.",
-    "Zurueck auf der Weide! Willkommen zurueck bei den KuHMuhs, {member}.",
-    "Die Stallglocke klingt vertraut: Willkommen zurueck, {member}!",
-    "Die alte Weidespur hat dich zur Herde gefuehrt. Willkommen zurueck, {member}!",
-    "Bekannte Hufe auf der Weide - schoen, dich wiederzusehen, {member}.",
-    "Die Herde freut sich ueber deine Rueckkehr. Willkommen zurueck, {member}!",
+WELCOME_BACK_LINES = (
+    "Da kennt jemand den Weg zur Weide noch!",
+    "Eine bekannte Kuh ist wieder da.",
+    "Die Herde bekommt ein bekanntes Gesicht zurueck.",
+    "Zurueck auf der Weide!",
+    "Die Stallglocke klingt vertraut.",
+    "Die alte Weidespur hat dich zur Herde gefuehrt.",
+    "Bekannte Hufe auf der Weide.",
+    "Die Herde freut sich ueber deine Rueckkehr.",
 )
 
 DEFAULT_GUILD = {"welcome_users": {}}
@@ -117,17 +105,24 @@ class Willkommen(commands.Cog):
             return
 
         welcome_type = "welcome_back" if is_welcome_back else "welcome"
-        messages = WELCOME_BACK_MESSAGES if is_welcome_back else WELCOME_MESSAGES
+        title = "🐮 Willkommen zurueck!" if is_welcome_back else "🐮 Willkommen in der Herde!"
+        footer = "KuHMuh • Willkommen zurueck" if is_welcome_back else "KuHMuh • Willkommen in der Herde"
+        lines = WELCOME_BACK_LINES if is_welcome_back else WELCOME_LINES
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
         if channel is None or not hasattr(channel, "send"):
             _log_error(f"Welcome channel {WELCOME_CHANNEL_ID} not found in guild {member.guild.id}")
             return
 
         embed = discord.Embed(
-            description=random.choice(messages).format(member=member.mention),
+            title=title,
+            description=(
+                f"{random.choice(lines)}\n\n"
+                f"Schoen, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
+            ),
             color=discord.Color.gold(),
         )
-        embed.set_image(url=WELCOME_IMAGE_URL)
+        embed.set_thumbnail(url=WELCOME_IMAGE_URL)
+        embed.set_footer(text=footer)
         try:
             await channel.send(
                 embed=embed,
