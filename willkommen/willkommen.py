@@ -118,11 +118,30 @@ class Willkommen(commands.Cog):
 
         before_role_ids = {role.id for role in before.roles}
         after_role_ids = {role.id for role in after.roles}
-        if MEMBER_ROLE_ID in before_role_ids or MEMBER_ROLE_ID not in after_role_ids:
+        member_role_added = MEMBER_ROLE_ID not in before_role_ids and MEMBER_ROLE_ID in after_role_ids
+        friend_role_added = FRIEND_ROLE_ID not in before_role_ids and FRIEND_ROLE_ID in after_role_ids
+        if not member_role_added and not friend_role_added:
             return
 
         async with self._locks[(after.guild.id, after.id)]:
-            await self._handle_member_role_received(after, after_role_ids)
+            if friend_role_added:
+                await self._handle_friend_role_received(after)
+            if member_role_added:
+                await self._handle_member_role_received(after, after_role_ids)
+
+    async def _handle_friend_role_received(self, member: discord.Member):
+        guild_data = await self.config.guild(member.guild).all()
+        users = guild_data.get("welcome_users", {})
+        user_key = str(member.id)
+        record = dict(users.get(user_key, {}))
+        history = dict(record.get("member_history", {}))
+        history["friend_status_count"] = int(history.get("friend_status_count", 0)) + 1
+        history["was_former_member"] = True
+        record["user_id"] = member.id
+        record["previous_status"] = "friend"
+        record["member_history"] = history
+        users[user_key] = record
+        await self.config.guild(member.guild).welcome_users.set(users)
 
     async def _handle_member_role_received(self, member: discord.Member, role_ids: set[int]):
         guild_data = await self.config.guild(member.guild).all()
@@ -137,8 +156,13 @@ class Willkommen(commands.Cog):
             FRIEND_ROLE_ID in role_ids
             or record.get("previous_status") in {"friend", "former_member"}
             or record.get("member_history", {}).get("was_former_member", False)
+            or record.get("member_history", {}).get("friend_status_count", 0) > 0
         )
-        already_welcomed_back = record.get("last_welcome_type") == "welcome_back"
+        friend_status_count = record.get("member_history", {}).get("friend_status_count", 0)
+        already_welcomed_back = (
+            record.get("last_welcome_type") == "welcome_back"
+            and record.get("member_history", {}).get("last_welcomed_friend_count") == friend_status_count
+        )
         if WELCOME_ANTI_SPAM_ENABLED and record.get("welcome_count", 0) > 0 and (
             not is_welcome_back or already_welcomed_back
         ):
@@ -185,6 +209,8 @@ class Willkommen(commands.Cog):
         history = dict(record.get("member_history", {}))
         history["was_member"] = True
         history["was_former_member"] = previous_status in {"friend", "former_member"}
+        if welcome_type == "welcome_back":
+            history["last_welcomed_friend_count"] = friend_status_count
         record["member_history"] = history
         users[user_key] = record
         await self.config.guild(member.guild).welcome_users.set(users)
