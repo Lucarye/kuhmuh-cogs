@@ -20,7 +20,7 @@ WELCOME_IMAGE_URL = (
     "1424149435662733393/farm_resized_960x540.webp"
 )
 
-# Fuer die Testphase False; fuer den Produktivbetrieb auf True setzen.
+# Für die Testphase False; für den Produktivbetrieb auf True setzen.
 WELCOME_ANTI_SPAM_ENABLED = False
 
 WELCOME_LINES = (
@@ -31,7 +31,7 @@ WELCOME_LINES = (
     "Frisches Muhen auf der Weide!",
     "Die KuHMuhs freuen sich über Verstärkung.",
     "Ein neues Paar Hufe betritt die Weide.",
-    "Die Stallglocke laeutet fuer dich!",
+    "Die Stallglocke läutet für dich!",
     "Neue Hufe, neue Geschichten.",
     "Die Weide bekommt Gesellschaft.",
     "Ein herzliches Muh aus der Herde!",
