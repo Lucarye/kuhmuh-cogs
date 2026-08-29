@@ -15,10 +15,7 @@ MEMBER_ROLE_ID = 1198654521354764449
 ENTRY_ROLE_ID = 1199022986955603999
 FRIEND_ROLE_ID = 1206903378014380063
 WELCOME_CHANNEL_ID = 1199322485297000528
-WELCOME_IMAGE_URL = (
-    "https://cdn.discordapp.com/attachments/1404063753946796122/"
-    "1424149435662733393/farm_resized_960x540.webp"
-)
+WELCOME_IMAGE_URL = "https://klipy.com/gifs/cow-holy-cow"
 
 # Für die Testphase False; für den Produktivbetrieb auf True setzen.
 WELCOME_ANTI_SPAM_ENABLED = False
