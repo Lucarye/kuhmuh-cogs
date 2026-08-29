@@ -252,7 +252,7 @@ class Willkommen(commands.Cog):
         if is_holy_cow:
             title = self._pick_unique_value(HOLY_COW_TITLES, last_title)
             text = self._pick_unique_value(HOLY_COW_LINES, last_text)
-            footer = "✨ KuHMuh • Die Holy Cow ist erschienen ✨"
+            footer = "✨ KuhMuh • Die Holy Cow ist erschienen ✨"
             embed_color = discord.Color.gold()
             description = (
                 f"## {title}\n\n"
