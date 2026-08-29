@@ -100,10 +100,18 @@ HOLY_COW_TITLES = (
 
 HOLY_COW_LINES = (
     "<:muhKuh:1207038544510586890> Ein legendäres Muh durchzieht die Weide.",
-    "<:muhKuh:1207038544510586890> Die Herde wurde Zeuge eines uralten Ereignisses.",
-    "<:muhKuh:1207038544510586890> Der Stall ist still, denn die Holy Cow ist erschienen.",
     "<:muhKuh:1207038544510586890> Die Weide glüht, als die Mythen wahr werden.",
-    "<:muhKuh:1207038544510586890> Ein seltenes Muh erinnert die Herde an alte Zeiten.",
+    "<:muhKuh:1207038544510586890> Der Stall ist still, denn die Holy Cow ist erschienen.",
+    "<:muhKuh:1207038544510586890> Ein uraltes Muh erinnert die Herde an alte Zeiten.",
+    "<:muhKuh:1207038544510586890> Die Nacht auf der Weide wird von einer Legende beherrscht.",
+)
+
+HOLY_COW_CLOSERS = (
+    "**Die Herde hält den Atem an.**",
+    "**Die Legende der Weide ist wahr geworden.**",
+    "**Der Stall flüstert noch immer von der Holy Cow.**",
+    "**Die Mythen sind wieder lebendig.**",
+    "**Die Weide lauscht noch immer auf das seltene Muh.**",
 )
 
 DEFAULT_GUILD = {
@@ -247,12 +255,13 @@ class Willkommen(commands.Cog):
         if is_holy_cow:
             title = self._pick_unique_value(HOLY_COW_TITLES, last_title)
             text = self._pick_unique_value(HOLY_COW_LINES, last_text)
+            closer = self._pick_unique_value(HOLY_COW_CLOSERS, last_text)
             footer = "✨ KuHMuh • Die Holy Cow ist erschienen ✨"
             embed_color = discord.Color.gold()
             description = (
                 f"## {title}\n\n"
                 f"**{text}**\n\n"
-                f"**Die Herde wurde Zeuge eines seltenen Ereignisses.**"
+                f"{closer}"
             )
         else:
             title = self._pick_unique_value(titles, last_title)
