@@ -15,7 +15,7 @@ MEMBER_ROLE_ID = 1198654521354764449
 ENTRY_ROLE_ID = 1199022986955603999
 FRIEND_ROLE_ID = 1206903378014380063
 WELCOME_CHANNEL_ID = 1199322485297000528
-WELCOME_IMAGE_URL = "https://klipy.com/gifs/cow-holy-cow"
+WELCOME_IMAGE_URL = "https://media.giphy.com/media/3o7TKtQ44m8K7lWAC4/giphy.gif"
 
 # Für die Testphase False; für den Produktivbetrieb auf True setzen.
 WELCOME_ANTI_SPAM_ENABLED = False
