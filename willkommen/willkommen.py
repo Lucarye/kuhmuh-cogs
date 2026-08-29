@@ -92,18 +92,18 @@ WELCOME_BACK_TITLES = (
 
 HOLY_COW_TITLES = (
     "✨ HOLY COW! ✨",
-    "✨ Die Holy Cow ist erschienen ✨",
-    "✨ Ein legendäres Muh! ✨",
+    "✨ Die Legendenglocke der Weide erklingt ✨",
+    "✨ Die Mythen sind wahr: Die Holy Cow ist da ✨",
+    "✨ Ein uraltes Muh durch die Nacht ✨",
     "✨ Die Weide hält den Atem an ✨",
-    "✨ Ein seltenes Ereignis auf der Weide ✨",
 )
 
 HOLY_COW_LINES = (
-    "<:muhKuh:1207038544510586890> Ein legendäres Muh!",
-    "<:muhKuh:1207038544510586890> Die Herde wurde Zeuge eines seltenen Ereignisses.",
-    "<:muhKuh:1207038544510586890> Der Stall ist still, denn die Holy Cow ist da.",
-    "<:muhKuh:1207038544510586890> Die Weide glüht, als die Holy Cow erscheint.",
-    "<:muhKuh:1207038544510586890> Ein mysteriöses Muh durchzieht die Nacht.",
+    "<:muhKuh:1207038544510586890> Ein legendäres Muh durchzieht die Weide.",
+    "<:muhKuh:1207038544510586890> Die Herde wurde Zeuge eines uralten Ereignisses.",
+    "<:muhKuh:1207038544510586890> Der Stall ist still, denn die Holy Cow ist erschienen.",
+    "<:muhKuh:1207038544510586890> Die Weide glüht, als die Mythen wahr werden.",
+    "<:muhKuh:1207038544510586890> Ein seltenes Muh erinnert die Herde an alte Zeiten.",
 )
 
 DEFAULT_GUILD = {
@@ -252,8 +252,7 @@ class Willkommen(commands.Cog):
             description = (
                 f"## {title}\n\n"
                 f"**{text}**\n\n"
-                f"**Die Herde wurde Zeuge eines seltenen Ereignisses.**\n"
-                f"Schön, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
+                f"**Die Herde wurde Zeuge eines seltenen Ereignisses.**"
             )
         else:
             title = self._pick_unique_value(titles, last_title)
