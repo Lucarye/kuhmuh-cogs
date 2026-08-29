@@ -15,7 +15,10 @@ MEMBER_ROLE_ID = 1198654521354764449
 ENTRY_ROLE_ID = 1199022986955603999
 FRIEND_ROLE_ID = 1206903378014380063
 WELCOME_CHANNEL_ID = 1199322485297000528
+WELCOME_MEDIA_THREAD_ID = 1543373634427559946
 WELCOME_IMAGE_URL = "https://cdn.discordapp.com/attachments/1543373634427559946/1543376216004886618/mxks5HTw3tqI3zGJ8a.gif?ex=6a94a49c&is=6a93531c&hm=e3c990b9709476995101370728d22ce6bcc8a75e0cbeabd8871dd311cc1d1555&"
+WELCOME_HOLY_COW_IMAGE_URL = WELCOME_IMAGE_URL
+WELCOME_HOLY_COW_CHANCE = 0.12
 
 # Für die Testphase False; für den Produktivbetrieb auf True setzen.
 WELCOME_ANTI_SPAM_ENABLED = False
@@ -87,7 +90,12 @@ WELCOME_BACK_TITLES = (
     "<:muhKuh:1207038544510586890> Wieder da bei den KuhMuhs!",
 )
 
-DEFAULT_GUILD = {"welcome_users": {}}
+DEFAULT_GUILD = {
+    "welcome_users": {},
+    "last_welcome_media_url": None,
+    "last_welcome_text": None,
+    "last_welcome_title": None,
+}
 
 
 def _timestamp() -> str:
@@ -106,6 +114,48 @@ class Willkommen(commands.Cog):
         self.config = Config.get_conf(self, identifier=0x4B55484D554857, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
         self._locks = defaultdict(asyncio.Lock)
+
+    @staticmethod
+    def _pick_unique_value(options: tuple[str, ...], previous: str | None) -> str:
+        candidates = [option for option in options if option != previous] if previous else list(options)
+        if not candidates:
+            candidates = list(options)
+        return random.choice(candidates)
+
+    async def _pick_random_media(self, guild: discord.Guild, previous_url: str | None) -> str:
+        media_urls: list[str] = []
+
+        if WELCOME_MEDIA_THREAD_ID:
+            try:
+                thread = guild.get_thread(WELCOME_MEDIA_THREAD_ID)
+                if thread is None:
+                    thread = await guild.fetch_channel(WELCOME_MEDIA_THREAD_ID)
+                if isinstance(thread, discord.Thread):
+                    async for message in thread.history(limit=200, oldest_first=False):
+                        for attachment in message.attachments:
+                            if attachment.url:
+                                media_urls.append(attachment.url)
+                        for embed in message.embeds:
+                            if embed.thumbnail and embed.thumbnail.url:
+                                media_urls.append(embed.thumbnail.url)
+                            if embed.image and embed.image.url:
+                                media_urls.append(embed.image.url)
+            except (discord.Forbidden, discord.HTTPException, AttributeError, TypeError):
+                media_urls = []
+
+        if not media_urls:
+            media_urls = [WELCOME_HOLY_COW_IMAGE_URL, WELCOME_IMAGE_URL]
+
+        if WELCOME_HOLY_COW_IMAGE_URL and random.random() < WELCOME_HOLY_COW_CHANCE:
+            if WELCOME_HOLY_COW_IMAGE_URL != previous_url:
+                return WELCOME_HOLY_COW_IMAGE_URL
+
+        for _ in range(25):
+            candidate = random.choice(media_urls)
+            if candidate != previous_url:
+                return candidate
+
+        return media_urls[0]
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
@@ -168,9 +218,18 @@ class Willkommen(commands.Cog):
 
         welcome_type = "welcome_back" if is_welcome_back else "welcome"
         titles = WELCOME_BACK_TITLES if is_welcome_back else WELCOME_TITLES
-        title = random.choice(titles)
-        footer = "KuhMuh • Eine Kuh macht Muh, viele Kühe machen Muuuuuhhh!"
         lines = WELCOME_BACK_LINES if is_welcome_back else WELCOME_LINES
+
+        guild_settings = await self.config.guild(member.guild).all()
+        last_title = guild_settings.get("last_welcome_title")
+        last_text = guild_settings.get("last_welcome_text")
+        last_media_url = guild_settings.get("last_welcome_media_url")
+
+        title = self._pick_unique_value(titles, last_title)
+        text = self._pick_unique_value(lines, last_text)
+        media_url = await self._pick_random_media(member.guild, last_media_url)
+
+        footer = "KuhMuh • Eine Kuh macht Muh, viele Kühe machen Muuuuuhhh!"
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
         if channel is None or not hasattr(channel, "send"):
             _log_error(f"Welcome channel {WELCOME_CHANNEL_ID} not found in guild {member.guild.id}")
@@ -179,12 +238,12 @@ class Willkommen(commands.Cog):
         embed = discord.Embed(
             description=(
                 f"# {title}\n\n"
-                f"{random.choice(lines)}\n\n"
+                f"{text}\n\n"
                 f"Schön, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
             ),
             color=discord.Color.green(),
         )
-        embed.set_image(url=WELCOME_IMAGE_URL)
+        embed.set_image(url=media_url)
         embed.set_footer(text=footer)
         try:
             await channel.send(
@@ -210,6 +269,9 @@ class Willkommen(commands.Cog):
         record["member_history"] = history
         users[user_key] = record
         await self.config.guild(member.guild).welcome_users.set(users)
+        await self.config.guild(member.guild).last_welcome_media_url.set(media_url)
+        await self.config.guild(member.guild).last_welcome_text.set(text)
+        await self.config.guild(member.guild).last_welcome_title.set(title)
 
     @staticmethod
     def _previous_status(role_ids: set[int]) -> str:
