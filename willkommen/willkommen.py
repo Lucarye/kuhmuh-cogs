@@ -90,6 +90,22 @@ WELCOME_BACK_TITLES = (
     "<:muhKuh:1207038544510586890> Wieder da bei den KuhMuhs!",
 )
 
+HOLY_COW_TITLES = (
+    "✨ HOLY COW! ✨",
+    "✨ Die Holy Cow ist erschienen ✨",
+    "✨ Ein legendäres Muh! ✨",
+    "✨ Die Weide hält den Atem an ✨",
+    "✨ Ein seltenes Ereignis auf der Weide ✨",
+)
+
+HOLY_COW_LINES = (
+    "<:muhKuh:1207038544510586890> Ein legendäres Muh!",
+    "<:muhKuh:1207038544510586890> Die Herde wurde Zeuge eines seltenen Ereignisses.",
+    "<:muhKuh:1207038544510586890> Der Stall ist still, denn die Holy Cow ist da.",
+    "<:muhKuh:1207038544510586890> Die Weide glüht, als die Holy Cow erscheint.",
+    "<:muhKuh:1207038544510586890> Ein mysteriöses Muh durchzieht die Nacht.",
+)
+
 DEFAULT_GUILD = {
     "welcome_users": {},
     "last_welcome_media_url": None,
@@ -225,23 +241,39 @@ class Willkommen(commands.Cog):
         last_text = guild_settings.get("last_welcome_text")
         last_media_url = guild_settings.get("last_welcome_media_url")
 
-        title = self._pick_unique_value(titles, last_title)
-        text = self._pick_unique_value(lines, last_text)
         media_url = await self._pick_random_media(member.guild, last_media_url)
+        is_holy_cow = media_url == WELCOME_HOLY_COW_IMAGE_URL
 
-        footer = "KuhMuh • Eine Kuh macht Muh, viele Kühe machen Muuuuuhhh!"
+        if is_holy_cow:
+            title = self._pick_unique_value(HOLY_COW_TITLES, last_title)
+            text = self._pick_unique_value(HOLY_COW_LINES, last_text)
+            footer = "✨ KuHMuh • Die Holy Cow ist erschienen ✨"
+            embed_color = discord.Color.gold()
+            description = (
+                f"## {title}\n\n"
+                f"**{text}**\n\n"
+                f"**Die Herde wurde Zeuge eines seltenen Ereignisses.**\n"
+                f"Schön, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
+            )
+        else:
+            title = self._pick_unique_value(titles, last_title)
+            text = self._pick_unique_value(lines, last_text)
+            footer = "KuhMuh • Eine Kuh macht Muh, viele Kühe machen Muuuuuhhh!"
+            embed_color = discord.Color.green()
+            description = (
+                f"# {title}\n\n"
+                f"{text}\n\n"
+                f"Schön, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
+            )
+
         channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
         if channel is None or not hasattr(channel, "send"):
             _log_error(f"Welcome channel {WELCOME_CHANNEL_ID} not found in guild {member.guild.id}")
             return
 
         embed = discord.Embed(
-            description=(
-                f"# {title}\n\n"
-                f"{text}\n\n"
-                f"Schön, dass du {'wieder ' if is_welcome_back else ''}da bist, {member.mention}!"
-            ),
-            color=discord.Color.green(),
+            description=description,
+            color=embed_color,
         )
         embed.set_image(url=media_url)
         embed.set_footer(text=footer)
