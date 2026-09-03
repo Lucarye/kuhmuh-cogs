@@ -1360,7 +1360,7 @@ class DetailsModal(discord.ui.Modal):
         if own_ap_val:
             ap_int = _parse_int_strict(own_ap_val)
             if ap_int is None:
-                await _invalid_number("❌ **AP ungültig.** Beispiele: `300`, `396`, `250`, ...")
+                await _invalid_number("❌ **AP ungültig.** Beispiele: `300`, `432`, `250`, ...")
                 return
             # ✅ Speichern wie bisher als digits-only string (kompatibel zu deinem Restcode)
             self.session.own_ap = str(ap_int)

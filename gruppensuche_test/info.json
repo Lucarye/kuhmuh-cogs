@@ -3,7 +3,7 @@
   "name": "gruppensuche_test",
   "short": "Gruppensuche (Test)",
   "description": "TEST-Cog: Gruppensuche mit Wizard (ephemeral) + öffentlicher Suche, Join/Leave, Ping, Bearbeiten inkl. Boss-Doppelrun, Close/Delete/Open. Läuft parallel zum Live-Cog.",
-  "install_msg": "Gruppensuche (Test) installiert. Nutze /gruppensuche_test.",
+  "install_msg": "Gruppensuche (Test) installiert. Nutze /gs_test.",
   "requirements": [],
   "tags": ["bdo", "gruppen", "utility", "test"],
   "hidden": false,

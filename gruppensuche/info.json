@@ -9,6 +9,6 @@
   "hidden": false,
   "disabled": false,
   "min_bot_version": "3.5.0",
-  "end_user_data_statement": "Speichert nur temporäre Daten im RAM (Teilnehmerlisten) und nichts dauerhaft.",
+  "end_user_data_statement": "Speichert Message-IDs, Teilnehmerlisten und Suchdetails (Tag/Start/Dauer/Notizen) pro Gruppensuche, damit Buttons nach Neustart weiter funktionieren.",
   "type": "COG"
 }
