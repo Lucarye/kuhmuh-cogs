@@ -6687,6 +6687,16 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "Channel nicht gefunden.", ephemeral=True)
             return
 
+        reservists = _reservist_ids(data)
+        if not reservists:
+            await self._ephemeral_notice(
+                interaction,
+                "ℹ️ Aktuell sind keine Reservisten eingetragen.",
+                ephemeral=True,
+            )
+            return
+
+        mentions = " ".join(f"<@{uid}>" for uid in reservists)
         day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
         try:
             day_d = dt.date.fromisoformat(day_iso)
@@ -6697,8 +6707,12 @@ class GruppensucheTest(commands.Cog):
         start_text = data.get("start_text") or "—"
         jump = f"https://discord.com/channels/{guild.id}/{channel.id}/{message_id}"
 
-        txt = f"🟨 Ping Reservisten | {day_str} | Start: {start_text}\n{jump}"
-        await channel.send(txt, allowed_mentions=discord.AllowedMentions.none())
+        txt = f"{mentions}\n🟨 Ping Reservisten | {day_str} | Start: {start_text}\n{jump}"
+        await channel.send(
+            txt,
+            allowed_mentions=discord.AllowedMentions(
+                users=True, roles=False, everyone=False),
+        )
 
     async def _close_search(self, interaction: discord.Interaction, message_id: int):
         if self._interaction_guard_hit(
