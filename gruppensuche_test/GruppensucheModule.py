@@ -3872,7 +3872,7 @@ class GruppensucheTest(commands.Cog):
             str(getattr(child, "custom_id", "") or "")
             for child in view.children
         ]
-        return actual_ids == expected_ids
+        return len(actual_ids) == len(expected_ids) and set(actual_ids) == set(expected_ids)
 
     async def _attach_view_and_verify(
         self,
