@@ -14,10 +14,26 @@ import discord  # pyright: ignore[reportMissingImports]
 # pyright: ignore[reportMissingImports]
 from redbot.core import commands, Config  # type: ignore
 import random
-import logging
+import importlib.util
+import logging as _logging
+import sysconfig
+from pathlib import Path
 
 
-log = logging.getLogger("red.kuhmuh.gruppensuche")
+if hasattr(_logging, "getLogger"):
+    log = _logging.getLogger("red.kuhmuh.gruppensuche")
+else:
+    _stdlib_logging_path = Path(sysconfig.get_paths()["stdlib"]) / "logging" / "__init__.py"
+    _stdlib_logging_spec = importlib.util.spec_from_file_location(
+        "_kuhmuh_stdlib_logging",
+        _stdlib_logging_path,
+        submodule_search_locations=[str(_stdlib_logging_path.parent)],
+    )
+    if _stdlib_logging_spec is None or _stdlib_logging_spec.loader is None:
+        raise ImportError("Python-Standardmodul logging konnte nicht geladen werden.")
+    _stdlib_logging = importlib.util.module_from_spec(_stdlib_logging_spec)
+    _stdlib_logging_spec.loader.exec_module(_stdlib_logging)
+    log = _stdlib_logging.getLogger("red.kuhmuh.gruppensuche")
 
 # =========================
 # IDs / Konfiguration
@@ -101,6 +117,37 @@ EASTER_EGG_TEXT_POOL = [
     "Sheet-AP ist nur ein Vorschlag",
     "ist wohl die Katze über die Tastatur gelaufen..",
     "Legenden beginnen genau so."
+]
+
+NEGATIVE_EASTER_EGG_TEXT_POOL = [
+    "macht heute einen AP-Rückwärtssalto",
+    "Minus ist auch eine Richtung",
+    "der Schwarzgeist zählt rückwärts",
+    "AP macht gerade Winterschlaf",
+    "grast souverän unter null",
+    "Mathematik sagt: interessant",
+    "betreibt kreatives Rechnen",
+    "der Build lädt noch",
+    "unter null, aber entspannt",
+    "das ist taktisches Minus",
+    "AP nimmt die Abkürzung nach unten",
+    "die Herde bleibt ganz gelassen",
+    "heute mit eingebautem Tiefgang",
+    "der Schwarzgeist plant neu",
+    "unter null beginnt der Spaß",
+    "AP auf Entdeckungstour",
+    "das Glas ist trotzdem halb voll",
+    "kurz die Schwerkraft testen",
+    "negativ geladen, positiv drauf",
+    "AP macht einen kleinen Umweg",
+    "heute ist unten oben",
+    "der Wert bleibt entspannt",
+    "Minus mit Stil",
+    "die Zahlen tanzen rückwärts",
+    "AP hat Gegenwind",
+    "locker durch den Nullpunkt",
+    "der Rechenweg ist kreativ",
+    "Tiefgang erfolgreich aktiviert",
 ]
 
 
@@ -310,9 +357,10 @@ def _ui_for(category: str) -> dict:
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
-def _parse_int_strict(val: object) -> Optional[int]:
+def _parse_int_strict(val: object, *, allow_negative: bool = False) -> Optional[int]:
     """
     Erlaubt nur Ziffern + gängige Trenner (., , und Leerzeichen).
+    Mit allow_negative=True ist zusätzlich ein führendes Minus erlaubt.
     - "3245" -> 3245
     - "3.245" / "3,245" / "3 245" -> 3245
     Alles andere (Buchstaben etc.) -> None
@@ -320,6 +368,12 @@ def _parse_int_strict(val: object) -> Optional[int]:
     s = str(val or "").strip()
     if not s:
         return None
+
+    sign = -1 if allow_negative and s.startswith("-") else 1
+    if sign < 0:
+        s = s[1:].strip()
+        if not s:
+            return None
 
     allowed = set("0123456789., ")
     if any(ch not in allowed for ch in s):
@@ -330,7 +384,7 @@ def _parse_int_strict(val: object) -> Optional[int]:
         return None
 
     try:
-        return int(digits)
+        return sign * int(digits)
     except Exception:
         return None
 
@@ -549,10 +603,15 @@ def _fmt_thousands_de(val: object) -> str:
     plus = s.endswith("+")
     core = s[:-1] if plus else s
 
+    sign = ""
+    if core.startswith("-"):
+        sign = "-"
+        core = core[1:]
+
     if core.isdigit():
         n = int(core)
         out = f"{n:,}".replace(",", ".")
-        return out + ("+" if plus else "")
+        return sign + out + ("+" if plus else "")
 
     return s
 
@@ -616,11 +675,18 @@ _AP_NUM_RE = re.compile(r"(\d+)")
 
 
 def _ap_triggers_easter_egg(ap_val: Optional[str]) -> bool:
-    """Trigger: AP > 432 (weil 432 max ist)."""
-    n = _parse_int_strict(ap_val)
+    """Trigger: AP > 432 oder jeder negative AP-Wert."""
+    n = _parse_int_strict(ap_val, allow_negative=True)
     if n is None:
         return False
-    return n > EASTER_EGG_AP
+    return n < 0 or n > EASTER_EGG_AP
+
+
+def _easter_egg_pool(ap_val: Optional[str]) -> list[str]:
+    n = _parse_int_strict(ap_val, allow_negative=True)
+    if n is not None and n < 0:
+        return NEGATIVE_EASTER_EGG_TEXT_POOL
+    return EASTER_EGG_TEXT_POOL
 
 
 def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> Optional[str]:
@@ -636,11 +702,12 @@ def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> 
         egg_map = {}
 
     key = str(int(user_id))
-    if key in egg_map and str(egg_map[key]).strip():
+    pool = _easter_egg_pool(ap_val)
+    if key in egg_map and str(egg_map[key]).strip() in pool:
         return str(egg_map[key])
 
     # einmalig würfeln
-    txt = random.choice(EASTER_EGG_TEXT_POOL) if EASTER_EGG_TEXT_POOL else "✨"
+    txt = random.choice(pool) if pool else "✨"
     egg_map[key] = txt
     data["easter_egg_texts"] = egg_map
     return txt
@@ -659,11 +726,11 @@ def _sync_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> Op
     key = str(int(user_id))
 
     if _ap_triggers_easter_egg(ap_val):
+        pool = _easter_egg_pool(ap_val)
         # existiert schon? dann behalten, sonst würfeln
-        if key in egg_map and str(egg_map.get(key) or "").strip():
+        if key in egg_map and str(egg_map.get(key) or "").strip() in pool:
             return str(egg_map[key])
-        txt = random.choice(
-            EASTER_EGG_TEXT_POOL) if EASTER_EGG_TEXT_POOL else "✨"
+        txt = random.choice(pool) if pool else "✨"
         egg_map[key] = txt
         data["easter_egg_texts"] = egg_map
         return txt
@@ -748,6 +815,20 @@ ALTAR_REQUIRED_STATS_BY_STEP = {
     19: {"division": "general", "ap": 390, "dp": 450},
     20: {"division": "general", "ap": 395, "dp": 450},
     21: {"division": "head", "ap": 400, "dp": 460},
+    22: {"division": "general", "ap": 405, "dp": 465},
+    23: {"division": "general", "ap": 410, "dp": 470},
+    24: {"division": "head", "ap": 415, "dp": 475},
+}
+
+ALTAR_BOSS_BY_STEP = {
+    3: "Kutum",
+    6: "Ronin",
+    9: "Sangoon",
+    12: "Duoksini",
+    15: "Kumiho",
+    18: "Jigwi",
+    21: "Jordine",
+    24: "Enslar",
 }
 
 
@@ -784,7 +865,9 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
             marks.append("Ziel")
 
         suffix = f" ({', '.join(marks)})" if marks else ""
-        line = f"• Stufe {step}: {ap} AP / {dp} VK{suffix}"
+        boss = ALTAR_BOSS_BY_STEP.get(step)
+        boss_text = f" – {boss}" if boss else ""
+        line = f"• Stufe {step}: {ap} AP / {dp} VK{boss_text}{suffix}"
         if marks:
             line = f"**{line}**"
         lines.append(line)
@@ -794,8 +877,8 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
 
 def _altar_recommended_ap_columns(*, start_step: Optional[object] = None, target_step: Optional[object] = None) -> tuple[str, str]:
     lines = _altar_recommended_ap_lines(start_step=start_step, target_step=target_step)
-    left = "\n".join(lines[:10]) if lines[:10] else "—"
-    right = "\n".join(lines[10:]) if lines[10:] else "—"
+    left = "\n".join(lines[:12]) if lines[:12] else "—"
+    right = "\n".join(lines[12:]) if lines[12:] else "—"
     return left, right
 
 
@@ -810,12 +893,12 @@ def _build_altar_values_embed(*, start_step: Optional[object] = None, target_ste
         description=description,
     )
     embed.add_field(
-        name="Stage 1-10",
+        name="Stage 1-12",
         value=recommended_left,
         inline=True,
     )
     embed.add_field(
-        name="Stage 11-21",
+        name="Stage 13-24",
         value=recommended_right,
         inline=True,
     )
@@ -838,15 +921,19 @@ def _altar_selected_ap_lines(*, start_step: Optional[object] = None, target_step
     if start_n is not None:
         start_stats = _altar_required_stats_for_step(start_n)
         if start_stats is not None:
+            boss = ALTAR_BOSS_BY_STEP.get(start_n)
+            boss_text = f" – {boss}" if boss else ""
             lines.append(
-                f"• Start-Stufe {start_n}: {start_stats['ap']} AP / {start_stats['dp']} VK"
+                f"• Start-Stufe {start_n}: {start_stats['ap']} AP / {start_stats['dp']} VK{boss_text}"
             )
 
     if target_n is not None:
         target_stats = _altar_required_stats_for_step(target_n)
         if target_stats is not None:
+            boss = ALTAR_BOSS_BY_STEP.get(target_n)
+            boss_text = f" – {boss}" if boss else ""
             lines.append(
-                f"• Ziel-Stufe {target_n}: {target_stats['ap']} AP / {target_stats['dp']} VK"
+                f"• Ziel-Stufe {target_n}: {target_stats['ap']} AP / {target_stats['dp']} VK{boss_text}"
             )
 
     return lines
@@ -1089,6 +1176,23 @@ def _spot_name(key: str) -> str:
 
 def _sum_runs(boss_runs: Dict[str, int]) -> int:
     return sum(int(v) for v in boss_runs.values())
+
+
+def _reservist_ids(data: dict) -> list[int]:
+    """Liest Reservisten; alte Warteschlangen-Daten bleiben lesbar."""
+    raw = data.get("reservists")
+    legacy = data.get("waitlist") or []
+    if not isinstance(raw, list) or (not raw and legacy):
+        raw = legacy
+    return [int(uid) for uid in raw]
+
+
+def _reservist_map(data: dict, key: str, legacy_key: str) -> dict:
+    current = data.get(key)
+    legacy = data.get(legacy_key)
+    if isinstance(current, dict) and (current or not isinstance(legacy, dict) or not legacy):
+        return current
+    return legacy if isinstance(legacy, dict) else {}
 
 
 def _allowed_party_range(category: str, spot_key: Optional[str] = None) -> Tuple[int, int]:
@@ -1358,7 +1462,7 @@ class DetailsModal(discord.ui.Modal):
 
         # Wenn gesetzt: Zahlenformat prüfen
         if own_ap_val:
-            ap_int = _parse_int_strict(own_ap_val)
+            ap_int = _parse_int_strict(own_ap_val, allow_negative=True)
             if ap_int is None:
                 await _invalid_number("❌ **AP ungültig.** Beispiele: `300`, `432`, `250`, ...")
                 return
@@ -1527,8 +1631,8 @@ class APAdjustModal(discord.ui.Modal):
 
         if self.include_altar_stage:
             self.altar_stage = discord.ui.TextInput(
-                label="Deine höchste Altar-Stufe (1-21)",
-                placeholder="Nur Zahl eingeben, z.B. 21",
+                label="Deine höchste Altar-Stufe (1-24)",
+                placeholder="Nur Zahl eingeben, z.B. 24",
                 required=True,
                 max_length=4,
                 default=(str(current_stage)
@@ -1537,7 +1641,7 @@ class APAdjustModal(discord.ui.Modal):
             self.add_item(self.altar_stage)
 
     async def on_submit(self, interaction: discord.Interaction):
-        ap_val = _parse_int_strict(self.ap_value.value)
+        ap_val = _parse_int_strict(self.ap_value.value, allow_negative=True)
         if ap_val is None:
             await interaction.response.send_modal(
                 APAdjustModal(
@@ -1565,7 +1669,7 @@ class APAdjustModal(discord.ui.Modal):
                 )
                 return
             altar_stage = int(raw_stage)
-            if altar_stage < 1 or altar_stage > 21:
+            if altar_stage < 1 or altar_stage > 24:
                 await interaction.response.send_modal(
                     APAdjustModal(
                         self.cog,
@@ -1606,8 +1710,8 @@ class JoinApModal(discord.ui.Modal):
 
         if self.include_altar_stage:
             self.altar_stage = discord.ui.TextInput(
-                label="Deine höchste Altar-Stufe (1-21)",
-                placeholder="Nur Zahl eingeben, z.B. 21",
+                label="Deine höchste Altar-Stufe (1-24)",
+                placeholder="Nur Zahl eingeben, z.B. 24",
                 required=True,
                 max_length=4,
                 default=(str(current_stage)
@@ -1617,7 +1721,7 @@ class JoinApModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         raw = str(self.ap.value).strip()
-        ap_int = _parse_int_strict(raw)
+        ap_int = _parse_int_strict(raw, allow_negative=True)
         if ap_int is None:
             await interaction.response.send_message(
                 "❌ **AP ungültig.** Erlaubt: `3245`, `3.245`, `3 245`, `3,245`.",
@@ -1644,7 +1748,7 @@ class JoinApModal(discord.ui.Modal):
             raw_stage = str(self.altar_stage.value).strip()
             if not raw_stage.isdigit():
                 await interaction.response.send_message(
-                    "❌ **Altar-Stufe ungültig.** Bitte nur Zahlen von `1` bis `21` eintragen.",
+                    "❌ **Altar-Stufe ungültig.** Bitte nur Zahlen von `1` bis `24` eintragen.",
                     ephemeral=True,
                     view=_ReopenModalView(
                     lambda: JoinApModal(
@@ -1659,9 +1763,9 @@ class JoinApModal(discord.ui.Modal):
                 return
 
             stage_int = int(raw_stage)
-            if stage_int < 1 or stage_int > 21:
+            if stage_int < 1 or stage_int > 24:
                 await interaction.response.send_message(
-                    "❌ **Altar-Stufe ungültig.** Bitte eine Stufe zwischen `1` und `21` eintragen.",
+                    "❌ **Altar-Stufe ungültig.** Bitte eine Stufe zwischen `1` und `24` eintragen.",
                     ephemeral=True,
                     view=_ReopenModalView(
                         lambda: JoinApModal(
@@ -2727,9 +2831,13 @@ class AltarStepSelect(discord.ui.Select):
         self.which = which
 
         options = []
-        for n in range(1, 22):
+        for n in range(1, 25):
             label = f"Stufe {n}"
-            desc = "Eigene höchste Altar-Stufe (1-21)" if which == "cleared" else "Geplante Ziel-Stufe (1-21)"
+            boss = ALTAR_BOSS_BY_STEP.get(n)
+            if boss:
+                label += f" – {boss}"
+            stats = ALTAR_REQUIRED_STATS_BY_STEP[n]
+            desc = f"{stats['ap']} AP / {stats['dp']} VK"
             options.append(
                 discord.SelectOption(
                     label=label,
@@ -2739,7 +2847,7 @@ class AltarStepSelect(discord.ui.Select):
                 )
             )
 
-        placeholder = "Deine höchste Altar-Stufe (1-21)..." if which == "cleared" else "Geplante Ziel-Stufe (1-21)..."
+        placeholder = "Deine höchste Altar-Stufe (1-24)..." if which == "cleared" else "Geplante Ziel-Stufe (1-24)..."
         super().__init__(
             placeholder=placeholder,
             min_values=1,
@@ -3287,6 +3395,13 @@ class PublicPostView(discord.ui.View):
             row=0,
             custom_id=f"gst:leave:{message_id}",
         )
+        reservist_btn = discord.ui.Button(
+            label="Reservist",
+            emoji="🟨",
+            style=discord.ButtonStyle.primary,
+            row=0,
+            custom_id=f"gst:reservist:{message_id}",
+        )
         ping_part_btn = discord.ui.Button(
             label="Ping Teilnehmer",
             emoji="📣",
@@ -3306,7 +3421,7 @@ class PublicPostView(discord.ui.View):
         )
 
         ping_wait_btn = discord.ui.Button(
-            label="Ping Warteschlange",
+            label="Ping Reservisten",
             emoji="🔔",
             style=discord.ButtonStyle.secondary,
             row=1,
@@ -3339,6 +3454,7 @@ class PublicPostView(discord.ui.View):
 
         join_btn.callback = self._on_join
         leave_btn.callback = self._on_leave
+        reservist_btn.callback = self._on_reservist
         ping_type_btn.callback = self._on_ping_type
         ping_wait_btn.callback = self._on_ping_wait
         edit_btn.callback = self._on_edit
@@ -3347,6 +3463,7 @@ class PublicPostView(discord.ui.View):
 
         self.add_item(join_btn)
         self.add_item(leave_btn)
+        self.add_item(reservist_btn)
         if self.category == "altar":
             altar_values_btn = discord.ui.Button(
                 label="Altar-Werte",
@@ -3378,7 +3495,7 @@ class PublicPostView(discord.ui.View):
 
         return data
 
-    async def _on_join(self, interaction: discord.Interaction):
+    async def _open_registration_modal(self, interaction: discord.Interaction, *, as_reservist: bool):
         if not interaction.guild:
             return
 
@@ -3396,20 +3513,26 @@ class PublicPostView(discord.ui.View):
         current_ap = None
 
         p_ap = data.get("participant_ap") or {}
-        w_ap = data.get("waitlist_ap") or {}
-        current_ap = p_ap.get(str(uid), w_ap.get(str(uid)))
+        r_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
+        current_ap = p_ap.get(str(uid), r_ap.get(str(uid)))
 
         if is_altar:
             p_stage = data.get("participant_altar_stage") or {}
-            w_stage = data.get("waitlist_altar_stage") or {}
-            raw_stage = p_stage.get(str(uid), w_stage.get(str(uid)))
+            r_stage = _reservist_map(data, "reservist_altar_stage", "waitlist_altar_stage")
+            raw_stage = p_stage.get(str(uid), r_stage.get(str(uid)))
             try:
                 current_stage = int(raw_stage)
             except Exception:
                 current_stage = None
 
         async def _done(modal_interaction: discord.Interaction, ap_val: str, altar_stage: Optional[int] = None):
-            await self.cog._join(modal_interaction, mid, ap_val, altar_stage=altar_stage)
+            await self.cog._join(
+                modal_interaction,
+                mid,
+                ap_val,
+                altar_stage=altar_stage,
+                as_reservist=as_reservist,
+            )
 
         try:
             await interaction.response.send_modal(
@@ -3431,6 +3554,30 @@ class PublicPostView(discord.ui.View):
                     current_ap=current_ap,
                 )
             )
+
+    async def _on_join(self, interaction: discord.Interaction):
+        data = await self.cog._get_search(self.message_id)
+        if data is None:
+            await self.cog._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+            return
+
+        if int(interaction.user.id) in [int(uid) for uid in _reservist_ids(data)]:
+            await self.cog._move_to_participants(interaction, self.message_id)
+            return
+
+        await self._open_registration_modal(interaction, as_reservist=False)
+
+    async def _on_reservist(self, interaction: discord.Interaction):
+        data = await self.cog._get_search(self.message_id)
+        if data is None:
+            await self.cog._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+            return
+
+        if int(interaction.user.id) in [int(uid) for uid in (data.get("participants") or [])]:
+            await self.cog._move_to_reservists(interaction, self.message_id)
+            return
+
+        await self._open_registration_modal(interaction, as_reservist=True)
 
     async def _on_leave(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -3678,9 +3825,86 @@ class Gruppensuche(commands.Cog):
         for mid_str, post in data.items():
             mid = int(mid_str)
             if bool(post.get("is_closed", False)):
-                self.bot.add_view(ClosedPostView(self, mid))
+                view = ClosedPostView(self, mid)
             else:
-                self.bot.add_view(PublicPostView(self, mid, category=post.get("category")))
+                view = PublicPostView(self, mid, category=post.get("category"))
+                await self._apply_dynamic_button_labels(view, post)
+            self.bot.add_view(view, message_id=mid)
+
+            try:
+                channel = guild.get_channel(int(post.get("channel_id", 0)))
+                if not isinstance(channel, discord.TextChannel):
+                    continue
+                message = await channel.fetch_message(mid)
+                if not self._message_has_view(message, view):
+                    await self._attach_view_and_verify(channel, mid, view)
+                    self._log_info(
+                        "STARTUP", "public post buttons reconciled",
+                        message_id=mid,
+                        channel_id=channel.id,
+                        existing_components=self._component_count(message),
+                        expected_components=len(view.children),
+                    )
+            except discord.NotFound:
+                continue
+            except Exception as exc:
+                self._log_warning(
+                    "STARTUP", "public post button recovery failed",
+                    message_id=mid, channel_id=post.get("channel_id"),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+
+    @staticmethod
+    def _component_count(message: discord.Message) -> int:
+        return sum(
+            len(getattr(row, "children", []))
+            for row in (message.components or [])
+        )
+
+    @classmethod
+    def _message_has_view(cls, message: discord.Message, view: discord.ui.View) -> bool:
+        actual_ids = [
+            str(getattr(child, "custom_id", "") or "")
+            for row in (message.components or [])
+            for child in getattr(row, "children", [])
+        ]
+        expected_ids = [
+            str(getattr(child, "custom_id", "") or "")
+            for child in view.children
+        ]
+        return len(actual_ids) == len(expected_ids) and set(actual_ids) == set(expected_ids)
+
+    async def _attach_view_and_verify(
+        self,
+        channel: discord.TextChannel,
+        message_id: int,
+        view: discord.ui.View,
+        message: Optional[discord.Message] = None,
+    ) -> discord.Message:
+        last_message: Optional[discord.Message] = None
+        for attempt in range(1, 4):
+            if message is None:
+                message = await channel.fetch_message(int(message_id))
+            edited_message = await message.edit(view=view)
+            if edited_message is not None and self._message_has_view(edited_message, view):
+                return edited_message
+            last_message = await channel.fetch_message(int(message_id))
+            if self._message_has_view(last_message, view):
+                return last_message
+            message = last_message
+            self._log_warning(
+                "VIEW",
+                "public post button verification failed",
+                message_id=message_id,
+                channel_id=channel.id,
+                attempt=attempt,
+                actual_components=self._component_count(last_message),
+                expected_components=len(view.children),
+            )
+
+        raise RuntimeError(
+            f"Button-View konnte für Nachricht {message_id} nicht verifiziert werden."
+        )
 
     def _expire_session(self, user_id: int):
         if user_id in self._sessions:
@@ -4456,14 +4680,14 @@ class Gruppensuche(commands.Cog):
         return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
 
     def _collect_recipients(self, data: dict) -> list[int]:
-        """Teilnehmer + Warteschlange, ohne Owner, unique, stable order."""
+        """Teilnehmer + Reservisten, ohne Owner, unique, stable order."""
         owner_id = int(data.get("owner_id", 0))
         participants = [int(x) for x in (data.get("participants") or [])]
-        waitlist = [int(x) for x in (data.get("waitlist") or [])]
+        reservists = _reservist_ids(data)
 
         seen = set()
         out: list[int] = []
-        for uid in participants + waitlist:
+        for uid in participants + reservists:
             if uid == owner_id:
                 continue
             if uid in seen:
@@ -4551,7 +4775,7 @@ class Gruppensuche(commands.Cog):
             _debounced_send())
 
     async def _send_edit_notify(self, message_id: int):
-        """Liest aktuellen Stand, verschickt DM an Teilnehmer+Warteschlange (ohne Owner), cleared pending."""
+        """Liest aktuellen Stand, verschickt DM an Teilnehmer+Reservisten (ohne Owner), cleared pending."""
         data = await self._get_search(int(message_id))
         if not data:
             return
@@ -4805,7 +5029,7 @@ class Gruppensuche(commands.Cog):
 
         max_players = int(data.get("max_players", 2))
         participants: List[int] = list(data.get("participants") or [])
-        waitlist: List[int] = list(data.get("waitlist") or [])
+        reservists = _reservist_ids(data)
 
         is_closed = bool(data.get("is_closed", False))
         is_full = len(participants) >= max_players
@@ -4885,15 +5109,15 @@ class Gruppensuche(commands.Cog):
             + "\n\n"
         )
 
-        wait_lines = _build_user_lines(
-            waitlist,
-            data.get("waitlist_ap") or {},
-            data.get("waitlist_altar_stage") or {},
+        reservist_lines = _build_user_lines(
+            reservists,
+            _reservist_map(data, "reservist_ap", "waitlist_ap"),
+            _reservist_map(data, "reservist_altar_stage", "waitlist_altar_stage"),
         )
         wait_block = (
-            f"**Warteschlange ({len(waitlist)})**\n"
-            + ("\n".join([f"• {x}" for x in wait_lines])
-               if wait_lines else "—")
+            f"**Reservisten ({len(reservists)})**\n"
+            + ("\n".join([f"• {x}" for x in reservist_lines])
+               if reservist_lines else "—")
         )
 
         # Titel
@@ -5470,7 +5694,7 @@ class Gruppensuche(commands.Cog):
             "day_date_iso": day_iso,
             "max_players": max_players,
             "participants": [owner_id],
-            "waitlist": [],
+            "reservists": [],
             "is_closed": False,
             "ping_role_id": int(ping_role_id),
             "created_at": int(_now_local().timestamp()),
@@ -5484,9 +5708,9 @@ class Gruppensuche(commands.Cog):
             "notes": session.notes,
             "owner_ap": session.own_ap,
             "participant_ap": {str(owner_id): session.own_ap or ""},
-            "waitlist_ap": {},
+            "reservist_ap": {},
             "participant_altar_stage": {str(owner_id): session.altar_cleared_step} if session.category == "altar" and session.altar_cleared_step is not None else {},
-            "waitlist_altar_stage": {},
+            "reservist_altar_stage": {},
             "atoraxxion_runs": list(session.atoraxxion_runs or []),
             "altar_cleared_step": session.altar_cleared_step,
             "altar_target_step": session.altar_target_step,
@@ -5546,31 +5770,7 @@ class Gruppensuche(commands.Cog):
             # 3) View vorbereiten und am Post setzen
             view = PublicPostView(self, msg.id, category=data.get("category"))
             await self._apply_dynamic_button_labels(view, data)
-
-            try:
-                await msg.edit(view=view)
-            except Exception as exc:
-                self._log_warning(
-                    "CREATE",
-                    "initial view attach failed, retrying",
-                    message_id=msg.id,
-                    guild_id=guild.id,
-                    channel_id=channel.id,
-                    error=type(exc).__name__,
-                )
-                try:
-                    fresh_msg = await channel.fetch_message(msg.id)
-                    await fresh_msg.edit(view=view)
-                except Exception as retry_exc:
-                    self._log_error(
-                        "CREATE",
-                        "view attach retry failed",
-                        message_id=msg.id,
-                        guild_id=guild.id,
-                        channel_id=channel.id,
-                        error=type(retry_exc).__name__,
-                    )
-                    raise
+            await self._attach_view_and_verify(channel, msg.id, view, message=msg)
 
             # 4) View nach erfolgreichem Attach registrieren
             self.bot.add_view(view)
@@ -5831,7 +6031,163 @@ class Gruppensuche(commands.Cog):
             except Exception:
                 pass
 
-    async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str, altar_stage: Optional[int] = None):
+    async def _move_to_participants(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="activate_reservist",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Deine letzte Änderung wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        uid = int(interaction.user.id)
+        data: Optional[dict] = None
+
+        async with self._lock_for(int(message_id)):
+            data = await self._get_search(message_id)
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+                return
+
+            participants = [int(value) for value in (data.get("participants") or [])]
+            reservists = _reservist_ids(data)
+            max_players = int(data.get("max_players", 2))
+
+            if uid not in reservists:
+                await self._ephemeral_notice(interaction, "Du bist nicht als Reservist eingetragen.", ephemeral=True)
+                return
+            if len(participants) >= max_players:
+                await self._ephemeral_notice(
+                    interaction,
+                    "ℹ️ Die Gruppe ist aktuell voll. Du bleibst als Reservist eingetragen.",
+                    ephemeral=True,
+                )
+                return
+
+            reservists.remove(uid)
+            participants.append(uid)
+
+            participant_ap = data.get("participant_ap") or {}
+            reservist_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
+            participant_stage = data.get("participant_altar_stage") or {}
+            reservist_stage = _reservist_map(
+                data, "reservist_altar_stage", "waitlist_altar_stage")
+
+            ap_value = reservist_ap.pop(str(uid), None)
+            if ap_value is not None:
+                participant_ap[str(uid)] = ap_value
+
+            stage_value = reservist_stage.pop(str(uid), None)
+            if stage_value is not None:
+                participant_stage[str(uid)] = stage_value
+
+            data["participants"] = participants
+            data["reservists"] = reservists
+            data["participant_ap"] = participant_ap
+            data["reservist_ap"] = reservist_ap
+            data["participant_altar_stage"] = participant_stage
+            data["reservist_altar_stage"] = reservist_stage
+            data.pop("waitlist", None)
+            data.pop("waitlist_ap", None)
+            data.pop("waitlist_altar_stage", None)
+
+            await self._save_refresh_dispatch(data)
+
+        await self._ephemeral_notice(
+            interaction,
+            "✅ Du bist jetzt aktiver Teilnehmer.",
+            ephemeral=True,
+        )
+        self.bot.loop.create_task(self._post_save_refresh_dispatch(data))
+
+    async def _move_to_reservists(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="reserve",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Deine letzte Änderung wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        uid = int(interaction.user.id)
+        data: Optional[dict] = None
+
+        async with self._lock_for(int(message_id)):
+            data = await self._get_search(int(message_id))
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+                return
+
+            participants = [int(value) for value in (data.get("participants") or [])]
+            reservists = _reservist_ids(data)
+            if uid not in participants:
+                await self._ephemeral_notice(interaction, "Du bist nicht als aktiver Teilnehmer eingetragen.", ephemeral=True)
+                return
+
+            participants.remove(uid)
+            if uid not in reservists:
+                reservists.append(uid)
+
+            participant_ap = data.get("participant_ap") or {}
+            reservist_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
+            participant_stage = data.get("participant_altar_stage") or {}
+            reservist_stage = _reservist_map(
+                data, "reservist_altar_stage", "waitlist_altar_stage")
+
+            ap_value = participant_ap.pop(str(uid), None)
+            if ap_value is not None:
+                reservist_ap[str(uid)] = ap_value
+
+            stage_value = participant_stage.pop(str(uid), None)
+            if stage_value is not None:
+                reservist_stage[str(uid)] = stage_value
+
+            data["participants"] = participants
+            data["reservists"] = reservists
+            data["participant_ap"] = participant_ap
+            data["reservist_ap"] = reservist_ap
+            data["participant_altar_stage"] = participant_stage
+            data["reservist_altar_stage"] = reservist_stage
+            data.pop("waitlist", None)
+            data.pop("waitlist_ap", None)
+            data.pop("waitlist_altar_stage", None)
+
+            await self._save_refresh_dispatch(data)
+
+        await self._ephemeral_notice(
+            interaction,
+            "🟨 Du bist jetzt als Reservist eingetragen.",
+            ephemeral=True,
+        )
+        self.bot.loop.create_task(self._post_save_refresh_dispatch(data))
+
+    async def _join(
+        self,
+        interaction: discord.Interaction,
+        message_id: int,
+        ap_val: str,
+        altar_stage: Optional[int] = None,
+        *,
+        as_reservist: bool = False,
+    ):
         result_state: Optional[str] = None
         if self._interaction_guard_hit(
             action="join",
@@ -5859,75 +6215,92 @@ class Gruppensuche(commands.Cog):
                 return
 
             ap_val = str(ap_val or "").strip()
-            if not ap_val or not ap_val.isdigit():
+            ap_int = _parse_int_strict(ap_val, allow_negative=True)
+            if ap_int is None:
                 await self._ephemeral_notice(interaction, "Bitte nur Zahlen bei AP eintragen (z.B. 301).")
                 return
+            ap_val = str(ap_int)
 
             uid = interaction.user.id
             participants: List[int] = list(data.get("participants") or [])
-            waitlist: List[int] = list(data.get("waitlist") or [])
+            reservists: List[int] = _reservist_ids(data)
             max_players = int(data.get("max_players", 2))
-            was_new_join = False
-            moved_from_waitlist = False
-            ap_updated = False            
             is_altar = str(data.get("category", "")).lower() == "altar"
             participant_stage = data.get("participant_altar_stage")
             if not isinstance(participant_stage, dict):
                 participant_stage = {}
-            waitlist_stage = data.get("waitlist_altar_stage")
-            if not isinstance(waitlist_stage, dict):
-                waitlist_stage = {}
+            reservist_stage = _reservist_map(
+                data, "reservist_altar_stage", "waitlist_altar_stage")
+            participant_ap = data.get("participant_ap") or {}
+            reservist_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
+            data["reservists"] = reservists
+            data["reservist_ap"] = reservist_ap
+            data["reservist_altar_stage"] = reservist_stage
 
-            # ✅ Wenn schon eingetragen: AP aktualisieren (Teilnehmer ODER Warteschlange)
+            # Bestehende Einträge aktualisieren oder zwischen Reservist/Teilnehmer wechseln.
             if uid in participants:
-                ap_map = data.get("participant_ap") or {}
-                ap_map[str(uid)] = ap_val
-                data["participant_ap"] = ap_map
+                participant_ap[str(uid)] = ap_val
 
                 if is_altar and altar_stage is not None:
                     participant_stage[str(uid)] = int(altar_stage)
-                    data["participant_altar_stage"] = participant_stage
 
                 _sync_easter_egg_text(data, uid, ap_val)
-
-                if _ap_triggers_easter_egg(ap_val):
-                    _ensure_easter_egg_text(data, uid, ap_val)
-                else:
-                    egg_map = data.get("easter_egg_texts")
-                    if isinstance(egg_map, dict):
-                        egg_map.pop(str(uid), None)
-                        data["easter_egg_texts"] = egg_map
-
+                data["participant_ap"] = participant_ap
+                data["participant_altar_stage"] = participant_stage
                 await self._save_refresh_dispatch(data)
                 result_state = "updated_participant"
 
-            elif uid in waitlist:
-                wl_map = data.get("waitlist_ap") or {}
-                wl_map[str(uid)] = ap_val
-                data["waitlist_ap"] = wl_map
+            elif uid in reservists and as_reservist:
+                reservist_ap[str(uid)] = ap_val
 
                 if is_altar and altar_stage is not None:
-                    waitlist_stage[str(uid)] = int(altar_stage)
-                    data["waitlist_altar_stage"] = waitlist_stage
+                    reservist_stage[str(uid)] = int(altar_stage)
 
-                if _ap_triggers_easter_egg(ap_val):
-                    _ensure_easter_egg_text(data, uid, ap_val)
-                else:
-                    egg_map = data.get("easter_egg_texts")
-                    if isinstance(egg_map, dict):
-                        egg_map.pop(str(uid), None)
-                        data["easter_egg_texts"] = egg_map
-
+                data["reservist_ap"] = reservist_ap
+                data["reservist_altar_stage"] = reservist_stage
+                _sync_easter_egg_text(data, uid, ap_val)
                 await self._save_refresh_dispatch(data)
-                result_state = "updated_waitlist"
+                result_state = "updated_reservist"
+
+            elif uid in reservists and not as_reservist:
+                if len(participants) >= max_players:
+                    result_state = "reservist_group_full"
+                else:
+                    reservists.remove(uid)
+                    participants.append(uid)
+                    participant_ap[str(uid)] = reservist_ap.pop(str(uid), ap_val)
+                    if is_altar:
+                        stage = reservist_stage.pop(str(uid), altar_stage)
+                        if stage is not None:
+                            participant_stage[str(uid)] = int(stage)
+                    data["participants"] = participants
+                    data["reservists"] = reservists
+                    data["participant_ap"] = participant_ap
+                    data["reservist_ap"] = reservist_ap
+                    data["participant_altar_stage"] = participant_stage
+                    data["reservist_altar_stage"] = reservist_stage
+                    _sync_easter_egg_text(data, uid, participant_ap[str(uid)])
+                    await self._save_refresh_dispatch(data)
+                    result_state = "promoted_reservist"
+
+            elif as_reservist:
+                reservists.append(uid)
+                reservist_ap[str(uid)] = ap_val
+                if is_altar and altar_stage is not None:
+                    reservist_stage[str(uid)] = int(altar_stage)
+                data["reservists"] = reservists
+                data["reservist_ap"] = reservist_ap
+                data["reservist_altar_stage"] = reservist_stage
+                _ensure_easter_egg_text(data, uid, ap_val)
+                await self._save_refresh_dispatch(data)
+                result_state = "joined_reservist"
 
             elif len(participants) < max_players:
                 participants.append(uid)
                 data["participants"] = participants
 
-                ap_map = data.get("participant_ap") or {}
-                ap_map[str(uid)] = ap_val
-                data["participant_ap"] = ap_map
+                participant_ap[str(uid)] = ap_val
+                data["participant_ap"] = participant_ap
 
                 if is_altar and altar_stage is not None:
                     participant_stage[str(uid)] = int(altar_stage)
@@ -5939,22 +6312,7 @@ class Gruppensuche(commands.Cog):
                 result_state = "joined_participant"
 
             else:
-                waitlist.append(uid)
-                data["waitlist"] = waitlist
-                data["updated_at"] = int(_now_local().timestamp())
-
-                wl_map = data.get("waitlist_ap") or {}
-                wl_map[str(uid)] = ap_val
-                data["waitlist_ap"] = wl_map
-
-                if is_altar and altar_stage is not None:
-                    waitlist_stage[str(uid)] = int(altar_stage)
-                    data["waitlist_altar_stage"] = waitlist_stage
-
-                _ensure_easter_egg_text(data, uid, ap_val)
-
-                await self._save_refresh_dispatch(data)
-                result_state = "joined_waitlist"
+                result_state = "group_full"
 
         await self._post_save_refresh_dispatch(data)
 
@@ -5969,15 +6327,30 @@ class Gruppensuche(commands.Cog):
             await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Teilnehmer).")
             return
 
-        if result_state == "updated_waitlist":
+        if result_state == "updated_reservist":
             self._log_info(
                 "JOIN",
-                "waitlist ap updated",
+                "reservist values updated",
                 message_id=message_id,
                 user_id=uid,
                 ap=ap_val,
             )
-            await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Warteschlange).")
+            await self._ephemeral_notice(interaction, "✅ Reservisten-Werte aktualisiert.")
+            return
+
+        if result_state == "promoted_reservist":
+            await self._ephemeral_notice(interaction, "✅ Du bist jetzt aktiver Teilnehmer.")
+            return
+
+        if result_state == "joined_reservist":
+            await self._ephemeral_notice(interaction, "🟨 Du bist jetzt als Reservist eingetragen.")
+            return
+
+        if result_state == "reservist_group_full":
+            await self._ephemeral_notice(
+                interaction,
+                "ℹ️ Die Gruppe ist aktuell voll. Du bleibst als Reservist eingetragen.",
+            )
             return
 
         if result_state == "joined_participant":
@@ -6001,21 +6374,20 @@ class Gruppensuche(commands.Cog):
             await self._ephemeral_notice(interaction, msg)
             return
 
-        if result_state == "joined_waitlist":
+        if result_state == "group_full":
             self._log_info(
                 "JOIN",
-                "user added to waitlist",
+                "active join rejected because group is full",
                 message_id=message_id,
                 user_id=uid,
                 ap=ap_val,
-                waitlist=len(data.get("waitlist") or []),
                 max_players=max_players,
             )
             warn_text = None
             if str(data.get("category", "")).lower() == "altar":
                 warn_text = _altar_ap_warning_for_target(data.get("altar_target_step"), ap_val)
 
-            msg = "ℹ️ Gruppe ist voll. Du bist in der Warteschlange."
+            msg = "ℹ️ Die Gruppe ist voll. Nutze den 🟨 Reservist-Button, wenn du bei Bedarf einspringen möchtest."
             if warn_text:
                 msg += f"\n\n{warn_text}"
 
@@ -6044,7 +6416,6 @@ class Gruppensuche(commands.Cog):
             pass
 
         data: Optional[dict] = None
-        promoted_id: Optional[int] = None
 
         lock = self._lock_for(message_id)
         async with lock:
@@ -6055,67 +6426,48 @@ class Gruppensuche(commands.Cog):
 
             uid = interaction.user.id
             participants: List[int] = list(data.get("participants") or [])
-            waitlist: List[int] = list(data.get("waitlist") or [])
-            max_players = int(data.get("max_players", 2))
+            reservists: List[int] = _reservist_ids(data)
 
             was_participant = uid in participants
-            was_wait = uid in waitlist
+            was_reservist = uid in reservists
 
-            if not was_participant and not was_wait:
+            if not was_participant and not was_reservist:
                 await self._ephemeral_notice(interaction, "Du bist nicht eingetragen.", ephemeral=True)
                 return
 
             if was_participant:
                 participants.remove(uid)
-            if was_wait:
-                waitlist.remove(uid)
+            if was_reservist:
+                reservists.remove(uid)
 
             ap_map = data.get("participant_ap") or {}
-            wl_map = data.get("waitlist_ap") or {}
+            reservist_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
             p_stage_map = data.get("participant_altar_stage") or {}
-            w_stage_map = data.get("waitlist_altar_stage") or {}
+            reservist_stage = _reservist_map(
+                data, "reservist_altar_stage", "waitlist_altar_stage")
+            data["reservists"] = reservists
+            data["reservist_ap"] = reservist_ap
+            data["reservist_altar_stage"] = reservist_stage
 
             if was_participant:
                 ap_map.pop(str(uid), None)
                 p_stage_map.pop(str(uid), None)
-            if was_wait:
-                wl_map.pop(str(uid), None)
-                w_stage_map.pop(str(uid), None)
+            if was_reservist:
+                reservist_ap.pop(str(uid), None)
+                reservist_stage.pop(str(uid), None)
 
             data["participant_ap"] = ap_map
-            data["waitlist_ap"] = wl_map
+            data["reservist_ap"] = reservist_ap
             data["participant_altar_stage"] = p_stage_map
-            data["waitlist_altar_stage"] = w_stage_map
+            data["reservist_altar_stage"] = reservist_stage
 
             egg_map = data.get("easter_egg_texts")
             if isinstance(egg_map, dict):
                 egg_map.pop(str(uid), None)
                 data["easter_egg_texts"] = egg_map
 
-            if was_participant and len(participants) < max_players and waitlist:
-                promoted_id = int(waitlist.pop(0))
-                participants.append(promoted_id)
-
-                wl_map = data.get("waitlist_ap") or {}
-                ap_map = data.get("participant_ap") or {}
-                w_stage_map = data.get("waitlist_altar_stage") or {}
-                p_stage_map = data.get("participant_altar_stage") or {}
-
-                promoted_ap = wl_map.pop(str(promoted_id), None)
-                if promoted_ap:
-                    ap_map[str(promoted_id)] = promoted_ap
-
-                promoted_stage = w_stage_map.pop(str(promoted_id), None)
-                if promoted_stage is not None:
-                    p_stage_map[str(promoted_id)] = promoted_stage
-
-                data["waitlist_ap"] = wl_map
-                data["participant_ap"] = ap_map
-                data["waitlist_altar_stage"] = w_stage_map
-                data["participant_altar_stage"] = p_stage_map
-
             data["participants"] = participants
-            data["waitlist"] = waitlist
+            data["reservists"] = reservists
 
             await self._save_refresh_dispatch(data)
 
@@ -6126,13 +6478,13 @@ class Gruppensuche(commands.Cog):
             "user removed from search",
             message_id=message_id,
             user_id=uid,
-            promoted_id=(promoted_id or 0),
+            role=("participant" if was_participant else "reservist"),
         )
 
-        await self._ephemeral_notice(interaction, "✅ Du wurdest abgemeldet.", ephemeral=True)
-
-        if promoted_id:
-            await self._notify_promotion(data, promoted_id)
+        if was_reservist and not was_participant:
+            await self._ephemeral_notice(interaction, "✅ Du wurdest als Reservist ausgetragen.", ephemeral=True)
+        else:
+            await self._ephemeral_notice(interaction, "✅ Du wurdest abgemeldet.", ephemeral=True)
 
     async def _apply_ap_adjust(self, interaction: discord.Interaction, message_id: int, ap_val: int, altar_stage: Optional[int] = None):
         if self._interaction_guard_hit(
@@ -6165,19 +6517,23 @@ class Gruppensuche(commands.Cog):
                 return
 
             participants: List[int] = list(data.get("participants") or [])
-            waitlist: List[int] = list(data.get("waitlist") or [])
+            reservists: List[int] = _reservist_ids(data)
 
             is_participant = uid in participants
-            is_wait = uid in waitlist
+            is_reservist = uid in reservists
 
-            if not is_participant and not is_wait:
+            if not is_participant and not is_reservist:
                 await self._ephemeral_notice(interaction, "Du bist nicht eingetragen.", ephemeral=True)
                 return
 
             ap_map = data.get("participant_ap") or {}
-            wl_map = data.get("waitlist_ap") or {}
+            reservist_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
             p_stage_map = data.get("participant_altar_stage") or {}
-            w_stage_map = data.get("waitlist_altar_stage") or {}
+            reservist_stage = _reservist_map(
+                data, "reservist_altar_stage", "waitlist_altar_stage")
+            data["reservists"] = reservists
+            data["reservist_ap"] = reservist_ap
+            data["reservist_altar_stage"] = reservist_stage
 
             ap_clean = str(int(ap_val))
             is_altar = str(data.get("category", "")).lower() == "altar"
@@ -6187,14 +6543,14 @@ class Gruppensuche(commands.Cog):
                 if is_altar and altar_stage is not None:
                     p_stage_map[str(uid)] = int(altar_stage)
             else:
-                wl_map[str(uid)] = ap_clean
+                reservist_ap[str(uid)] = ap_clean
                 if is_altar and altar_stage is not None:
-                    w_stage_map[str(uid)] = int(altar_stage)
+                    reservist_stage[str(uid)] = int(altar_stage)
 
             data["participant_ap"] = ap_map
-            data["waitlist_ap"] = wl_map
+            data["reservist_ap"] = reservist_ap
             data["participant_altar_stage"] = p_stage_map
-            data["waitlist_altar_stage"] = w_stage_map
+            data["reservist_altar_stage"] = reservist_stage
 
             _sync_easter_egg_text(data, uid, ap_clean)
 
@@ -6208,7 +6564,7 @@ class Gruppensuche(commands.Cog):
             message_id=message_id,
             user_id=uid,
             ap=ap_clean,
-            target=("participants" if is_participant else "waitlist"),
+            target=("participants" if is_participant else "reservists"),
         )
 
         warn_text = None
@@ -6220,73 +6576,6 @@ class Gruppensuche(commands.Cog):
             msg += f"\n\n{warn_text}"
 
         await self._ephemeral_notice(interaction, msg, ephemeral=True)
-
-    async def _notify_promotion(self, data: dict, promoted_id: int):
-        guild = self.bot.get_guild(int(data.get("guild_id", 0)))
-        if guild is None:
-            return
-        channel = guild.get_channel(int(data.get("channel_id", 0)))
-        if not isinstance(channel, discord.TextChannel):
-            return
-
-        def _member_has_no_dm_role(member: discord.Member) -> bool:
-            return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
-
-        owner_id = int(data.get("owner_id", 0))
-        mid = int(data.get("message_id", 0))
-        jump = f"https://discord.com/channels/{guild.id}/{channel.id}/{mid}"
-
-        day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
-        try:
-            day_d = dt.date.fromisoformat(day_iso)
-            day_str = _format_day(day_d)
-        except Exception:
-            day_str = str(day_iso)
-
-        start_text = data.get("start_text") or "—"
-
-        owner_member = guild.get_member(owner_id)
-        promoted_member = guild.get_member(promoted_id)
-
-        owner_dm_ok = False
-        promoted_dm_ok = False
-
-        if owner_member and not _member_has_no_dm_role(owner_member):
-            try:
-                await owner_member.send(
-                    f"🔔 **Warteschlange aufgerückt**\n"
-                    f"In deiner Suche ({day_str} / {start_text}) ist "
-                    f"{promoted_member.mention if promoted_member else f'<@{promoted_id}>'} nachgerückt.\n"
-                    f"Link: {jump}"
-                )
-                owner_dm_ok = True
-            except Exception:
-                owner_dm_ok = False
-
-        if promoted_member and not _member_has_no_dm_role(promoted_member):
-            try:
-                await promoted_member.send(
-                    f"❗ **Ein Teilnehmer hat abgesagt.**\n"
-                    f"Du bist bei der Suche nachgerückt und jetzt **Teilnehmer**.\n\n"
-                    f"⏰ Start: {day_str} / {start_text}\n"
-                    f"Link: {jump}"
-                )
-                promoted_dm_ok = True
-            except Exception:
-                promoted_dm_ok = False
-
-        if owner_dm_ok and promoted_dm_ok:
-            return
-
-        try:
-            await channel.send(
-                content=f"{promoted_member.mention if promoted_member else f'<@{promoted_id}>'} ist nachgerückt! "
-                f"({day_str} / {start_text})\n{jump}",
-                allowed_mentions=discord.AllowedMentions(
-                    users=True, roles=False, everyone=False),
-            )
-        except Exception:
-            return
 
     async def _ping_type(self, interaction: discord.Interaction, message_id: int, data: dict):
         # ✅ ack-sicher: erst defer, dann nur followup (und öffentliche Channel-Nachricht separat)
@@ -6398,6 +6687,16 @@ class Gruppensuche(commands.Cog):
             await self._ephemeral_notice(interaction, "Channel nicht gefunden.", ephemeral=True)
             return
 
+        reservists = _reservist_ids(data)
+        if not reservists:
+            await self._ephemeral_notice(
+                interaction,
+                "ℹ️ Aktuell sind keine Reservisten eingetragen.",
+                ephemeral=True,
+            )
+            return
+
+        mentions = " ".join(f"<@{uid}>" for uid in reservists)
         day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
         try:
             day_d = dt.date.fromisoformat(day_iso)
@@ -6408,8 +6707,12 @@ class Gruppensuche(commands.Cog):
         start_text = data.get("start_text") or "—"
         jump = f"https://discord.com/channels/{guild.id}/{channel.id}/{message_id}"
 
-        txt = f"🔔 Ping Warteschlange | {day_str} | Start: {start_text}\n{jump}"
-        await channel.send(txt, allowed_mentions=discord.AllowedMentions.none())
+        txt = f"{mentions}\n🟨 Ping Reservisten | {day_str} | Start: {start_text}\n{jump}"
+        await channel.send(
+            txt,
+            allowed_mentions=discord.AllowedMentions(
+                users=True, roles=False, everyone=False),
+        )
 
     async def _close_search(self, interaction: discord.Interaction, message_id: int):
         if self._interaction_guard_hit(
@@ -6670,19 +6973,19 @@ class Gruppensuche(commands.Cog):
             await self._open_owner_edit_menu(interaction, int(message_id), data)
             return
 
-        # Teilnehmer / Warteliste -> AP-Korrektur, bei Altar inkl. Stufe
+        # Teilnehmer / Reservisten -> AP-Korrektur, bei Altar inkl. Stufe
         is_altar = str(data.get("category", "")).lower() == "altar"
         uid = int(interaction.user.id)
 
         p_ap = data.get("participant_ap") or {}
-        w_ap = data.get("waitlist_ap") or {}
-        current_ap = p_ap.get(str(uid), w_ap.get(str(uid)))
+        r_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
+        current_ap = p_ap.get(str(uid), r_ap.get(str(uid)))
 
         current_stage = None
         if is_altar:
             p_stage = data.get("participant_altar_stage") or {}
-            w_stage = data.get("waitlist_altar_stage") or {}
-            raw_stage = p_stage.get(str(uid), w_stage.get(str(uid)))
+            r_stage = _reservist_map(data, "reservist_altar_stage", "waitlist_altar_stage")
+            raw_stage = p_stage.get(str(uid), r_stage.get(str(uid)))
             try:
                 current_stage = int(raw_stage)
             except Exception:
@@ -6842,73 +7145,43 @@ class Gruppensuche(commands.Cog):
                 await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
                 return
 
+            if desired_max < len(list(data.get("participants") or [])):
+                await self._ephemeral_notice(
+                    interaction,
+                    "Die maximale Teilnehmerzahl kann nicht unter die aktuelle Teilnehmerzahl gesenkt werden.",
+                    ephemeral=True,
+                )
+                return
+
             # --- alte Werte sichern (für Change-Notify) ---
             old_max = int(data.get("max_players", 2))
             old_part_count = len(list(data.get("participants") or []))
-            old_wait_count = len(list(data.get("waitlist") or []))
+            old_reservist_count = len(_reservist_ids(data))
 
             # --- neue max setzen ---
             data["max_players"] = int(desired_max)
 
             participants = list(data.get("participants") or [])
-            waitlist = list(data.get("waitlist") or [])
-
-            ap_map = data.get("participant_ap") or {}
-            wl_map = data.get("waitlist_ap") or {}
-            participant_stage = data.get("participant_altar_stage") or {}
-            waitlist_stage = data.get("waitlist_altar_stage") or {}
-
-            # 1) Wenn new_max kleiner ist: zu viele Teilnehmer -> in Warteschlange schieben (letzte zuerst)
-            while len(participants) > desired_max:
-                demoted_id = int(participants.pop())
-                demoted_ap = ap_map.pop(str(demoted_id), None)
-                if demoted_ap is not None:
-                    wl_map[str(demoted_id)] = demoted_ap
-
-                demoted_stage = participant_stage.pop(str(demoted_id), None)
-                if demoted_stage is not None:
-                    waitlist_stage[str(demoted_id)] = demoted_stage
-
-                waitlist.insert(0, demoted_id)
-
-            # 2) Wenn new_max größer ist: aus Warteschlange auffüllen
-            while len(participants) < desired_max and waitlist:
-                pid = int(waitlist.pop(0))
-                participants.append(pid)
-
-                promoted_ap = wl_map.pop(str(pid), None)
-                if promoted_ap is not None:
-                    ap_map[str(pid)] = promoted_ap
-
-                promoted_stage = waitlist_stage.pop(str(pid), None)
-                if promoted_stage is not None:
-                    participant_stage[str(pid)] = promoted_stage
-
             data["participants"] = participants
-            data["waitlist"] = waitlist
-            data["participant_ap"] = ap_map
-            data["waitlist_ap"] = wl_map
-            data["participant_altar_stage"] = participant_stage
-            data["waitlist_altar_stage"] = waitlist_stage
 
             await self._save_refresh_dispatch(data)
 
             # --- neue Werte ---
             new_max = int(data.get("max_players", 2))
             new_part_count = len(list(data.get("participants") or []))
-            new_wait_count = len(list(data.get("waitlist") or []))
+            new_reservist_count = len(_reservist_ids(data))
 
             changes = [
                 {"key": "max_players", "label": "Max. Teilnehmer",
                     "old": str(old_max), "new": str(new_max)},
             ]
 
-            if (old_part_count, old_wait_count) != (new_part_count, new_wait_count):
+            if (old_part_count, old_reservist_count) != (new_part_count, new_reservist_count):
                 changes.append({
                     "key": "lists",
-                    "label": "Teilnehmer/Warteschlange",
-                    "old": f"{old_part_count} / {old_wait_count}",
-                    "new": f"{new_part_count} / {new_wait_count}",
+                    "label": "Teilnehmer/Reservisten",
+                    "old": f"{old_part_count} / {old_reservist_count}",
+                    "new": f"{new_part_count} / {new_reservist_count}",
                 })
 
             self._schedule_edit_notify(message_id, data, changes=changes)
@@ -7248,4 +7521,3 @@ class Gruppensuche(commands.Cog):
 
         await self._post_save_refresh_dispatch(data)
         await self._send_edit_menu(interaction, session)
-
