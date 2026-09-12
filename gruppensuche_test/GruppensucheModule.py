@@ -5976,7 +5976,7 @@ class GruppensucheTest(commands.Cog):
         await self._post_save_refresh_dispatch(data)
         await self._ephemeral_notice(
             interaction,
-            "✅ Du bist jetzt aktiver Teilnehmer. Deine Werte wurden übernommen.",
+            "✅ Du bist jetzt aktiver Teilnehmer.",
             ephemeral=True,
         )
 
@@ -6043,7 +6043,7 @@ class GruppensucheTest(commands.Cog):
         await self._post_save_refresh_dispatch(data)
         await self._ephemeral_notice(
             interaction,
-            "🟨 Du bist jetzt als Reservist eingetragen. Deine Werte wurden übernommen.",
+            "🟨 Du bist jetzt als Reservist eingetragen.",
             ephemeral=True,
         )
 
