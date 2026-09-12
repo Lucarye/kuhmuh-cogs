@@ -870,15 +870,19 @@ def _altar_selected_ap_lines(*, start_step: Optional[object] = None, target_step
     if start_n is not None:
         start_stats = _altar_required_stats_for_step(start_n)
         if start_stats is not None:
+            boss = ALTAR_BOSS_BY_STEP.get(start_n)
+            boss_text = f" – {boss}" if boss else ""
             lines.append(
-                f"• Start-Stufe {start_n}: {start_stats['ap']} AP / {start_stats['dp']} VK"
+                f"• Start-Stufe {start_n}: {start_stats['ap']} AP / {start_stats['dp']} VK{boss_text}"
             )
 
     if target_n is not None:
         target_stats = _altar_required_stats_for_step(target_n)
         if target_stats is not None:
+            boss = ALTAR_BOSS_BY_STEP.get(target_n)
+            boss_text = f" – {boss}" if boss else ""
             lines.append(
-                f"• Ziel-Stufe {target_n}: {target_stats['ap']} AP / {target_stats['dp']} VK"
+                f"• Ziel-Stufe {target_n}: {target_stats['ap']} AP / {target_stats['dp']} VK{boss_text}"
             )
 
     return lines
@@ -3781,11 +3785,18 @@ class GruppensucheTest(commands.Cog):
                 if not isinstance(channel, discord.TextChannel):
                     continue
                 message = await channel.fetch_message(mid)
-                if not message.components:
+                component_count = sum(
+                    len(getattr(row, "children", []))
+                    for row in (message.components or [])
+                )
+                if component_count != len(view.children):
                     await message.edit(view=view)
                     self._log_info(
-                        "STARTUP", "missing public post buttons restored",
-                        message_id=mid, channel_id=channel.id,
+                        "STARTUP", "public post buttons reconciled",
+                        message_id=mid,
+                        channel_id=channel.id,
+                        existing_components=component_count,
+                        expected_components=len(view.children),
                     )
             except discord.NotFound:
                 continue
