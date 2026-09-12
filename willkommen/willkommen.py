@@ -330,7 +330,15 @@ class Willkommen(commands.Cog):
             await ctx.send("Dieser Befehl kann nur auf dem KuhMuh-Server ausgeführt werden.")
             return
 
-        members = [member async for member in ctx.guild.fetch_members(limit=0)]
+        await ctx.guild.chunk(cache=True)
+        members = list(ctx.guild.members)
+        if not members:
+            await ctx.send(
+                "Es konnten keine Mitglieder geladen werden. "
+                "Bitte den Server-Members-Intent im Discord Developer Portal und im Bot aktivieren."
+            )
+            return
+
         guild_data = await self.config.guild(ctx.guild).all()
         users = dict(guild_data.get("welcome_users", {}))
         initialized_at = _timestamp()
