@@ -14,10 +14,26 @@ import discord  # pyright: ignore[reportMissingImports]
 # pyright: ignore[reportMissingImports]
 from redbot.core import commands, Config  # type: ignore
 import random
-import logging
+import importlib.util
+import logging as _logging
+import sysconfig
+from pathlib import Path
 
 
-log = logging.getLogger("red.kuhmuh.gruppensuche")
+if hasattr(_logging, "getLogger"):
+    log = _logging.getLogger("red.kuhmuh.gruppensuche")
+else:
+    _stdlib_logging_path = Path(sysconfig.get_paths()["stdlib"]) / "logging" / "__init__.py"
+    _stdlib_logging_spec = importlib.util.spec_from_file_location(
+        "_kuhmuh_stdlib_logging",
+        _stdlib_logging_path,
+        submodule_search_locations=[str(_stdlib_logging_path.parent)],
+    )
+    if _stdlib_logging_spec is None or _stdlib_logging_spec.loader is None:
+        raise ImportError("Python-Standardmodul logging konnte nicht geladen werden.")
+    _stdlib_logging = importlib.util.module_from_spec(_stdlib_logging_spec)
+    _stdlib_logging_spec.loader.exec_module(_stdlib_logging)
+    log = _stdlib_logging.getLogger("red.kuhmuh.gruppensuche")
 
 # =========================
 # IDs / Konfiguration
