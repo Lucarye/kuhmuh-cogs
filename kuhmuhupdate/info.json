@@ -1,12 +1,14 @@
 {
-  "author": ["Lucarye"],
-  "install_msg": "triggerpost installiert. Nutze °load triggerpost, dann °triggerpost setchannel #hilfe.",
-  "name": "triggerpost",
-  "short": "Postet/aktualisiert eine Aushilfe-Liste per Trigger.",
-  "description": "Listet online Mitglieder zweier Rollen (Normal/Schwer) bei Triggerworten. Enthält Cooldown, Channel-Gating und Admin/Offiziere-Bypass.",
-  "tags": ["utility", "trigger", "roles", "presence"],
+  "name": "kuhmuhupdate",
+  "short": "Administratives Update-Werkzeug fuer Kuhmuh-Cogs.",
+  "description": "Verwaltet gespeicherte Redbot-Cogs und fuehrt Repository-Update, Installation und Laden mit Statusanzeige aus.",
+  "install_msg": "KuhmuhUpdate wurde installiert. Nutze /kuhmuhupdate.",
+  "author": ["Kuhmuh"],
+  "tags": ["admin", "update", "redbot", "kuhmuh"],
   "requirements": [],
   "min_bot_version": "3.5.0",
-  "end_user_data_statement": "Speichert pro Guild: Trigger, Ziel-Channel, Message-ID, Cooldown.",
-  "type": "COG"
+  "hidden": false,
+  "disabled": false,
+  "type": "COG",
+  "end_user_data_statement": "Speichert global die vom Administrator hinterlegten Cog- und Repository-Namen für Update-Aktionen."
 }
