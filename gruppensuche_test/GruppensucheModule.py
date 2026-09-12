@@ -769,6 +769,17 @@ ALTAR_REQUIRED_STATS_BY_STEP = {
     24: {"division": "head", "ap": 415, "dp": 475},
 }
 
+ALTAR_BOSS_BY_STEP = {
+    3: "Kutum",
+    6: "Ronin",
+    9: "Sangoon",
+    12: "Duoksini",
+    15: "Kumiho",
+    18: "Jigwi",
+    21: "Jordine",
+    24: "Enslar",
+}
+
 
 def _altar_required_stats_for_step(step: Optional[object]) -> Optional[dict]:
     try:
@@ -803,7 +814,9 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
             marks.append("Ziel")
 
         suffix = f" ({', '.join(marks)})" if marks else ""
-        line = f"• Stufe {step}: {ap} AP / {dp} VK{suffix}"
+        boss = ALTAR_BOSS_BY_STEP.get(step)
+        boss_text = f" – {boss}" if boss else ""
+        line = f"• Stufe {step}{boss_text}: {ap} AP / {dp} VK{suffix}"
         if marks:
             line = f"**{line}**"
         lines.append(line)
