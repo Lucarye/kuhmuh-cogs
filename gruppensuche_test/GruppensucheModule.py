@@ -3883,7 +3883,9 @@ class GruppensucheTest(commands.Cog):
         last_message: Optional[discord.Message] = None
         for attempt in range(1, 4):
             message = await channel.fetch_message(int(message_id))
-            await message.edit(view=view)
+            edited_message = await message.edit(view=view)
+            if edited_message is not None and self._message_has_view(edited_message, view):
+                return edited_message
             last_message = await channel.fetch_message(int(message_id))
             if self._message_has_view(last_message, view):
                 return last_message
