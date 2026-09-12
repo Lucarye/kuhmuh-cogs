@@ -816,7 +816,7 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
         suffix = f" ({', '.join(marks)})" if marks else ""
         boss = ALTAR_BOSS_BY_STEP.get(step)
         boss_text = f" – {boss}" if boss else ""
-        line = f"• Stufe {step}{boss_text}: {ap} AP / {dp} VK{suffix}"
+        line = f"• Stufe {step}: {ap} AP / {dp} VK{boss_text}{suffix}"
         if marks:
             line = f"**{line}**"
         lines.append(line)
