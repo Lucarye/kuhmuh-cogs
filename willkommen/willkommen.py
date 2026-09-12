@@ -14,6 +14,17 @@ GUILD_ID = 1198649628787212458
 MEMBER_ROLE_ID = 1198654521354764449
 ENTRY_ROLE_ID = 1199022986955603999
 FRIEND_ROLE_ID = 1206903378014380063
+ELEVATED_MEMBER_ROLE_IDS = frozenset(
+    {
+        1198652183546175589,
+        1497703714780352733,
+        1198652039312453723,
+        1198651655005159457,
+        1204073376071548971,
+        1198651056461189220,
+        1198654286582788126,
+    }
+)
 WELCOME_CHANNEL_ID = 1198659722505621594
 WELCOME_MEDIA_THREAD_ID = 1543373634427559946
 WELCOME_IMAGE_URL = "https://cdn.discordapp.com/attachments/1543373634427559946/1543376216004886618/mxks5HTw3tqI3zGJ8a.gif?ex=6a94a49c&is=6a93531c&hm=e3c990b9709476995101370728d22ce6bcc8a75e0cbeabd8871dd311cc1d1555&"
@@ -230,7 +241,9 @@ class Willkommen(commands.Cog):
             record.get("last_welcome_type") == "welcome_back"
             and record.get("member_history", {}).get("last_welcomed_friend_count") == friend_status_count
         )
-        if WELCOME_ANTI_SPAM_ENABLED and record.get("welcome_count", 0) > 0 and (
+        if WELCOME_ANTI_SPAM_ENABLED and (
+            record.get("welcome_count", 0) > 0 or record.get("member_initialized", False)
+        ) and (
             not is_welcome_back or already_welcomed_back
         ):
             users[user_key] = record
@@ -308,6 +321,55 @@ class Willkommen(commands.Cog):
         await self.config.guild(member.guild).last_welcome_media_url.set(media_url)
         await self.config.guild(member.guild).last_welcome_text.set(text)
         await self.config.guild(member.guild).last_welcome_title.set(title)
+
+    @commands.command(name="willkommen_initialisieren")
+    @commands.admin_or_permissions(manage_guild=True)
+    async def initialize_welcome_users(self, ctx: commands.Context):
+        """Markiert bestehende Mitglieder, ohne eine Willkommensnachricht zu senden."""
+        if ctx.guild is None or ctx.guild.id != GUILD_ID:
+            await ctx.send("Dieser Befehl kann nur auf dem KuhMuh-Server ausgeführt werden.")
+            return
+
+        members = [member async for member in ctx.guild.fetch_members(limit=0)]
+        guild_data = await self.config.guild(ctx.guild).all()
+        users = dict(guild_data.get("welcome_users", {}))
+        initialized_at = _timestamp()
+        counts = {"member": 0, "elevated": 0, "friend": 0}
+
+        for member in members:
+            role_ids = {role.id for role in member.roles}
+            has_member_role = MEMBER_ROLE_ID in role_ids
+            has_elevated_role = bool(role_ids & ELEVATED_MEMBER_ROLE_IDS)
+            has_friend_role = FRIEND_ROLE_ID in role_ids
+            if not has_member_role and not has_elevated_role and not has_friend_role:
+                continue
+
+            user_key = str(member.id)
+            record = dict(users.get(user_key, {}))
+            record["user_id"] = member.id
+            record["initial_roles_flagged_at"] = initialized_at
+
+            if has_member_role or has_elevated_role:
+                record["member_initialized"] = True
+                counts["member"] += int(has_member_role)
+                counts["elevated"] += int(has_elevated_role)
+
+            if has_friend_role:
+                history = dict(record.get("member_history", {}))
+                history["friend_status_count"] = max(int(history.get("friend_status_count", 0)), 1)
+                history["was_former_member"] = True
+                record["previous_status"] = "friend"
+                record["member_history"] = history
+                counts["friend"] += 1
+
+            users[user_key] = record
+
+        await self.config.guild(ctx.guild).welcome_users.set(users)
+        await ctx.send(
+            "Initialisierung abgeschlossen: "
+            f"{counts['member']} Member, {counts['elevated']} höhere Rollen und "
+            f"{counts['friend']} Herdengenossen markiert."
+        )
 
     @staticmethod
     def _previous_status(role_ids: set[int]) -> str:

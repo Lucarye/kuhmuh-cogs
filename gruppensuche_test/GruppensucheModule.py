@@ -748,6 +748,9 @@ ALTAR_REQUIRED_STATS_BY_STEP = {
     19: {"division": "general", "ap": 390, "dp": 450},
     20: {"division": "general", "ap": 395, "dp": 450},
     21: {"division": "head", "ap": 400, "dp": 460},
+    22: {"division": "general", "ap": 405, "dp": 465},
+    23: {"division": "general", "ap": 410, "dp": 470},
+    24: {"division": "head", "ap": 415, "dp": 475},
 }
 
 
@@ -815,7 +818,7 @@ def _build_altar_values_embed(*, start_step: Optional[object] = None, target_ste
         inline=True,
     )
     embed.add_field(
-        name="Stage 11-21",
+        name="Stage 11-24",
         value=recommended_right,
         inline=True,
     )
@@ -1527,8 +1530,8 @@ class APAdjustModal(discord.ui.Modal):
 
         if self.include_altar_stage:
             self.altar_stage = discord.ui.TextInput(
-                label="Deine höchste Altar-Stufe (1-21)",
-                placeholder="Nur Zahl eingeben, z.B. 21",
+                label="Deine höchste Altar-Stufe (1-24)",
+                placeholder="Nur Zahl eingeben, z.B. 24",
                 required=True,
                 max_length=4,
                 default=(str(current_stage)
@@ -1565,7 +1568,7 @@ class APAdjustModal(discord.ui.Modal):
                 )
                 return
             altar_stage = int(raw_stage)
-            if altar_stage < 1 or altar_stage > 21:
+            if altar_stage < 1 or altar_stage > 24:
                 await interaction.response.send_modal(
                     APAdjustModal(
                         self.cog,
@@ -1606,8 +1609,8 @@ class JoinApModal(discord.ui.Modal):
 
         if self.include_altar_stage:
             self.altar_stage = discord.ui.TextInput(
-                label="Deine höchste Altar-Stufe (1-21)",
-                placeholder="Nur Zahl eingeben, z.B. 21",
+                label="Deine höchste Altar-Stufe (1-24)",
+                placeholder="Nur Zahl eingeben, z.B. 24",
                 required=True,
                 max_length=4,
                 default=(str(current_stage)
@@ -1644,7 +1647,7 @@ class JoinApModal(discord.ui.Modal):
             raw_stage = str(self.altar_stage.value).strip()
             if not raw_stage.isdigit():
                 await interaction.response.send_message(
-                    "❌ **Altar-Stufe ungültig.** Bitte nur Zahlen von `1` bis `21` eintragen.",
+                    "❌ **Altar-Stufe ungültig.** Bitte nur Zahlen von `1` bis `24` eintragen.",
                     ephemeral=True,
                     view=_ReopenModalView(
                     lambda: JoinApModal(
@@ -1659,9 +1662,9 @@ class JoinApModal(discord.ui.Modal):
                 return
 
             stage_int = int(raw_stage)
-            if stage_int < 1 or stage_int > 21:
+            if stage_int < 1 or stage_int > 24:
                 await interaction.response.send_message(
-                    "❌ **Altar-Stufe ungültig.** Bitte eine Stufe zwischen `1` und `21` eintragen.",
+                    "❌ **Altar-Stufe ungültig.** Bitte eine Stufe zwischen `1` und `24` eintragen.",
                     ephemeral=True,
                     view=_ReopenModalView(
                         lambda: JoinApModal(
@@ -2727,9 +2730,9 @@ class AltarStepSelect(discord.ui.Select):
         self.which = which
 
         options = []
-        for n in range(1, 22):
+        for n in range(1, 25):
             label = f"Stufe {n}"
-            desc = "Eigene höchste Altar-Stufe (1-21)" if which == "cleared" else "Geplante Ziel-Stufe (1-21)"
+            desc = "Eigene höchste Altar-Stufe (1-24)" if which == "cleared" else "Geplante Ziel-Stufe (1-24)"
             options.append(
                 discord.SelectOption(
                     label=label,
@@ -2739,7 +2742,7 @@ class AltarStepSelect(discord.ui.Select):
                 )
             )
 
-        placeholder = "Deine höchste Altar-Stufe (1-21)..." if which == "cleared" else "Geplante Ziel-Stufe (1-21)..."
+        placeholder = "Deine höchste Altar-Stufe (1-24)..." if which == "cleared" else "Geplante Ziel-Stufe (1-24)..."
         super().__init__(
             placeholder=placeholder,
             min_values=1,
