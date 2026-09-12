@@ -1113,16 +1113,17 @@ def _sum_runs(boss_runs: Dict[str, int]) -> int:
 def _reservist_ids(data: dict) -> list[int]:
     """Liest Reservisten; alte Warteschlangen-Daten bleiben lesbar."""
     raw = data.get("reservists")
-    if not isinstance(raw, list):
-        raw = data.get("waitlist") or []
+    legacy = data.get("waitlist") or []
+    if not isinstance(raw, list) or (not raw and legacy):
+        raw = legacy
     return [int(uid) for uid in raw]
 
 
 def _reservist_map(data: dict, key: str, legacy_key: str) -> dict:
     current = data.get(key)
-    if isinstance(current, dict):
-        return current
     legacy = data.get(legacy_key)
+    if isinstance(current, dict) and (current or not isinstance(legacy, dict) or not legacy):
+        return current
     return legacy if isinstance(legacy, dict) else {}
 
 
@@ -5970,6 +5971,9 @@ class GruppensucheTest(commands.Cog):
             data["reservist_ap"] = reservist_ap
             data["participant_altar_stage"] = participant_stage
             data["reservist_altar_stage"] = reservist_stage
+            data.pop("waitlist", None)
+            data.pop("waitlist_ap", None)
+            data.pop("waitlist_altar_stage", None)
 
             await self._save_refresh_dispatch(data)
 
@@ -6037,6 +6041,9 @@ class GruppensucheTest(commands.Cog):
             data["reservist_ap"] = reservist_ap
             data["participant_altar_stage"] = participant_stage
             data["reservist_altar_stage"] = reservist_stage
+            data.pop("waitlist", None)
+            data.pop("waitlist_ap", None)
+            data.pop("waitlist_altar_stage", None)
 
             await self._save_refresh_dispatch(data)
 
