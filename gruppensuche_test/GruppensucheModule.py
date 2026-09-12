@@ -2778,7 +2778,11 @@ class AltarStepSelect(discord.ui.Select):
         options = []
         for n in range(1, 25):
             label = f"Stufe {n}"
-            desc = "Eigene höchste Altar-Stufe (1-24)" if which == "cleared" else "Geplante Ziel-Stufe (1-24)"
+            boss = ALTAR_BOSS_BY_STEP.get(n)
+            if boss:
+                label += f" – {boss}"
+            stats = ALTAR_REQUIRED_STATS_BY_STEP[n]
+            desc = f"{stats['ap']} AP / {stats['dp']} VK"
             options.append(
                 discord.SelectOption(
                     label=label,
