@@ -3483,6 +3483,15 @@ class PublicPostView(discord.ui.View):
             )
 
     async def _on_join(self, interaction: discord.Interaction):
+        data = await self.cog._get_search(self.message_id)
+        if data is None:
+            await self.cog._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
+            return
+
+        if int(interaction.user.id) in [int(uid) for uid in _reservist_ids(data)]:
+            await self.cog._move_to_participants(interaction, self.message_id)
+            return
+
         await self._open_registration_modal(interaction, as_reservist=False)
 
     async def _on_reservist(self, interaction: discord.Interaction):
@@ -5895,6 +5904,81 @@ class GruppensucheTest(commands.Cog):
                 )
             except Exception:
                 pass
+
+    async def _move_to_participants(self, interaction: discord.Interaction, message_id: int):
+        if self._interaction_guard_hit(
+            action="activate_reservist",
+            user_id=int(interaction.user.id),
+            message_id=int(message_id),
+        ):
+            await self._ephemeral_notice(
+                interaction,
+                "⏳ Deine letzte Änderung wird bereits verarbeitet.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
+        uid = int(interaction.user.id)
+        data: Optional[dict] = None
+
+        async with self._lock_for(int(message_id)):
+            data = await self._get_search(message_id)
+            if data is None:
+                await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.", ephemeral=True)
+                return
+
+            participants = [int(value) for value in (data.get("participants") or [])]
+            reservists = _reservist_ids(data)
+            max_players = int(data.get("max_players", 2))
+
+            if uid not in reservists:
+                await self._ephemeral_notice(interaction, "Du bist nicht als Reservist eingetragen.", ephemeral=True)
+                return
+            if len(participants) >= max_players:
+                await self._ephemeral_notice(
+                    interaction,
+                    "ℹ️ Die Gruppe ist aktuell voll. Du bleibst als Reservist eingetragen.",
+                    ephemeral=True,
+                )
+                return
+
+            reservists.remove(uid)
+            participants.append(uid)
+
+            participant_ap = data.get("participant_ap") or {}
+            reservist_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
+            participant_stage = data.get("participant_altar_stage") or {}
+            reservist_stage = _reservist_map(
+                data, "reservist_altar_stage", "waitlist_altar_stage")
+
+            ap_value = reservist_ap.pop(str(uid), None)
+            if ap_value is not None:
+                participant_ap[str(uid)] = ap_value
+
+            stage_value = reservist_stage.pop(str(uid), None)
+            if stage_value is not None:
+                participant_stage[str(uid)] = stage_value
+
+            data["participants"] = participants
+            data["reservists"] = reservists
+            data["participant_ap"] = participant_ap
+            data["reservist_ap"] = reservist_ap
+            data["participant_altar_stage"] = participant_stage
+            data["reservist_altar_stage"] = reservist_stage
+
+            await self._save_refresh_dispatch(data)
+
+        await self._post_save_refresh_dispatch(data)
+        await self._ephemeral_notice(
+            interaction,
+            "✅ Du bist jetzt aktiver Teilnehmer. Deine Werte wurden übernommen.",
+            ephemeral=True,
+        )
 
     async def _move_to_reservists(self, interaction: discord.Interaction, message_id: int):
         if self._interaction_guard_hit(
