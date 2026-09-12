@@ -6215,9 +6215,11 @@ class GruppensucheTest(commands.Cog):
                 return
 
             ap_val = str(ap_val or "").strip()
-            if not ap_val or not ap_val.isdigit():
+            ap_int = _parse_int_strict(ap_val, allow_negative=True)
+            if ap_int is None:
                 await self._ephemeral_notice(interaction, "Bitte nur Zahlen bei AP eintragen (z.B. 301).")
                 return
+            ap_val = str(ap_int)
 
             uid = interaction.user.id
             participants: List[int] = list(data.get("participants") or [])
