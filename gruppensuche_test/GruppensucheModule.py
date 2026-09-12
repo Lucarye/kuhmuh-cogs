@@ -3770,9 +3770,31 @@ class GruppensucheTest(commands.Cog):
         for mid_str, post in data.items():
             mid = int(mid_str)
             if bool(post.get("is_closed", False)):
-                self.bot.add_view(ClosedPostView(self, mid))
+                view = ClosedPostView(self, mid)
             else:
-                self.bot.add_view(PublicPostView(self, mid, category=post.get("category")))
+                view = PublicPostView(self, mid, category=post.get("category"))
+                await self._apply_dynamic_button_labels(view, post)
+            self.bot.add_view(view, message_id=mid)
+
+            try:
+                channel = guild.get_channel(int(post.get("channel_id", 0)))
+                if not isinstance(channel, discord.TextChannel):
+                    continue
+                message = await channel.fetch_message(mid)
+                if not message.components:
+                    await message.edit(view=view)
+                    self._log_info(
+                        "STARTUP", "missing public post buttons restored",
+                        message_id=mid, channel_id=channel.id,
+                    )
+            except discord.NotFound:
+                continue
+            except Exception as exc:
+                self._log_warning(
+                    "STARTUP", "public post button recovery failed",
+                    message_id=mid, channel_id=post.get("channel_id"),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
 
     def _expire_session(self, user_id: int):
         if user_id in self._sessions:
