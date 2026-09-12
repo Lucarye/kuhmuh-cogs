@@ -1094,6 +1094,22 @@ def _sum_runs(boss_runs: Dict[str, int]) -> int:
     return sum(int(v) for v in boss_runs.values())
 
 
+def _reservist_ids(data: dict) -> list[int]:
+    """Liest Reservisten; alte Warteschlangen-Daten bleiben lesbar."""
+    raw = data.get("reservists")
+    if not isinstance(raw, list):
+        raw = data.get("waitlist") or []
+    return [int(uid) for uid in raw]
+
+
+def _reservist_map(data: dict, key: str, legacy_key: str) -> dict:
+    current = data.get(key)
+    if isinstance(current, dict):
+        return current
+    legacy = data.get(legacy_key)
+    return legacy if isinstance(legacy, dict) else {}
+
+
 def _allowed_party_range(category: str, spot_key: Optional[str] = None) -> Tuple[int, int]:
     ui = _ui_for(category)
     return (int(ui["party_min"]), int(ui["party_max"]))
@@ -3290,6 +3306,13 @@ class PublicPostView(discord.ui.View):
             row=0,
             custom_id=f"gst:leave:{message_id}",
         )
+        reservist_btn = discord.ui.Button(
+            label="Reservist",
+            emoji="🟨",
+            style=discord.ButtonStyle.secondary,
+            row=0,
+            custom_id=f"gst:reservist:{message_id}",
+        )
         ping_part_btn = discord.ui.Button(
             label="Ping Teilnehmer",
             emoji="📣",
@@ -3309,7 +3332,7 @@ class PublicPostView(discord.ui.View):
         )
 
         ping_wait_btn = discord.ui.Button(
-            label="Ping Warteschlange",
+            label="Ping Reservisten",
             emoji="🔔",
             style=discord.ButtonStyle.secondary,
             row=1,
@@ -3342,6 +3365,7 @@ class PublicPostView(discord.ui.View):
 
         join_btn.callback = self._on_join
         leave_btn.callback = self._on_leave
+        reservist_btn.callback = self._on_reservist
         ping_type_btn.callback = self._on_ping_type
         ping_wait_btn.callback = self._on_ping_wait
         edit_btn.callback = self._on_edit
@@ -3350,6 +3374,7 @@ class PublicPostView(discord.ui.View):
 
         self.add_item(join_btn)
         self.add_item(leave_btn)
+        self.add_item(reservist_btn)
         if self.category == "altar":
             altar_values_btn = discord.ui.Button(
                 label="Altar-Werte",
@@ -3381,7 +3406,7 @@ class PublicPostView(discord.ui.View):
 
         return data
 
-    async def _on_join(self, interaction: discord.Interaction):
+    async def _open_registration_modal(self, interaction: discord.Interaction, *, as_reservist: bool):
         if not interaction.guild:
             return
 
@@ -3399,20 +3424,26 @@ class PublicPostView(discord.ui.View):
         current_ap = None
 
         p_ap = data.get("participant_ap") or {}
-        w_ap = data.get("waitlist_ap") or {}
-        current_ap = p_ap.get(str(uid), w_ap.get(str(uid)))
+        r_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
+        current_ap = p_ap.get(str(uid), r_ap.get(str(uid)))
 
         if is_altar:
             p_stage = data.get("participant_altar_stage") or {}
-            w_stage = data.get("waitlist_altar_stage") or {}
-            raw_stage = p_stage.get(str(uid), w_stage.get(str(uid)))
+            r_stage = _reservist_map(data, "reservist_altar_stage", "waitlist_altar_stage")
+            raw_stage = p_stage.get(str(uid), r_stage.get(str(uid)))
             try:
                 current_stage = int(raw_stage)
             except Exception:
                 current_stage = None
 
         async def _done(modal_interaction: discord.Interaction, ap_val: str, altar_stage: Optional[int] = None):
-            await self.cog._join(modal_interaction, mid, ap_val, altar_stage=altar_stage)
+            await self.cog._join(
+                modal_interaction,
+                mid,
+                ap_val,
+                altar_stage=altar_stage,
+                as_reservist=as_reservist,
+            )
 
         try:
             await interaction.response.send_modal(
@@ -3434,6 +3465,12 @@ class PublicPostView(discord.ui.View):
                     current_ap=current_ap,
                 )
             )
+
+    async def _on_join(self, interaction: discord.Interaction):
+        await self._open_registration_modal(interaction, as_reservist=False)
+
+    async def _on_reservist(self, interaction: discord.Interaction):
+        await self._open_registration_modal(interaction, as_reservist=True)
 
     async def _on_leave(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -4459,14 +4496,14 @@ class GruppensucheTest(commands.Cog):
         return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
 
     def _collect_recipients(self, data: dict) -> list[int]:
-        """Teilnehmer + Warteschlange, ohne Owner, unique, stable order."""
+        """Teilnehmer + Reservisten, ohne Owner, unique, stable order."""
         owner_id = int(data.get("owner_id", 0))
         participants = [int(x) for x in (data.get("participants") or [])]
-        waitlist = [int(x) for x in (data.get("waitlist") or [])]
+        reservists = _reservist_ids(data)
 
         seen = set()
         out: list[int] = []
-        for uid in participants + waitlist:
+        for uid in participants + reservists:
             if uid == owner_id:
                 continue
             if uid in seen:
@@ -4554,7 +4591,7 @@ class GruppensucheTest(commands.Cog):
             _debounced_send())
 
     async def _send_edit_notify(self, message_id: int):
-        """Liest aktuellen Stand, verschickt DM an Teilnehmer+Warteschlange (ohne Owner), cleared pending."""
+        """Liest aktuellen Stand, verschickt DM an Teilnehmer+Reservisten (ohne Owner), cleared pending."""
         data = await self._get_search(int(message_id))
         if not data:
             return
@@ -4808,7 +4845,7 @@ class GruppensucheTest(commands.Cog):
 
         max_players = int(data.get("max_players", 2))
         participants: List[int] = list(data.get("participants") or [])
-        waitlist: List[int] = list(data.get("waitlist") or [])
+        reservists = _reservist_ids(data)
 
         is_closed = bool(data.get("is_closed", False))
         is_full = len(participants) >= max_players
@@ -4888,15 +4925,15 @@ class GruppensucheTest(commands.Cog):
             + "\n\n"
         )
 
-        wait_lines = _build_user_lines(
-            waitlist,
-            data.get("waitlist_ap") or {},
-            data.get("waitlist_altar_stage") or {},
+        reservist_lines = _build_user_lines(
+            reservists,
+            _reservist_map(data, "reservist_ap", "waitlist_ap"),
+            _reservist_map(data, "reservist_altar_stage", "waitlist_altar_stage"),
         )
         wait_block = (
-            f"**Warteschlange ({len(waitlist)})**\n"
-            + ("\n".join([f"• {x}" for x in wait_lines])
-               if wait_lines else "—")
+            f"**Reservisten ({len(reservists)})**\n"
+            + ("\n".join([f"• {x}" for x in reservist_lines])
+               if reservist_lines else "—")
         )
 
         # Titel
@@ -5473,7 +5510,7 @@ class GruppensucheTest(commands.Cog):
             "day_date_iso": day_iso,
             "max_players": max_players,
             "participants": [owner_id],
-            "waitlist": [],
+            "reservists": [],
             "is_closed": False,
             "ping_role_id": int(ping_role_id),
             "created_at": int(_now_local().timestamp()),
@@ -5487,9 +5524,9 @@ class GruppensucheTest(commands.Cog):
             "notes": session.notes,
             "owner_ap": session.own_ap,
             "participant_ap": {str(owner_id): session.own_ap or ""},
-            "waitlist_ap": {},
+            "reservist_ap": {},
             "participant_altar_stage": {str(owner_id): session.altar_cleared_step} if session.category == "altar" and session.altar_cleared_step is not None else {},
-            "waitlist_altar_stage": {},
+            "reservist_altar_stage": {},
             "atoraxxion_runs": list(session.atoraxxion_runs or []),
             "altar_cleared_step": session.altar_cleared_step,
             "altar_target_step": session.altar_target_step,
@@ -5834,7 +5871,15 @@ class GruppensucheTest(commands.Cog):
             except Exception:
                 pass
 
-    async def _join(self, interaction: discord.Interaction, message_id: int, ap_val: str, altar_stage: Optional[int] = None):
+    async def _join(
+        self,
+        interaction: discord.Interaction,
+        message_id: int,
+        ap_val: str,
+        altar_stage: Optional[int] = None,
+        *,
+        as_reservist: bool = False,
+    ):
         result_state: Optional[str] = None
         if self._interaction_guard_hit(
             action="join",
@@ -5868,69 +5913,84 @@ class GruppensucheTest(commands.Cog):
 
             uid = interaction.user.id
             participants: List[int] = list(data.get("participants") or [])
-            waitlist: List[int] = list(data.get("waitlist") or [])
+            reservists: List[int] = _reservist_ids(data)
             max_players = int(data.get("max_players", 2))
-            was_new_join = False
-            moved_from_waitlist = False
-            ap_updated = False            
             is_altar = str(data.get("category", "")).lower() == "altar"
             participant_stage = data.get("participant_altar_stage")
             if not isinstance(participant_stage, dict):
                 participant_stage = {}
-            waitlist_stage = data.get("waitlist_altar_stage")
-            if not isinstance(waitlist_stage, dict):
-                waitlist_stage = {}
+            reservist_stage = _reservist_map(
+                data, "reservist_altar_stage", "waitlist_altar_stage")
+            participant_ap = data.get("participant_ap") or {}
+            reservist_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
+            data["reservists"] = reservists
+            data["reservist_ap"] = reservist_ap
+            data["reservist_altar_stage"] = reservist_stage
 
-            # ✅ Wenn schon eingetragen: AP aktualisieren (Teilnehmer ODER Warteschlange)
+            # Bestehende Einträge aktualisieren oder zwischen Reservist/Teilnehmer wechseln.
             if uid in participants:
-                ap_map = data.get("participant_ap") or {}
-                ap_map[str(uid)] = ap_val
-                data["participant_ap"] = ap_map
+                participant_ap[str(uid)] = ap_val
 
                 if is_altar and altar_stage is not None:
                     participant_stage[str(uid)] = int(altar_stage)
-                    data["participant_altar_stage"] = participant_stage
 
                 _sync_easter_egg_text(data, uid, ap_val)
-
-                if _ap_triggers_easter_egg(ap_val):
-                    _ensure_easter_egg_text(data, uid, ap_val)
-                else:
-                    egg_map = data.get("easter_egg_texts")
-                    if isinstance(egg_map, dict):
-                        egg_map.pop(str(uid), None)
-                        data["easter_egg_texts"] = egg_map
-
+                data["participant_ap"] = participant_ap
+                data["participant_altar_stage"] = participant_stage
                 await self._save_refresh_dispatch(data)
                 result_state = "updated_participant"
 
-            elif uid in waitlist:
-                wl_map = data.get("waitlist_ap") or {}
-                wl_map[str(uid)] = ap_val
-                data["waitlist_ap"] = wl_map
+            elif uid in reservists and as_reservist:
+                reservist_ap[str(uid)] = ap_val
 
                 if is_altar and altar_stage is not None:
-                    waitlist_stage[str(uid)] = int(altar_stage)
-                    data["waitlist_altar_stage"] = waitlist_stage
+                    reservist_stage[str(uid)] = int(altar_stage)
 
-                if _ap_triggers_easter_egg(ap_val):
-                    _ensure_easter_egg_text(data, uid, ap_val)
-                else:
-                    egg_map = data.get("easter_egg_texts")
-                    if isinstance(egg_map, dict):
-                        egg_map.pop(str(uid), None)
-                        data["easter_egg_texts"] = egg_map
-
+                data["reservist_ap"] = reservist_ap
+                data["reservist_altar_stage"] = reservist_stage
+                _sync_easter_egg_text(data, uid, ap_val)
                 await self._save_refresh_dispatch(data)
-                result_state = "updated_waitlist"
+                result_state = "updated_reservist"
+
+            elif uid in reservists and not as_reservist:
+                if len(participants) >= max_players:
+                    result_state = "reservist_group_full"
+                else:
+                    reservists.remove(uid)
+                    participants.append(uid)
+                    participant_ap[str(uid)] = reservist_ap.pop(str(uid), ap_val)
+                    if is_altar:
+                        stage = reservist_stage.pop(str(uid), altar_stage)
+                        if stage is not None:
+                            participant_stage[str(uid)] = int(stage)
+                    data["participants"] = participants
+                    data["reservists"] = reservists
+                    data["participant_ap"] = participant_ap
+                    data["reservist_ap"] = reservist_ap
+                    data["participant_altar_stage"] = participant_stage
+                    data["reservist_altar_stage"] = reservist_stage
+                    _sync_easter_egg_text(data, uid, participant_ap[str(uid)])
+                    await self._save_refresh_dispatch(data)
+                    result_state = "promoted_reservist"
+
+            elif as_reservist:
+                reservists.append(uid)
+                reservist_ap[str(uid)] = ap_val
+                if is_altar and altar_stage is not None:
+                    reservist_stage[str(uid)] = int(altar_stage)
+                data["reservists"] = reservists
+                data["reservist_ap"] = reservist_ap
+                data["reservist_altar_stage"] = reservist_stage
+                _ensure_easter_egg_text(data, uid, ap_val)
+                await self._save_refresh_dispatch(data)
+                result_state = "joined_reservist"
 
             elif len(participants) < max_players:
                 participants.append(uid)
                 data["participants"] = participants
 
-                ap_map = data.get("participant_ap") or {}
-                ap_map[str(uid)] = ap_val
-                data["participant_ap"] = ap_map
+                participant_ap[str(uid)] = ap_val
+                data["participant_ap"] = participant_ap
 
                 if is_altar and altar_stage is not None:
                     participant_stage[str(uid)] = int(altar_stage)
@@ -5942,22 +6002,7 @@ class GruppensucheTest(commands.Cog):
                 result_state = "joined_participant"
 
             else:
-                waitlist.append(uid)
-                data["waitlist"] = waitlist
-                data["updated_at"] = int(_now_local().timestamp())
-
-                wl_map = data.get("waitlist_ap") or {}
-                wl_map[str(uid)] = ap_val
-                data["waitlist_ap"] = wl_map
-
-                if is_altar and altar_stage is not None:
-                    waitlist_stage[str(uid)] = int(altar_stage)
-                    data["waitlist_altar_stage"] = waitlist_stage
-
-                _ensure_easter_egg_text(data, uid, ap_val)
-
-                await self._save_refresh_dispatch(data)
-                result_state = "joined_waitlist"
+                result_state = "group_full"
 
         await self._post_save_refresh_dispatch(data)
 
@@ -5972,15 +6017,30 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Teilnehmer).")
             return
 
-        if result_state == "updated_waitlist":
+        if result_state == "updated_reservist":
             self._log_info(
                 "JOIN",
-                "waitlist ap updated",
+                "reservist values updated",
                 message_id=message_id,
                 user_id=uid,
                 ap=ap_val,
             )
-            await self._ephemeral_notice(interaction, "✅ AP aktualisiert (Warteschlange).")
+            await self._ephemeral_notice(interaction, "✅ Reservisten-Werte aktualisiert.")
+            return
+
+        if result_state == "promoted_reservist":
+            await self._ephemeral_notice(interaction, "✅ Du bist jetzt aktiver Teilnehmer.")
+            return
+
+        if result_state == "joined_reservist":
+            await self._ephemeral_notice(interaction, "🟨 Du bist jetzt als Reservist eingetragen.")
+            return
+
+        if result_state == "reservist_group_full":
+            await self._ephemeral_notice(
+                interaction,
+                "ℹ️ Die Gruppe ist aktuell voll. Du bleibst als Reservist eingetragen.",
+            )
             return
 
         if result_state == "joined_participant":
@@ -6004,21 +6064,20 @@ class GruppensucheTest(commands.Cog):
             await self._ephemeral_notice(interaction, msg)
             return
 
-        if result_state == "joined_waitlist":
+        if result_state == "group_full":
             self._log_info(
                 "JOIN",
-                "user added to waitlist",
+                "active join rejected because group is full",
                 message_id=message_id,
                 user_id=uid,
                 ap=ap_val,
-                waitlist=len(data.get("waitlist") or []),
                 max_players=max_players,
             )
             warn_text = None
             if str(data.get("category", "")).lower() == "altar":
                 warn_text = _altar_ap_warning_for_target(data.get("altar_target_step"), ap_val)
 
-            msg = "ℹ️ Gruppe ist voll. Du bist in der Warteschlange."
+            msg = "ℹ️ Die Gruppe ist voll. Nutze den 🟨 Reservist-Button, wenn du bei Bedarf einspringen möchtest."
             if warn_text:
                 msg += f"\n\n{warn_text}"
 
@@ -6047,7 +6106,6 @@ class GruppensucheTest(commands.Cog):
             pass
 
         data: Optional[dict] = None
-        promoted_id: Optional[int] = None
 
         lock = self._lock_for(message_id)
         async with lock:
@@ -6058,67 +6116,48 @@ class GruppensucheTest(commands.Cog):
 
             uid = interaction.user.id
             participants: List[int] = list(data.get("participants") or [])
-            waitlist: List[int] = list(data.get("waitlist") or [])
-            max_players = int(data.get("max_players", 2))
+            reservists: List[int] = _reservist_ids(data)
 
             was_participant = uid in participants
-            was_wait = uid in waitlist
+            was_reservist = uid in reservists
 
-            if not was_participant and not was_wait:
+            if not was_participant and not was_reservist:
                 await self._ephemeral_notice(interaction, "Du bist nicht eingetragen.", ephemeral=True)
                 return
 
             if was_participant:
                 participants.remove(uid)
-            if was_wait:
-                waitlist.remove(uid)
+            if was_reservist:
+                reservists.remove(uid)
 
             ap_map = data.get("participant_ap") or {}
-            wl_map = data.get("waitlist_ap") or {}
+            reservist_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
             p_stage_map = data.get("participant_altar_stage") or {}
-            w_stage_map = data.get("waitlist_altar_stage") or {}
+            reservist_stage = _reservist_map(
+                data, "reservist_altar_stage", "waitlist_altar_stage")
+            data["reservists"] = reservists
+            data["reservist_ap"] = reservist_ap
+            data["reservist_altar_stage"] = reservist_stage
 
             if was_participant:
                 ap_map.pop(str(uid), None)
                 p_stage_map.pop(str(uid), None)
-            if was_wait:
-                wl_map.pop(str(uid), None)
-                w_stage_map.pop(str(uid), None)
+            if was_reservist:
+                reservist_ap.pop(str(uid), None)
+                reservist_stage.pop(str(uid), None)
 
             data["participant_ap"] = ap_map
-            data["waitlist_ap"] = wl_map
+            data["reservist_ap"] = reservist_ap
             data["participant_altar_stage"] = p_stage_map
-            data["waitlist_altar_stage"] = w_stage_map
+            data["reservist_altar_stage"] = reservist_stage
 
             egg_map = data.get("easter_egg_texts")
             if isinstance(egg_map, dict):
                 egg_map.pop(str(uid), None)
                 data["easter_egg_texts"] = egg_map
 
-            if was_participant and len(participants) < max_players and waitlist:
-                promoted_id = int(waitlist.pop(0))
-                participants.append(promoted_id)
-
-                wl_map = data.get("waitlist_ap") or {}
-                ap_map = data.get("participant_ap") or {}
-                w_stage_map = data.get("waitlist_altar_stage") or {}
-                p_stage_map = data.get("participant_altar_stage") or {}
-
-                promoted_ap = wl_map.pop(str(promoted_id), None)
-                if promoted_ap:
-                    ap_map[str(promoted_id)] = promoted_ap
-
-                promoted_stage = w_stage_map.pop(str(promoted_id), None)
-                if promoted_stage is not None:
-                    p_stage_map[str(promoted_id)] = promoted_stage
-
-                data["waitlist_ap"] = wl_map
-                data["participant_ap"] = ap_map
-                data["waitlist_altar_stage"] = w_stage_map
-                data["participant_altar_stage"] = p_stage_map
-
             data["participants"] = participants
-            data["waitlist"] = waitlist
+            data["reservists"] = reservists
 
             await self._save_refresh_dispatch(data)
 
@@ -6129,13 +6168,13 @@ class GruppensucheTest(commands.Cog):
             "user removed from search",
             message_id=message_id,
             user_id=uid,
-            promoted_id=(promoted_id or 0),
+            role=("participant" if was_participant else "reservist"),
         )
 
-        await self._ephemeral_notice(interaction, "✅ Du wurdest abgemeldet.", ephemeral=True)
-
-        if promoted_id:
-            await self._notify_promotion(data, promoted_id)
+        if was_reservist and not was_participant:
+            await self._ephemeral_notice(interaction, "✅ Du wurdest als Reservist ausgetragen.", ephemeral=True)
+        else:
+            await self._ephemeral_notice(interaction, "✅ Du wurdest abgemeldet.", ephemeral=True)
 
     async def _apply_ap_adjust(self, interaction: discord.Interaction, message_id: int, ap_val: int, altar_stage: Optional[int] = None):
         if self._interaction_guard_hit(
@@ -6168,19 +6207,23 @@ class GruppensucheTest(commands.Cog):
                 return
 
             participants: List[int] = list(data.get("participants") or [])
-            waitlist: List[int] = list(data.get("waitlist") or [])
+            reservists: List[int] = _reservist_ids(data)
 
             is_participant = uid in participants
-            is_wait = uid in waitlist
+            is_reservist = uid in reservists
 
-            if not is_participant and not is_wait:
+            if not is_participant and not is_reservist:
                 await self._ephemeral_notice(interaction, "Du bist nicht eingetragen.", ephemeral=True)
                 return
 
             ap_map = data.get("participant_ap") or {}
-            wl_map = data.get("waitlist_ap") or {}
+            reservist_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
             p_stage_map = data.get("participant_altar_stage") or {}
-            w_stage_map = data.get("waitlist_altar_stage") or {}
+            reservist_stage = _reservist_map(
+                data, "reservist_altar_stage", "waitlist_altar_stage")
+            data["reservists"] = reservists
+            data["reservist_ap"] = reservist_ap
+            data["reservist_altar_stage"] = reservist_stage
 
             ap_clean = str(int(ap_val))
             is_altar = str(data.get("category", "")).lower() == "altar"
@@ -6190,14 +6233,14 @@ class GruppensucheTest(commands.Cog):
                 if is_altar and altar_stage is not None:
                     p_stage_map[str(uid)] = int(altar_stage)
             else:
-                wl_map[str(uid)] = ap_clean
+                reservist_ap[str(uid)] = ap_clean
                 if is_altar and altar_stage is not None:
-                    w_stage_map[str(uid)] = int(altar_stage)
+                    reservist_stage[str(uid)] = int(altar_stage)
 
             data["participant_ap"] = ap_map
-            data["waitlist_ap"] = wl_map
+            data["reservist_ap"] = reservist_ap
             data["participant_altar_stage"] = p_stage_map
-            data["waitlist_altar_stage"] = w_stage_map
+            data["reservist_altar_stage"] = reservist_stage
 
             _sync_easter_egg_text(data, uid, ap_clean)
 
@@ -6211,7 +6254,7 @@ class GruppensucheTest(commands.Cog):
             message_id=message_id,
             user_id=uid,
             ap=ap_clean,
-            target=("participants" if is_participant else "waitlist"),
+            target=("participants" if is_participant else "reservists"),
         )
 
         warn_text = None
@@ -6223,73 +6266,6 @@ class GruppensucheTest(commands.Cog):
             msg += f"\n\n{warn_text}"
 
         await self._ephemeral_notice(interaction, msg, ephemeral=True)
-
-    async def _notify_promotion(self, data: dict, promoted_id: int):
-        guild = self.bot.get_guild(int(data.get("guild_id", 0)))
-        if guild is None:
-            return
-        channel = guild.get_channel(int(data.get("channel_id", 0)))
-        if not isinstance(channel, discord.TextChannel):
-            return
-
-        def _member_has_no_dm_role(member: discord.Member) -> bool:
-            return any(r.id == ROLE_NO_DM_ID for r in getattr(member, "roles", []))
-
-        owner_id = int(data.get("owner_id", 0))
-        mid = int(data.get("message_id", 0))
-        jump = f"https://discord.com/channels/{guild.id}/{channel.id}/{mid}"
-
-        day_iso = data.get("day_date_iso") or _now_local().date().isoformat()
-        try:
-            day_d = dt.date.fromisoformat(day_iso)
-            day_str = _format_day(day_d)
-        except Exception:
-            day_str = str(day_iso)
-
-        start_text = data.get("start_text") or "—"
-
-        owner_member = guild.get_member(owner_id)
-        promoted_member = guild.get_member(promoted_id)
-
-        owner_dm_ok = False
-        promoted_dm_ok = False
-
-        if owner_member and not _member_has_no_dm_role(owner_member):
-            try:
-                await owner_member.send(
-                    f"🔔 **Warteschlange aufgerückt**\n"
-                    f"In deiner Suche ({day_str} / {start_text}) ist "
-                    f"{promoted_member.mention if promoted_member else f'<@{promoted_id}>'} nachgerückt.\n"
-                    f"Link: {jump}"
-                )
-                owner_dm_ok = True
-            except Exception:
-                owner_dm_ok = False
-
-        if promoted_member and not _member_has_no_dm_role(promoted_member):
-            try:
-                await promoted_member.send(
-                    f"❗ **Ein Teilnehmer hat abgesagt.**\n"
-                    f"Du bist bei der Suche nachgerückt und jetzt **Teilnehmer**.\n\n"
-                    f"⏰ Start: {day_str} / {start_text}\n"
-                    f"Link: {jump}"
-                )
-                promoted_dm_ok = True
-            except Exception:
-                promoted_dm_ok = False
-
-        if owner_dm_ok and promoted_dm_ok:
-            return
-
-        try:
-            await channel.send(
-                content=f"{promoted_member.mention if promoted_member else f'<@{promoted_id}>'} ist nachgerückt! "
-                f"({day_str} / {start_text})\n{jump}",
-                allowed_mentions=discord.AllowedMentions(
-                    users=True, roles=False, everyone=False),
-            )
-        except Exception:
-            return
 
     async def _ping_type(self, interaction: discord.Interaction, message_id: int, data: dict):
         # ✅ ack-sicher: erst defer, dann nur followup (und öffentliche Channel-Nachricht separat)
@@ -6411,7 +6387,7 @@ class GruppensucheTest(commands.Cog):
         start_text = data.get("start_text") or "—"
         jump = f"https://discord.com/channels/{guild.id}/{channel.id}/{message_id}"
 
-        txt = f"🔔 Ping Warteschlange | {day_str} | Start: {start_text}\n{jump}"
+        txt = f"🟨 Ping Reservisten | {day_str} | Start: {start_text}\n{jump}"
         await channel.send(txt, allowed_mentions=discord.AllowedMentions.none())
 
     async def _close_search(self, interaction: discord.Interaction, message_id: int):
@@ -6673,19 +6649,19 @@ class GruppensucheTest(commands.Cog):
             await self._open_owner_edit_menu(interaction, int(message_id), data)
             return
 
-        # Teilnehmer / Warteliste -> AP-Korrektur, bei Altar inkl. Stufe
+        # Teilnehmer / Reservisten -> AP-Korrektur, bei Altar inkl. Stufe
         is_altar = str(data.get("category", "")).lower() == "altar"
         uid = int(interaction.user.id)
 
         p_ap = data.get("participant_ap") or {}
-        w_ap = data.get("waitlist_ap") or {}
-        current_ap = p_ap.get(str(uid), w_ap.get(str(uid)))
+        r_ap = _reservist_map(data, "reservist_ap", "waitlist_ap")
+        current_ap = p_ap.get(str(uid), r_ap.get(str(uid)))
 
         current_stage = None
         if is_altar:
             p_stage = data.get("participant_altar_stage") or {}
-            w_stage = data.get("waitlist_altar_stage") or {}
-            raw_stage = p_stage.get(str(uid), w_stage.get(str(uid)))
+            r_stage = _reservist_map(data, "reservist_altar_stage", "waitlist_altar_stage")
+            raw_stage = p_stage.get(str(uid), r_stage.get(str(uid)))
             try:
                 current_stage = int(raw_stage)
             except Exception:
@@ -6845,73 +6821,43 @@ class GruppensucheTest(commands.Cog):
                 await self._ephemeral_notice(interaction, "Diese Suche existiert nicht mehr.")
                 return
 
+            if desired_max < len(list(data.get("participants") or [])):
+                await self._ephemeral_notice(
+                    interaction,
+                    "Die maximale Teilnehmerzahl kann nicht unter die aktuelle Teilnehmerzahl gesenkt werden.",
+                    ephemeral=True,
+                )
+                return
+
             # --- alte Werte sichern (für Change-Notify) ---
             old_max = int(data.get("max_players", 2))
             old_part_count = len(list(data.get("participants") or []))
-            old_wait_count = len(list(data.get("waitlist") or []))
+            old_reservist_count = len(_reservist_ids(data))
 
             # --- neue max setzen ---
             data["max_players"] = int(desired_max)
 
             participants = list(data.get("participants") or [])
-            waitlist = list(data.get("waitlist") or [])
-
-            ap_map = data.get("participant_ap") or {}
-            wl_map = data.get("waitlist_ap") or {}
-            participant_stage = data.get("participant_altar_stage") or {}
-            waitlist_stage = data.get("waitlist_altar_stage") or {}
-
-            # 1) Wenn new_max kleiner ist: zu viele Teilnehmer -> in Warteschlange schieben (letzte zuerst)
-            while len(participants) > desired_max:
-                demoted_id = int(participants.pop())
-                demoted_ap = ap_map.pop(str(demoted_id), None)
-                if demoted_ap is not None:
-                    wl_map[str(demoted_id)] = demoted_ap
-
-                demoted_stage = participant_stage.pop(str(demoted_id), None)
-                if demoted_stage is not None:
-                    waitlist_stage[str(demoted_id)] = demoted_stage
-
-                waitlist.insert(0, demoted_id)
-
-            # 2) Wenn new_max größer ist: aus Warteschlange auffüllen
-            while len(participants) < desired_max and waitlist:
-                pid = int(waitlist.pop(0))
-                participants.append(pid)
-
-                promoted_ap = wl_map.pop(str(pid), None)
-                if promoted_ap is not None:
-                    ap_map[str(pid)] = promoted_ap
-
-                promoted_stage = waitlist_stage.pop(str(pid), None)
-                if promoted_stage is not None:
-                    participant_stage[str(pid)] = promoted_stage
-
             data["participants"] = participants
-            data["waitlist"] = waitlist
-            data["participant_ap"] = ap_map
-            data["waitlist_ap"] = wl_map
-            data["participant_altar_stage"] = participant_stage
-            data["waitlist_altar_stage"] = waitlist_stage
 
             await self._save_refresh_dispatch(data)
 
             # --- neue Werte ---
             new_max = int(data.get("max_players", 2))
             new_part_count = len(list(data.get("participants") or []))
-            new_wait_count = len(list(data.get("waitlist") or []))
+            new_reservist_count = len(_reservist_ids(data))
 
             changes = [
                 {"key": "max_players", "label": "Max. Teilnehmer",
                     "old": str(old_max), "new": str(new_max)},
             ]
 
-            if (old_part_count, old_wait_count) != (new_part_count, new_wait_count):
+            if (old_part_count, old_reservist_count) != (new_part_count, new_reservist_count):
                 changes.append({
                     "key": "lists",
-                    "label": "Teilnehmer/Warteschlange",
-                    "old": f"{old_part_count} / {old_wait_count}",
-                    "new": f"{new_part_count} / {new_wait_count}",
+                    "label": "Teilnehmer/Reservisten",
+                    "old": f"{old_part_count} / {old_reservist_count}",
+                    "new": f"{new_part_count} / {new_reservist_count}",
                 })
 
             self._schedule_edit_notify(message_id, data, changes=changes)
