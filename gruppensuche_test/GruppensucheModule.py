@@ -3836,17 +3836,13 @@ class GruppensucheTest(commands.Cog):
                 if not isinstance(channel, discord.TextChannel):
                     continue
                 message = await channel.fetch_message(mid)
-                component_count = sum(
-                    len(getattr(row, "children", []))
-                    for row in (message.components or [])
-                )
-                if component_count != len(view.children):
-                    await message.edit(view=view)
+                if not self._message_has_view(message, view):
+                    await self._attach_view_and_verify(channel, mid, view)
                     self._log_info(
                         "STARTUP", "public post buttons reconciled",
                         message_id=mid,
                         channel_id=channel.id,
-                        existing_components=component_count,
+                        existing_components=self._component_count(message),
                         expected_components=len(view.children),
                     )
             except discord.NotFound:
@@ -3857,6 +3853,53 @@ class GruppensucheTest(commands.Cog):
                     message_id=mid, channel_id=post.get("channel_id"),
                     error=f"{type(exc).__name__}: {exc}",
                 )
+
+    @staticmethod
+    def _component_count(message: discord.Message) -> int:
+        return sum(
+            len(getattr(row, "children", []))
+            for row in (message.components or [])
+        )
+
+    @classmethod
+    def _message_has_view(cls, message: discord.Message, view: discord.ui.View) -> bool:
+        actual_ids = [
+            str(getattr(child, "custom_id", "") or "")
+            for row in (message.components or [])
+            for child in getattr(row, "children", [])
+        ]
+        expected_ids = [
+            str(getattr(child, "custom_id", "") or "")
+            for child in view.children
+        ]
+        return actual_ids == expected_ids
+
+    async def _attach_view_and_verify(
+        self,
+        channel: discord.TextChannel,
+        message_id: int,
+        view: discord.ui.View,
+    ) -> discord.Message:
+        last_message: Optional[discord.Message] = None
+        for attempt in range(1, 4):
+            message = await channel.fetch_message(int(message_id))
+            await message.edit(view=view)
+            last_message = await channel.fetch_message(int(message_id))
+            if self._message_has_view(last_message, view):
+                return last_message
+            self._log_warning(
+                "VIEW",
+                "public post button verification failed",
+                message_id=message_id,
+                channel_id=channel.id,
+                attempt=attempt,
+                actual_components=self._component_count(last_message),
+                expected_components=len(view.children),
+            )
+
+        raise RuntimeError(
+            f"Button-View konnte für Nachricht {message_id} nicht verifiziert werden."
+        )
 
     def _expire_session(self, user_id: int):
         if user_id in self._sessions:
@@ -5722,31 +5765,7 @@ class GruppensucheTest(commands.Cog):
             # 3) View vorbereiten und am Post setzen
             view = PublicPostView(self, msg.id, category=data.get("category"))
             await self._apply_dynamic_button_labels(view, data)
-
-            try:
-                await msg.edit(view=view)
-            except Exception as exc:
-                self._log_warning(
-                    "CREATE",
-                    "initial view attach failed, retrying",
-                    message_id=msg.id,
-                    guild_id=guild.id,
-                    channel_id=channel.id,
-                    error=type(exc).__name__,
-                )
-                try:
-                    fresh_msg = await channel.fetch_message(msg.id)
-                    await fresh_msg.edit(view=view)
-                except Exception as retry_exc:
-                    self._log_error(
-                        "CREATE",
-                        "view attach retry failed",
-                        message_id=msg.id,
-                        guild_id=guild.id,
-                        channel_id=channel.id,
-                        error=type(retry_exc).__name__,
-                    )
-                    raise
+            await self._attach_view_and_verify(channel, msg.id, view)
 
             # 4) View nach erfolgreichem Attach registrieren
             self.bot.add_view(view)
