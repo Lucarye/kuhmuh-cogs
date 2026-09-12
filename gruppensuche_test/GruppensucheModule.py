@@ -6102,12 +6102,12 @@ class GruppensucheTest(commands.Cog):
 
             await self._save_refresh_dispatch(data)
 
-        await self._post_save_refresh_dispatch(data)
         await self._ephemeral_notice(
             interaction,
             "✅ Du bist jetzt aktiver Teilnehmer.",
             ephemeral=True,
         )
+        self.bot.loop.create_task(self._post_save_refresh_dispatch(data))
 
     async def _move_to_reservists(self, interaction: discord.Interaction, message_id: int):
         if self._interaction_guard_hit(
@@ -6172,12 +6172,12 @@ class GruppensucheTest(commands.Cog):
 
             await self._save_refresh_dispatch(data)
 
-        await self._post_save_refresh_dispatch(data)
         await self._ephemeral_notice(
             interaction,
             "🟨 Du bist jetzt als Reservist eingetragen.",
             ephemeral=True,
         )
+        self.bot.loop.create_task(self._post_save_refresh_dispatch(data))
 
     async def _join(
         self,
