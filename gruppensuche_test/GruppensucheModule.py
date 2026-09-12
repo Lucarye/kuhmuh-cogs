@@ -6314,7 +6314,8 @@ class GruppensucheTest(commands.Cog):
             else:
                 result_state = "group_full"
 
-        await self._post_save_refresh_dispatch(data)
+        if result_state != "group_full":
+            self.bot.loop.create_task(self._post_save_refresh_dispatch(data))
 
         if result_state == "updated_participant":
             self._log_info(
@@ -6471,7 +6472,7 @@ class GruppensucheTest(commands.Cog):
 
             await self._save_refresh_dispatch(data)
 
-        await self._post_save_refresh_dispatch(data)
+        self.bot.loop.create_task(self._post_save_refresh_dispatch(data))
 
         self._log_info(
             "LEAVE",
