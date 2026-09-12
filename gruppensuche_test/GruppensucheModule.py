@@ -3879,16 +3879,19 @@ class GruppensucheTest(commands.Cog):
         channel: discord.TextChannel,
         message_id: int,
         view: discord.ui.View,
+        message: Optional[discord.Message] = None,
     ) -> discord.Message:
         last_message: Optional[discord.Message] = None
         for attempt in range(1, 4):
-            message = await channel.fetch_message(int(message_id))
+            if message is None:
+                message = await channel.fetch_message(int(message_id))
             edited_message = await message.edit(view=view)
             if edited_message is not None and self._message_has_view(edited_message, view):
                 return edited_message
             last_message = await channel.fetch_message(int(message_id))
             if self._message_has_view(last_message, view):
                 return last_message
+            message = last_message
             self._log_warning(
                 "VIEW",
                 "public post button verification failed",
@@ -5767,7 +5770,7 @@ class GruppensucheTest(commands.Cog):
             # 3) View vorbereiten und am Post setzen
             view = PublicPostView(self, msg.id, category=data.get("category"))
             await self._apply_dynamic_button_labels(view, data)
-            await self._attach_view_and_verify(channel, msg.id, view)
+            await self._attach_view_and_verify(channel, msg.id, view, message=msg)
 
             # 4) View nach erfolgreichem Attach registrieren
             self.bot.add_view(view)
