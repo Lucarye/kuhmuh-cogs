@@ -119,6 +119,37 @@ EASTER_EGG_TEXT_POOL = [
     "Legenden beginnen genau so."
 ]
 
+NEGATIVE_EASTER_EGG_TEXT_POOL = [
+    "macht heute einen AP-Rückwärtssalto",
+    "Minus ist auch eine Richtung",
+    "der Schwarzgeist zählt rückwärts",
+    "AP macht gerade Winterschlaf",
+    "grast souverän unter null",
+    "Mathematik sagt: interessant",
+    "betreibt kreatives Rechnen",
+    "der Build lädt noch",
+    "unter null, aber entspannt",
+    "das ist taktisches Minus",
+    "AP nimmt die Abkürzung nach unten",
+    "die Herde bleibt ganz gelassen",
+    "heute mit eingebautem Tiefgang",
+    "der Schwarzgeist plant neu",
+    "unter null beginnt der Spaß",
+    "AP auf Entdeckungstour",
+    "das Glas ist trotzdem halb voll",
+    "kurz die Schwerkraft testen",
+    "negativ geladen, positiv drauf",
+    "AP macht einen kleinen Umweg",
+    "heute ist unten oben",
+    "der Wert bleibt entspannt",
+    "Minus mit Stil",
+    "die Zahlen tanzen rückwärts",
+    "AP hat Gegenwind",
+    "locker durch den Nullpunkt",
+    "der Rechenweg ist kreativ",
+    "Tiefgang erfolgreich aktiviert",
+]
+
 
 GUILD_ID = 1198649628787212458
 
@@ -326,9 +357,10 @@ def _ui_for(category: str) -> dict:
 WEEKDAYS_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
-def _parse_int_strict(val: object) -> Optional[int]:
+def _parse_int_strict(val: object, *, allow_negative: bool = False) -> Optional[int]:
     """
     Erlaubt nur Ziffern + gängige Trenner (., , und Leerzeichen).
+    Mit allow_negative=True ist zusätzlich ein führendes Minus erlaubt.
     - "3245" -> 3245
     - "3.245" / "3,245" / "3 245" -> 3245
     Alles andere (Buchstaben etc.) -> None
@@ -336,6 +368,12 @@ def _parse_int_strict(val: object) -> Optional[int]:
     s = str(val or "").strip()
     if not s:
         return None
+
+    sign = -1 if allow_negative and s.startswith("-") else 1
+    if sign < 0:
+        s = s[1:].strip()
+        if not s:
+            return None
 
     allowed = set("0123456789., ")
     if any(ch not in allowed for ch in s):
@@ -346,7 +384,7 @@ def _parse_int_strict(val: object) -> Optional[int]:
         return None
 
     try:
-        return int(digits)
+        return sign * int(digits)
     except Exception:
         return None
 
@@ -565,10 +603,15 @@ def _fmt_thousands_de(val: object) -> str:
     plus = s.endswith("+")
     core = s[:-1] if plus else s
 
+    sign = ""
+    if core.startswith("-"):
+        sign = "-"
+        core = core[1:]
+
     if core.isdigit():
         n = int(core)
         out = f"{n:,}".replace(",", ".")
-        return out + ("+" if plus else "")
+        return sign + out + ("+" if plus else "")
 
     return s
 
@@ -632,11 +675,18 @@ _AP_NUM_RE = re.compile(r"(\d+)")
 
 
 def _ap_triggers_easter_egg(ap_val: Optional[str]) -> bool:
-    """Trigger: AP > 432 (weil 432 max ist)."""
-    n = _parse_int_strict(ap_val)
+    """Trigger: AP > 432 oder jeder negative AP-Wert."""
+    n = _parse_int_strict(ap_val, allow_negative=True)
     if n is None:
         return False
-    return n > EASTER_EGG_AP
+    return n < 0 or n > EASTER_EGG_AP
+
+
+def _easter_egg_pool(ap_val: Optional[str]) -> list[str]:
+    n = _parse_int_strict(ap_val, allow_negative=True)
+    if n is not None and n < 0:
+        return NEGATIVE_EASTER_EGG_TEXT_POOL
+    return EASTER_EGG_TEXT_POOL
 
 
 def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> Optional[str]:
@@ -652,11 +702,12 @@ def _ensure_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> 
         egg_map = {}
 
     key = str(int(user_id))
-    if key in egg_map and str(egg_map[key]).strip():
+    pool = _easter_egg_pool(ap_val)
+    if key in egg_map and str(egg_map[key]).strip() in pool:
         return str(egg_map[key])
 
     # einmalig würfeln
-    txt = random.choice(EASTER_EGG_TEXT_POOL) if EASTER_EGG_TEXT_POOL else "✨"
+    txt = random.choice(pool) if pool else "✨"
     egg_map[key] = txt
     data["easter_egg_texts"] = egg_map
     return txt
@@ -675,11 +726,11 @@ def _sync_easter_egg_text(data: dict, user_id: int, ap_val: Optional[str]) -> Op
     key = str(int(user_id))
 
     if _ap_triggers_easter_egg(ap_val):
+        pool = _easter_egg_pool(ap_val)
         # existiert schon? dann behalten, sonst würfeln
-        if key in egg_map and str(egg_map.get(key) or "").strip():
+        if key in egg_map and str(egg_map.get(key) or "").strip() in pool:
             return str(egg_map[key])
-        txt = random.choice(
-            EASTER_EGG_TEXT_POOL) if EASTER_EGG_TEXT_POOL else "✨"
+        txt = random.choice(pool) if pool else "✨"
         egg_map[key] = txt
         data["easter_egg_texts"] = egg_map
         return txt
@@ -1411,7 +1462,7 @@ class DetailsModal(discord.ui.Modal):
 
         # Wenn gesetzt: Zahlenformat prüfen
         if own_ap_val:
-            ap_int = _parse_int_strict(own_ap_val)
+            ap_int = _parse_int_strict(own_ap_val, allow_negative=True)
             if ap_int is None:
                 await _invalid_number("❌ **AP ungültig.** Beispiele: `300`, `432`, `250`, ...")
                 return
@@ -1590,7 +1641,7 @@ class APAdjustModal(discord.ui.Modal):
             self.add_item(self.altar_stage)
 
     async def on_submit(self, interaction: discord.Interaction):
-        ap_val = _parse_int_strict(self.ap_value.value)
+        ap_val = _parse_int_strict(self.ap_value.value, allow_negative=True)
         if ap_val is None:
             await interaction.response.send_modal(
                 APAdjustModal(
@@ -1670,7 +1721,7 @@ class JoinApModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         raw = str(self.ap.value).strip()
-        ap_int = _parse_int_strict(raw)
+        ap_int = _parse_int_strict(raw, allow_negative=True)
         if ap_int is None:
             await interaction.response.send_message(
                 "❌ **AP ungültig.** Erlaubt: `3245`, `3.245`, `3 245`, `3,245`.",
