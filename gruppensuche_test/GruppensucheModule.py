@@ -813,8 +813,8 @@ def _altar_recommended_ap_lines(*, start_step: Optional[object] = None, target_s
 
 def _altar_recommended_ap_columns(*, start_step: Optional[object] = None, target_step: Optional[object] = None) -> tuple[str, str]:
     lines = _altar_recommended_ap_lines(start_step=start_step, target_step=target_step)
-    left = "\n".join(lines[:10]) if lines[:10] else "—"
-    right = "\n".join(lines[10:]) if lines[10:] else "—"
+    left = "\n".join(lines[:12]) if lines[:12] else "—"
+    right = "\n".join(lines[12:]) if lines[12:] else "—"
     return left, right
 
 
@@ -829,12 +829,12 @@ def _build_altar_values_embed(*, start_step: Optional[object] = None, target_ste
         description=description,
     )
     embed.add_field(
-        name="Stage 1-10",
+        name="Stage 1-12",
         value=recommended_left,
         inline=True,
     )
     embed.add_field(
-        name="Stage 11-24",
+        name="Stage 13-24",
         value=recommended_right,
         inline=True,
     )
