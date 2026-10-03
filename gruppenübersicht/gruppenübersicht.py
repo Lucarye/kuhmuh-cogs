@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import datetime as dt
-import re
-from typing import Dict, List, Optional, Tuple
 import asyncio
+import datetime as dt
 import hashlib
 import json
 import logging
+import re
+from typing import Dict, List, Optional, Tuple
 
-
-import discord # pyright: ignore[reportMissingImports]
-from discord.ext import tasks # pyright: ignore[reportMissingImports]
-from redbot.core import commands, Config # pyright: ignore[reportMissingImports]
-from discord import app_commands # pyright: ignore[reportMissingImports]
+import discord  # pyright: ignore[reportMissingImports]
+from discord import app_commands  # pyright: ignore[reportMissingImports]
+from discord.ext import tasks  # pyright: ignore[reportMissingImports]
+from redbot.core import Config, commands  # pyright: ignore[reportMissingImports]
 
 log = logging.getLogger("red.kuhmuh.dashboard")
 
@@ -469,18 +468,6 @@ class Gruppenübersicht(commands.Cog):
         except Exception:
             pass
 
-        # 2) Commands explizit in den Tree hängen (Red-sicher)
-        gobj = discord.Object(id=GUILD_ID)
-        try:
-            self.bot.tree.add_command(self.dashboard_command, guild=gobj)
-        except Exception:
-            pass
-
-        # 3) Danach syncen
-        try:
-            await self.bot.tree.sync(guild=gobj)
-        except Exception:
-            pass
         if not self._dashboard_refresh_loop.is_running():
             self._dashboard_refresh_loop.start()
 
@@ -488,13 +475,6 @@ class Gruppenübersicht(commands.Cog):
         # Loop stoppen
         try:
             self._dashboard_refresh_loop.cancel()
-        except Exception:
-            pass
-
-        # Command entfernen (wichtig bei reload)
-        try:
-            self.bot.tree.remove_command(
-                "dashboard", type=discord.AppCommandType.chat_input)
         except Exception:
             pass
 

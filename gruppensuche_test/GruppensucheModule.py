@@ -3808,12 +3808,6 @@ class GruppensucheTest(commands.Cog):
         except Exception:
             pass
 
-        try:
-            guild_obj = discord.Object(id=GUILD_ID)
-            await self.bot.tree.sync(guild=guild_obj)
-        except Exception:
-            pass
-
     async def _register_all_persistent_views(self):
         guild = self.bot.get_guild(GUILD_ID)
         if guild is None:

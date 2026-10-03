@@ -319,21 +319,6 @@ class Export(commands.Cog):
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
-        self._startup_task = self.bot.loop.create_task(self._startup_guild_sync())
-
-    async def _startup_guild_sync(self) -> None:
-        """Synchronisiert den guild-scoped Slash-Command beim Start."""
-        try:
-            await self.bot.wait_until_red_ready()
-            await self.bot.wait_until_ready()
-            await self.bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-            log.info("[export] Slash-Command fuer Guild %s synchronisiert.", GUILD_ID)
-        except Exception:
-            log.exception("[export] Slash-Sync fuer Guild %s fehlgeschlagen.", GUILD_ID)
-
-    def cog_unload(self) -> None:
-        if self._startup_task and not self._startup_task.done():
-            self._startup_task.cancel()
 
     def _has_export_permission(self, user: discord.User | discord.Member) -> bool:
         """Prueft, ob der Nutzer Export-Berechtigung hat."""
