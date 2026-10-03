@@ -82,27 +82,21 @@ Eigene Cogs bilden die Kernarchitektur. Community-Cogs sind nicht Bestandteil di
 
 ## 4. Slash-Commands und Registrierung
 
-### 4.1 Zielstandard für neue Commands
+### 4.1 Registrierung
 
-Neue serverinterne Slash-Commands sollen:
+Slash-Commands werden ausschließlich per Decorator direkt am Cog definiert (`@app_commands.guilds(...)` + `@app_commands.command(...)`). Sie sind Guild-scoped, prüfen Berechtigungen und Guild-Grenzen und besitzen eine klare, stabile Beschreibung und eindeutige Optionen.
 
-- Guild-scoped registriert werden;
-- einen nachvollziehbaren Startup-Sync besitzen;
-- Berechtigungen und Guild-Grenzen prüfen;
-- eine klare, stabile Beschreibung und eindeutige Optionen besitzen.
+### 4.2 Kein Sync im Code
 
-Der bevorzugte Zielaufbau ist eine direkte Command-Definition am Cog mit Guild-Scope und einem kontrollierten Startup-Sync.
+In Cogs sind `bot.tree.sync()`, `clear_commands()`, `copy_global_to()` sowie manuelles `bot.tree.add_command()`/`remove_command()` für eigene Commands verboten, auch in `cog_load()`, `cog_unload()` und Startup-Tasks.
 
-### 4.2 Gewachsener Bestand
+Begründung: `tree.sync(guild=...)` überschreibt die komplette Command-Liste der Guild mit dem lokalen Tree. Fehlt dort ein Command (Ladereihenfolge, fehlgeschlagener Cog, Unload), wird er in Discord gelöscht und später mit neuer ID neu angelegt. Dabei gehen die Berechtigungen aus Servereinstellungen > Integrationen verloren.
 
-Der reale Bestand verwendet teilweise `cog_load()` und `bot.tree.add_command()`. Diese Registrierungen sind als bestehender Übergangscode zu behandeln, nicht als Anlass für ungeplante Sofortumbauten.
+Synchronisiert wird nur manuell mit `[p]slash sync <GUILD_ID>`, und nur wenn sich Command-Definitionen geändert haben. Vorher prüfen, dass alle Cogs mit Slash-Commands geladen sind (`[p]cogs`).
 
-Bei einer Änderung an einem betroffenen Cog ist zu prüfen:
+### 4.3 Command-Identität
 
-- ob der Command doppelt oder global registriert wird;
-- ob Reloads alte Commands entfernen;
-- ob der Sync nur für die Ziel-Guild erfolgt;
-- ob die Runtime-Integration aus einem anderen Repository betroffen ist.
+Name und Typ eines Commands sind stabil. Umbenennen oder Entfernen löscht die Berechtigungen in Discord dauerhaft und ist deshalb eine bewusste Änderung, die vor dem Live-Push in `Änderungen.md` vermerkt wird.
 
 ## 5. UI, Kommunikation und Logging
 
